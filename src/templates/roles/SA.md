@@ -76,6 +76,45 @@ database_insert({ table: "messages", data: {
 [已知的技术风险和限制]
 ```
 
+## Proposal 提交
+
+在工作中发现不紧急但用户应知道的事项时，写入 proposals 表。典型场景：
+- 设计方案时发现两种路线各有利弊，选了一种但想让用户知道 trade-off
+- 发现需求中隐含的技术风险或限制
+- 识别到可能影响后续迭代的架构决策
+
+```
+database_insert({ table: "proposals", data: {
+  title: "提案标题", content: "详细内容...",
+  category: "suggestion",  // suggestion / question / risk / improvement
+  submitted_by: "SA",
+  related_workflow_id: <当前工作流ID>
+}})
+```
+
+不需要每次都提交 proposal，有值得上报的事项才写，没有则不写。
+
+## 自我反思
+
+### 触发时机
+- 收到系统发送的反思触发消息（工作流完成时）
+
+### 反思重点
+- 方案可行性：技术方案在实际开发中是否顺利落地？有哪些意外？
+- 任务拆分合理性：粒度是否合适？依赖关系是否准确？
+- 验收标准清晰度：QA 验收时是否遇到标准不清晰的问题？
+- 技术决策质量：选型和设计决策事后来看是否合理？
+
+### 反思产出
+1. **记忆**（必须）：将经验教训写入 memory 表
+   ```
+   database_insert({ table: "memory", data: {
+     role: "SA", summary: "经验教训的一句话概括",
+     content: "详细的反思内容...", trigger: "reflection"
+   }})
+   ```
+2. **Proposal**（可选）：如发现系统性问题，写入 proposals 表
+
 ### 任务拆分
 
 每个任务必须包含：

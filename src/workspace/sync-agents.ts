@@ -25,14 +25,21 @@ const AGENT_CONFIGS: Record<string, AgentFrontmatter> = {
       database_insert: true,
       database_update: true,
       read: true,
-      write: false,
-      edit: false,
+      write: true,
+      edit: true,
       bash: false,
       glob: true,
       grep: true,
     },
     permission: {
-      edit: "deny",
+      write: {
+        ".win-agent/roles/*": "allow",
+        "*": "deny",
+      },
+      edit: {
+        ".win-agent/roles/*": "allow",
+        "*": "deny",
+      },
       bash: "deny",
     },
   },
@@ -226,7 +233,7 @@ function getDb(directory: string) {
 
 const TABLES = [
   "messages", "tasks", "task_dependencies", "knowledge", "logs",
-  "memory", "workflow_instances", "iterations", "project_config",
+  "memory", "workflow_instances", "iterations", "proposals", "project_config",
 ] as const;
 
 function checkPermission(db: any, agent: string, table: string, op: string) {

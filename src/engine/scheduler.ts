@@ -6,12 +6,16 @@ import { checkAndRotate } from "./memory-rotator.js";
 import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
 import { select } from "../db/repository.js";
+import { syncAgents } from "../workspace/sync-agents.js";
 
 /** Sleep helper */
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Engine running flag — set to false to stop the main loop */
 let running = false;
+
+/** Track whether onboarding agent re-sync has been done */
+let onboardingSynced = false;
 
 /**
  * Start the scheduler main loop.
@@ -29,6 +33,7 @@ export async function startSchedulerLoop(
   workspace: string,
 ): Promise<void> {
   running = true;
+  onboardingSynced = false;
   resetTriggers();
   const roleManager = new RoleManager();
 
@@ -117,4 +122,14 @@ async function schedulerTick(
   // (tasks may have been updated by a previous dispatch's tool calls)
   checkAutoTriggers();
   checkWorkflowCompletion(workspace, sessionManager);
+
+  // Check if onboarding just completed — re-sync agents so updated role prompts take effect
+  if (!onboardingSynced) {
+    const rows = select("project_config", { key: "onboarding_completed" });
+    if (rows.length > 0) {
+      onboardingSynced = true;
+      syncAgents(workspace);
+      console.log("   ✓ Onboarding 完成，已重新同步 Agent 配置");
+    }
+  }
 }

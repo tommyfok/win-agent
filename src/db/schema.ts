@@ -101,6 +101,21 @@ const TABLE_SCHEMAS: Record<string, string> = {
       PRIMARY KEY (role, table_name, operation)
     )`,
 
+  proposals: `
+    CREATE TABLE IF NOT EXISTS proposals (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      title       TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      category    TEXT NOT NULL DEFAULT 'suggestion',
+      submitted_by TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'pending',
+      resolution  TEXT,
+      related_task_id     INTEGER REFERENCES tasks(id),
+      related_workflow_id INTEGER REFERENCES workflow_instances(id),
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
   project_config: `
     CREATE TABLE IF NOT EXISTS project_config (
       key         TEXT PRIMARY KEY,
@@ -142,6 +157,7 @@ const INDEX_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS idx_tasks_iteration ON tasks(iteration)",
   "CREATE INDEX IF NOT EXISTS idx_memory_role ON memory(role, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, submitted_by)",
 ];
 
 // Table creation order matters due to foreign key references
@@ -154,6 +170,7 @@ const CREATE_ORDER = [
   "logs",
   "memory",
   "iterations",
+  "proposals",
   "role_permissions",
   "project_config",
 ];

@@ -351,35 +351,35 @@ CREATE TABLE IF NOT EXISTS proposals (
 
 #### 7.2 角色权限更新 (`src/db/permissions.ts`)
 
-- [ ] 所有角色新增 `proposals` 表的 `select` 和 `insert` 权限
-- [ ] PM 新增 `proposals` 表的 `update` 权限
-- [ ] PM 新增 `.win-agent/roles/` 目录的文件写权限（用于 onboarding）
+- [x] 所有角色新增 `proposals` 表的 `select` 和 `insert` 权限
+- [x] PM 新增 `proposals` 表的 `update` 权限
+- [x] PM 新增 `.win-agent/roles/` 目录的文件写权限（用于 onboarding）
 
 #### 7.3 Onboarding 流程
 
 **触发条件**：`project_config` 中无 `onboarding_completed` 键
 
 **引擎侧** (`src/cli/start.ts`)：
-- [ ] Session 初始化后，检测 `onboarding_completed`
-- [ ] 未完成时，向 PM session 注入 onboarding 系统消息，告知 PM 进入 onboarding 模式
-- [ ] Onboarding 完成后，PM 写入 `project_config.onboarding_completed = true`
-- [ ] 引擎检测到 onboarding 完成 → 重新执行 `syncAgents()` 使更新后的角色 prompt 生效
+- [x] Session 初始化后，检测 `onboarding_completed`
+- [x] 未完成时，向 PM session 注入 onboarding 系统消息，告知 PM 进入 onboarding 模式
+- [x] Onboarding 完成后，PM 写入 `project_config.onboarding_completed = true`
+- [x] 引擎检测到 onboarding 完成 → 重新执行 `syncAgents()` 使更新后的角色 prompt 生效
 
 **PM 侧** (`src/templates/roles/PM.md`)：
-- [ ] 新增「团队 Onboarding」工作流章节
-- [ ] PM 向用户介绍 5 个角色的定位和协作方式
-- [ ] 逐个角色与用户讨论期望：
+- [x] 新增「团队 Onboarding」工作流章节
+- [x] PM 向用户介绍 5 个角色的定位和协作方式
+- [x] 逐个角色与用户讨论期望：
   - SA：技术决策风格（保守/激进）、方案详细程度、任务拆分粒度
   - DEV：编码风格偏好、commit 规范、自测要求
   - QA：验收严格程度、是否关注标准外问题、回归测试范围
   - OPS：回顾频率、优化激进程度
   - PM 自身：汇报频率、沟通风格、决策自主度
-- [ ] PM 讨论工作流偏好（MVP 优先 vs 一步到位、迭代节奏等）
-- [ ] PM 综合所有输入，改写每个角色的 `.win-agent/roles/*.md`
-- [ ] PM 写入 `project_config.onboarding_completed = true`
+- [x] PM 讨论工作流偏好（MVP 优先 vs 一步到位、迭代节奏等）
+- [x] PM 综合所有输入，改写每个角色的 `.win-agent/roles/*.md`
+- [x] PM 写入 `project_config.onboarding_completed = true`
 
 **Agent 配置** (`src/workspace/sync-agents.ts`)：
-- [ ] PM 的 opencode agent 配置加入 `.win-agent/roles/` 目录的 write 权限
+- [x] PM 的 opencode agent 配置加入 `.win-agent/roles/` 目录的 write 权限
 
 #### 7.4 角色自我反思
 
@@ -402,24 +402,24 @@ CREATE TABLE IF NOT EXISTS proposals (
 - OPS：上轮优化是否生效、指标变化趋势
 
 **引擎侧改动**：
-- [ ] `workflow-checker.ts`：工作流完成时，向所有参与角色发反思触发消息
-- [ ] `src/templates/roles/*.md`：所有角色新增「自我反思」章节
+- [x] `workflow-checker.ts`：工作流完成时，向所有参与角色发反思触发消息
+- [x] `src/templates/roles/*.md`：所有角色新增「自我反思」章节
 
 #### 7.5 PM 的 Proposal 管理
 
 PM prompt 中新增 Proposal 处理流程：
-- [ ] 用户对话时，PM 主动提及有未处理的 proposals（如有）
-- [ ] 用户可查询 proposals 列表、查看详情
-- [ ] PM 根据用户指令处理：accept → 转化为行动（创建任务/发消息/调整配置），reject → 填写理由，archive → 归档
-- [ ] PM 处理完毕后更新 proposal 状态和 resolution 字段
+- [x] 用户对话时，PM 主动提及有未处理的 proposals（如有）
+- [x] 用户可查询 proposals 列表、查看详情
+- [x] PM 根据用户指令处理：accept → 转化为行动（创建任务/发消息/调整配置），reject → 填写理由，archive → 归档
+- [x] PM 处理完毕后更新 proposal 状态和 resolution 字段
 
 #### 7.6 角色 Prompt 更新汇总
 
 所有角色 prompt 需新增的内容：
-- [ ] 所有角色：新增「Proposal 提交」说明——在工作中发现不紧急但用户应知道的事项时，写入 proposals 表
-- [ ] 所有角色：新增「自我反思」章节——描述反思时机、反思重点、产出格式
-- [ ] PM：新增「团队 Onboarding」工作流章节
-- [ ] PM：新增「Proposal 管理」工作流章节
+- [x] 所有角色：新增「Proposal 提交」说明——在工作中发现不紧急但用户应知道的事项时，写入 proposals 表
+- [x] 所有角色：新增「自我反思」章节——描述反思时机、反思重点、产出格式
+- [x] PM：新增「团队 Onboarding」工作流章节
+- [x] PM：新增「Proposal 管理」工作流章节
 
 ---
 

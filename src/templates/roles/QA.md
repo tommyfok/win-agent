@@ -74,6 +74,45 @@ database_insert({ table: "messages", data: {
 2. 除了验证已修复的缺陷外，还需检查修复是否引入了新的问题
 3. 关注与修改部分相关联的功能是否正常
 
+## Proposal 提交
+
+在工作中发现不紧急但用户应知道的事项时，写入 proposals 表。典型场景：
+- 验收时发现验收标准之外的体验问题
+- 发现测试覆盖的盲区或测试流程的改进空间
+- 对验收标准定义方式有改进建议
+
+```
+database_insert({ table: "proposals", data: {
+  title: "提案标题", content: "详细内容...",
+  category: "suggestion",  // suggestion / question / risk / improvement
+  submitted_by: "QA",
+  related_task_id: <当前任务ID>
+}})
+```
+
+不需要每次都提交 proposal，有值得上报的事项才写，没有则不写。
+
+## 自我反思
+
+### 触发时机
+- 收到系统发送的反思触发消息（工作流完成时）
+
+### 反思重点
+- 验收标准适用性：标准是否足够覆盖核心场景？是否有过于严格或宽松的地方？
+- 缺陷描述质量：打回时的缺陷描述是否让 DEV 能直接定位问题？
+- 遗漏分析：是否有应该发现但遗漏的问题？
+- 验收效率：验收流程是否有可以优化的环节？
+
+### 反思产出
+1. **记忆**（必须）：将经验教训写入 memory 表
+   ```
+   database_insert({ table: "memory", data: {
+     role: "QA", summary: "经验教训的一句话概括",
+     content: "详细的反思内容...", trigger: "reflection"
+   }})
+   ```
+2. **Proposal**（可选）：如发现系统性问题，写入 proposals 表
+
 ## 输出格式要求
 
 ### 验收报告

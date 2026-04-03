@@ -44,6 +44,9 @@ export function checkWorkflowCompletion(
         related_workflow_id: wf.id,
       });
 
+      // Send reflection trigger to all participating roles
+      sendReflectionTriggers(wf);
+
       insert("logs", {
         role: "system",
         action: "workflow_completed",
@@ -134,6 +137,80 @@ function checkTemplateCompletion(wf: any, workspace: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Send self-reflection trigger messages to all roles that participated in a workflow.
+ * Participating roles are determined by who sent/received messages related to the workflow.
+ */
+function sendReflectionTriggers(wf: any): void {
+  // Find all roles that participated in this workflow via messages
+  const messages = select("messages", { related_workflow_id: wf.id }) as Array<{
+    from_role: string;
+    to_role: string;
+  }>;
+
+  // Also check tasks assigned to roles
+  const tasks = select("tasks", { workflow_id: wf.id }) as Array<{
+    assigned_to: string | null;
+  }>;
+
+  const participatingRoles = new Set<string>();
+  for (const msg of messages) {
+    if (msg.from_role !== "system") participatingRoles.add(msg.from_role);
+    if (msg.to_role !== "system") participatingRoles.add(msg.to_role);
+  }
+  for (const task of tasks) {
+    if (task.assigned_to) participatingRoles.add(task.assigned_to);
+  }
+
+  // Always include PM (owns all workflows) and exclude "user"
+  participatingRoles.add("PM");
+  participatingRoles.delete("user");
+
+  for (const role of participatingRoles) {
+    insert("messages", {
+      from_role: "system",
+      to_role: role,
+      type: "system",
+      content: buildReflectionPrompt(role, wf),
+      status: "unread",
+      related_workflow_id: wf.id,
+    });
+  }
+
+  insert("logs", {
+    role: "system",
+    action: "reflection_triggered",
+    content: `工作流 #${wf.id} 完成，已向 ${[...participatingRoles].join(",")} 发送反思触发`,
+  });
+}
+
+/**
+ * Build a reflection prompt tailored to each role.
+ */
+function buildReflectionPrompt(role: string, wf: any): string {
+  const base = `【自我反思】工作流 #${wf.id}（${wf.template}）已完成，请进行自我反思。`;
+
+  const roleGuidance: Record<string, string> = {
+    PM: "请回顾：需求理解是否准确？沟通效率如何？信息流转是否及时？有无可改进的协作方式？",
+    SA: "请回顾：技术方案可行性如何？任务拆分粒度是否合理？验收标准是否清晰足够？",
+    DEV: "请回顾：代码质量如何？自测是否充分？有无被打回？被打回的根因是什么？",
+    QA: "请回顾：验收标准是否适用？缺陷描述质量如何？是否有遗漏的测试场景？",
+    OPS: "请回顾：上轮优化建议是否生效？指标变化趋势如何？有无新的系统性问题？",
+  };
+
+  const guidance = roleGuidance[role] ?? "请回顾本次工作中的经验教训。";
+
+  return [
+    base,
+    "",
+    guidance,
+    "",
+    "反思产出：",
+    "1. 将经验教训写入 memory 表（必须）",
+    "2. 如发现需要用户决策的系统性问题，写入 proposals 表（可选，有则写，无则不写）",
+  ].join("\n");
 }
 
 /**

@@ -72,6 +72,44 @@ database_insert({ table: "messages", data: {
 2. 评估现有流程模板是否需要增加/删除/调整步骤
 3. 起草流程变更方案，提交产品经理审核
 
+## Proposal 提交
+
+在工作中发现不紧急但用户应知道的事项时，写入 proposals 表。典型场景：
+- 迭代回顾时识别出系统性问题
+- 发现团队协作模式中的瓶颈
+- 对角色定义或流程模板有重大调整建议
+
+```
+database_insert({ table: "proposals", data: {
+  title: "提案标题", content: "详细内容...",
+  category: "improvement",  // suggestion / question / risk / improvement
+  submitted_by: "OPS"
+}})
+```
+
+不需要每次都提交 proposal，有值得上报的事项才写，没有则不写。
+
+## 自我反思
+
+### 触发时机
+- 收到系统发送的反思触发消息（工作流完成时）
+
+### 反思重点
+- 上轮优化效果：之前提出的优化建议是否生效？指标是否改善？
+- 指标变化趋势：各项关注指标的变化方向和幅度
+- 系统性问题：是否有跨角色、跨流程的共性问题？
+- 知识库质量：知识库的覆盖度和组织质量是否在改善？
+
+### 反思产出
+1. **记忆**（必须）：将经验教训写入 memory 表
+   ```
+   database_insert({ table: "memory", data: {
+     role: "OPS", summary: "经验教训的一句话概括",
+     content: "详细的反思内容...", trigger: "reflection"
+   }})
+   ```
+2. **Proposal**（可选）：如发现系统性问题，写入 proposals 表
+
 ## 输出格式要求
 
 ### 迭代回顾报告

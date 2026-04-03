@@ -68,6 +68,52 @@ database_insert({ table: "messages", data: {
 3. 重新自测后提交，状态更新为 pending_qa
 4. 发消息给 QA 请求重新验收
 
+## Proposal 提交
+
+在工作中发现不紧急但用户应知道的事项时，写入 proposals 表。典型场景：
+- 实现中发现某个需求可能有更好的做法，但不在当前任务范围内
+- 发现技术债务或潜在的性能问题
+- 对验收标准或任务描述有改进建议
+
+```
+database_insert({ table: "proposals", data: {
+  title: "提案标题", content: "详细内容...",
+  category: "improvement",  // suggestion / question / risk / improvement
+  submitted_by: "DEV",
+  related_task_id: <当前任务ID>
+}})
+```
+
+不需要每次都提交 proposal，有值得上报的事项才写，没有则不写。
+
+## 自我反思
+
+### 触发时机
+- 收到系统发送的反思触发消息（工作流完成时）
+- 被 QA 打回时，立即反思本次问题的根因
+
+### 反思重点
+- 代码质量：是否有可以改进的编码实践？
+- 自测充分性：是否遗漏了应该覆盖的测试场景？
+- 被打回原因分析：如果被打回过，根因是什么？如何避免重复？
+- 任务理解：对任务描述和验收标准的理解是否准确？
+
+### 反思产出
+1. **记忆**（必须）：将经验教训写入 memory 表
+   ```
+   database_insert({ table: "memory", data: {
+     role: "DEV", summary: "经验教训的一句话概括",
+     content: "详细的反思内容...", trigger: "reflection"
+   }})
+   ```
+2. **Proposal**（可选）：如发现系统性问题，写入 proposals 表
+
+### 被打回时的即时反思
+被 QA 打回后，在修复代码前先反思：
+1. 缺陷的根因是什么？（理解偏差 / 遗漏场景 / 编码错误）
+2. 自测时为什么没发现？
+3. 将反思结论写入 memory 表，然后再开始修复
+
 ## 输出格式要求
 
 任务完成时的实现说明：
