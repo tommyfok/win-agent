@@ -15,6 +15,9 @@ import { select as dbSelect, insert as dbInsert, rawQuery } from "../db/reposito
 import { startOpencodeServer, type OpencodeServerHandle } from "../engine/opencode-server.js";
 import { syncAgents, deployTools } from "../workspace/sync-agents.js";
 import { SessionManager } from "../engine/session-manager.js";
+import { insertKnowledge } from "../embedding/knowledge.js";
+import { getEmbeddingDimension } from "../embedding/index.js";
+import { setEmbeddingDimension } from "../db/schema.js";
 
 /** Global references for cleanup on stop */
 let serverHandle: OpencodeServerHandle | null = null;
@@ -44,6 +47,9 @@ export async function startCommand() {
   console.log("\n2️⃣  环境检查");
   const config = await runEnvCheck();
   const workspace = config.workspace!;
+
+  // Set embedding dimension before DB init (affects vector table schema)
+  setEmbeddingDimension(getEmbeddingDimension());
 
   // ── 3️⃣ 工作空间初始化 ──
   console.log("\n3️⃣  工作空间初始化");
@@ -212,7 +218,7 @@ async function importProjectContext(workspace: string) {
     });
     const resolvedDir = path.resolve(refDir.trim());
     if (fs.existsSync(resolvedDir) && fs.statSync(resolvedDir).isDirectory()) {
-      knowledgeCount += importReferenceDir(resolvedDir, workspace);
+      knowledgeCount += await importReferenceDir(resolvedDir, workspace);
     } else {
       console.log(`   ⚠️  目录不存在: ${resolvedDir}`);
     }
@@ -249,7 +255,7 @@ async function importProjectContext(workspace: string) {
       if (forbiddenTech) parts.push(`- 禁止使用: ${forbiddenTech}`);
       if (otherConstraints) parts.push(`- 其他约束: ${otherConstraints}`);
 
-      dbInsert("knowledge", {
+      await insertKnowledge({
         title: "技术约束",
         content: parts.join("\n"),
         category: "convention",
@@ -288,7 +294,7 @@ function detectExistingCode(workspace: string): boolean {
 /**
  * Import reference materials from a directory into knowledge table.
  */
-function importReferenceDir(refDir: string, workspace: string): number {
+async function importReferenceDir(refDir: string, workspace: string): Promise<number> {
   const TEXT_EXTS = new Set([".md", ".txt", ".rst", ".html", ".json", ".yaml", ".yml", ".xml"]);
   const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"]);
 
@@ -304,7 +310,7 @@ function importReferenceDir(refDir: string, workspace: string): number {
     if (TEXT_EXTS.has(ext)) {
       // Read text content directly
       const content = fs.readFileSync(filePath, "utf-8");
-      dbInsert("knowledge", {
+      await insertKnowledge({
         title: entry.name,
         content,
         category: "reference",
@@ -317,7 +323,7 @@ function importReferenceDir(refDir: string, workspace: string): number {
       // Copy image to attachments
       const destPath = path.join(attachDir, entry.name);
       fs.copyFileSync(filePath, destPath);
-      dbInsert("knowledge", {
+      await insertKnowledge({
         title: entry.name,
         content: `[图片] .win-agent/attachments/${entry.name}`,
         category: "reference",
@@ -330,7 +336,7 @@ function importReferenceDir(refDir: string, workspace: string): number {
       // Copy other files to attachments
       const destPath = path.join(attachDir, entry.name);
       fs.copyFileSync(filePath, destPath);
-      dbInsert("knowledge", {
+      await insertKnowledge({
         title: entry.name,
         content: `[附件] .win-agent/attachments/${entry.name}`,
         category: "reference",

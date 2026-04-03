@@ -11,7 +11,11 @@ export function validateConfig(config: WinEngineConfig): string[] {
   if (!config.provider?.type || !config.provider?.apiKey || !config.provider?.model) {
     missing.push("provider");
   }
-  if (!config.embedding?.type || !config.embedding?.model) {
+  if (!config.embedding?.type) {
+    missing.push("embedding");
+  }
+  // OpenAI embedding needs apiKey; local does not
+  if (config.embedding?.type === "openai" && !config.embedding?.apiKey) {
     missing.push("embedding");
   }
   return missing;
@@ -63,29 +67,38 @@ export async function runEnvCheck(): Promise<WinEngineConfig> {
 
   // 3. Embedding
   console.log("\n3. Embedding 模型配置");
-  if (config.embedding?.type && config.embedding?.model) {
-    console.log(`   ✓ 已配置 → ${config.embedding.type} / ${config.embedding.model}`);
+  if (config.embedding?.type) {
+    console.log(`   ✓ 已配置 → ${config.embedding.type} / ${config.embedding.model || "default"}`);
   } else {
     const type = await select({
       message: "请选择 Embedding Provider",
       choices: [
-        { value: "openai", name: "OpenAI" },
-        { value: "custom", name: "自定义" },
+        { value: "local", name: "本地模型 (bge-small-zh-v1.5, 无需 API)" },
+        { value: "openai", name: "OpenAI (text-embedding-3-small)" },
       ],
     });
-    const apiKey = await input({
-      message: "请输入 Embedding API Key（留空则复用 Provider 的 Key）",
-      default: "",
-    });
-    const model = await input({
-      message: "请选择 Embedding 模型",
-      default: "text-embedding-3-small",
-    });
-    config.embedding = {
-      type,
-      apiKey: apiKey || config.provider?.apiKey || "",
-      model,
-    };
+
+    if (type === "local") {
+      config.embedding = {
+        type: "local",
+        apiKey: "",
+        model: "Xenova/bge-small-zh-v1.5",
+      };
+    } else {
+      const apiKey = await input({
+        message: "请输入 Embedding API Key（留空则复用 Provider 的 Key）",
+        default: "",
+      });
+      const model = await input({
+        message: "请选择 Embedding 模型",
+        default: "text-embedding-3-small",
+      });
+      config.embedding = {
+        type,
+        apiKey: apiKey || config.provider?.apiKey || "",
+        model,
+      };
+    }
     changed = true;
   }
 

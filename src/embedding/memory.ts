@@ -1,0 +1,173 @@
+import { getDb } from "../db/connection.js";
+import { insert } from "../db/repository.js";
+import { generateEmbedding } from "./index.js";
+
+export interface MemoryData {
+  role: string;
+  summary: string;
+  content: string;
+  trigger: string;
+}
+
+/**
+ * Insert a memory entry and generate its embedding vector.
+ * Writes to both `memory` and `memory_vec` tables.
+ */
+export async function insertMemory(data: MemoryData): Promise<number> {
+  const { lastInsertRowid } = insert("memory", data);
+
+  // Generate embedding from summary (concise, best for semantic search)
+  try {
+    const embedding = await generateEmbedding(data.summary);
+    const db = getDb();
+    db.prepare(
+      "INSERT INTO memory_vec(id, embedding) VALUES (?, ?)"
+    ).run(lastInsertRowid, JSON.stringify(embedding));
+  } catch (err) {
+    console.log(`   ⚠️  记忆 #${lastInsertRowid} embedding 生成失败: ${err}`);
+  }
+
+  return lastInsertRowid;
+}
+
+export interface MemoryEntry {
+  id: number;
+  summary: string;
+  content: string;
+  role: string;
+  created_at: string;
+}
+
+/**
+ * Build a recall prompt from recent memories for a role, using vector similarity.
+ *
+ * - Last 7 days: ranked by vector similarity to currentContext
+ * - 7-30 days: only included if highly similar (distance < 0.3)
+ * - 30+ days: excluded
+ *
+ * @param role - The role to recall memories for
+ * @param currentContext - Current context text for semantic matching (optional)
+ * @param limit - Max memories to include (default 10)
+ */
+export async function buildRecallPrompt(
+  role: string,
+  currentContext?: string,
+  limit: number = 10
+): Promise<string> {
+  const db = getDb();
+
+  // If no context for vector search, fall back to time-based recall
+  if (!currentContext) {
+    const memories = db
+      .prepare(
+        `SELECT id, summary FROM memory
+         WHERE role = ? AND created_at > datetime('now', '-7 days')
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .all(role, limit) as Array<{ id: number; summary: string }>;
+
+    return formatRecallPrompt(memories);
+  }
+
+  // Vector-based recall
+  const queryEmbedding = await generateEmbedding(currentContext);
+
+  // Get candidate memory IDs from vector search (fetch more than needed for filtering)
+  const vecResults = db
+    .prepare(
+      "SELECT id, distance FROM memory_vec WHERE embedding MATCH ? AND k = ?"
+    )
+    .all(JSON.stringify(queryEmbedding), limit * 3) as Array<{
+    id: number;
+    distance: number;
+  }>;
+
+  if (vecResults.length === 0) {
+    return formatRecallPrompt([]);
+  }
+
+  const ids = vecResults.map((r) => r.id);
+  const placeholders = ids.map(() => "?").join(", ");
+  const distMap = new Map(vecResults.map((r) => [r.id, r.distance]));
+
+  // Fetch memories with time window filtering
+  const memories = db
+    .prepare(
+      `SELECT id, summary, created_at FROM memory
+       WHERE role = ? AND id IN (${placeholders})
+         AND created_at > datetime('now', '-30 days')
+       ORDER BY created_at DESC`
+    )
+    .all(role, ...ids) as Array<{
+    id: number;
+    summary: string;
+    created_at: string;
+  }>;
+
+  // Apply time-decay filtering
+  const now = Date.now();
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const filtered = memories.filter((m) => {
+    const age = now - new Date(m.created_at).getTime();
+    const distance = distMap.get(m.id) ?? 1;
+
+    // Last 7 days: include all
+    if (age <= SEVEN_DAYS) return true;
+    // 7-30 days: only high similarity (low distance)
+    return distance < 0.3;
+  });
+
+  // Sort by vector distance (most relevant first)
+  filtered.sort(
+    (a, b) => (distMap.get(a.id) ?? 1) - (distMap.get(b.id) ?? 1)
+  );
+
+  return formatRecallPrompt(filtered.slice(0, limit));
+}
+
+/**
+ * Clean up expired memories (30+ days old).
+ * Called during iteration review.
+ */
+export function cleanExpiredMemories(): number {
+  const db = getDb();
+
+  // Get IDs of expired memories
+  const expired = db
+    .prepare(
+      "SELECT id FROM memory WHERE created_at < datetime('now', '-30 days')"
+    )
+    .all() as Array<{ id: number }>;
+
+  if (expired.length === 0) return 0;
+
+  const ids = expired.map((r) => r.id);
+  const placeholders = ids.map(() => "?").join(", ");
+
+  // Delete from both tables
+  db.prepare(`DELETE FROM memory_vec WHERE id IN (${placeholders})`).run(
+    ...ids
+  );
+  const result = db
+    .prepare(`DELETE FROM memory WHERE id IN (${placeholders})`)
+    .run(...ids);
+
+  return result.changes;
+}
+
+function formatRecallPrompt(
+  memories: Array<{ id: number; summary: string }>
+): string {
+  if (memories.length === 0) return "";
+
+  const summaries = memories
+    .map((m) => `- [#${m.id}] ${m.summary}`)
+    .join("\n");
+
+  return `## 近期工作回忆
+以下是你最近的工作记忆摘要，请在接下来的工作中参考这些上下文：
+${summaries}
+
+如需了解某条记忆的详细内容，可以通过 database_query 查询 memory 表。`;
+}

@@ -109,17 +109,29 @@ const TABLE_SCHEMAS: Record<string, string> = {
     )`,
 };
 
-// Virtual tables for vector search (sqlite-vec)
-const VECTOR_TABLES = [
-  `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vec USING vec0(
-    id INTEGER PRIMARY KEY,
-    embedding float[1536]
-  )`,
-  `CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
-    id INTEGER PRIMARY KEY,
-    embedding float[1536]
-  )`,
-];
+/** Default embedding dimension (512 for local bge-small-zh-v1.5, 1536 for OpenAI) */
+let embeddingDimension = 512;
+
+/**
+ * Set the embedding dimension before creating tables.
+ * Must be called before createAllTables() if using non-default dimension.
+ */
+export function setEmbeddingDimension(dim: number): void {
+  embeddingDimension = dim;
+}
+
+function getVectorTableSQL(): string[] {
+  return [
+    `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vec USING vec0(
+      id INTEGER PRIMARY KEY,
+      embedding float[${embeddingDimension}]
+    )`,
+    `CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
+      id INTEGER PRIMARY KEY,
+      embedding float[${embeddingDimension}]
+    )`,
+  ];
+}
 
 // Table creation order matters due to foreign key references
 const CREATE_ORDER = [
@@ -139,7 +151,7 @@ export function createAllTables(db: Database.Database): void {
   for (const table of CREATE_ORDER) {
     db.exec(TABLE_SCHEMAS[table]);
   }
-  for (const stmt of VECTOR_TABLES) {
+  for (const stmt of getVectorTableSQL()) {
     db.exec(stmt);
   }
 }
@@ -174,11 +186,12 @@ export function patchMissingTables(db: Database.Database): string[] {
     }
   }
   // Patch virtual tables
+  const vecSQL = getVectorTableSQL();
   if (missing.includes("knowledge_vec")) {
-    db.exec(VECTOR_TABLES[0]);
+    db.exec(vecSQL[0]);
   }
   if (missing.includes("memory_vec")) {
-    db.exec(VECTOR_TABLES[1]);
+    db.exec(vecSQL[1]);
   }
   return missing;
 }

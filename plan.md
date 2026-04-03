@@ -205,19 +205,20 @@ win-agent/
 参考：[implementation.md 向量检索](../win-agent-design/docs/implementation.md#8-向量检索)
 
 #### 4.1 Embedding 接口 (`src/embedding/`)
-- [ ] 定义统一接口 `generateEmbedding(text: string): Promise<number[]>`
-- [ ] 实现 OpenAI embedding adapter（text-embedding-3-small）
-- [ ] 从 config 读取 embedding provider 配置
+- [x] 定义统一接口 `generateEmbedding(text: string): Promise<number[]>`
+- [x] 实现 OpenAI embedding adapter（text-embedding-3-small）
+- [x] 实现本地 embedding adapter（@huggingface/transformers, bge-small-zh-v1.5, 512 维）
+- [x] 从 config 读取 embedding provider 配置（支持 local / openai）
 
 #### 4.2 知识库向量检索
-- [ ] 写入 knowledge 时自动生成 embedding
-- [ ] `queryRelevantKnowledge(text, category?, limit?)`：category 精确过滤 + 向量排序
-- [ ] 使用 sqlite-vec 的 `vec_distance_cosine()` 函数
+- [x] 写入 knowledge 时自动生成 embedding（insertKnowledge）
+- [x] `queryRelevantKnowledge(text, category?, limit?)`：category 精确过滤 + 向量排序
+- [x] 使用 sqlite-vec 的 KNN MATCH 查询
 
 #### 4.3 记忆向量检索
-- [ ] 写入 memory 时基于 summary 生成 embedding
-- [ ] `buildRecallPrompt(role, currentContext)`：7 天内记忆 + 向量相似度排序 + 摘要注入
-- [ ] 7-30 天记忆仅高相似度时召回，30 天以上清理
+- [x] 写入 memory 时基于 summary 生成 embedding（insertMemory）
+- [x] `buildRecallPrompt(role, currentContext)`：7 天内记忆 + 向量相似度排序 + 摘要注入
+- [x] 7-30 天记忆仅高相似度时召回（distance < 0.3），30 天以上清理（cleanExpiredMemories）
 
 ---
 

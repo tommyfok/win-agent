@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { OpencodeClient } from "@opencode-ai/sdk";
-import { select, insert, rawQuery } from "../db/repository.js";
+import {
+  insertMemory,
+  buildRecallPrompt as buildVectorRecallPrompt,
+} from "../embedding/memory.js";
 
 type Role = "PM" | "SA" | "DEV" | "QA" | "OPS";
 const PERSISTENT_ROLES: Role[] = ["PM", "SA", "OPS"];
@@ -24,23 +27,7 @@ const WRITE_MEMORY_PROMPT = `你即将被轮转到一个新的 session。请总�
 }
 \`\`\``;
 
-/**
- * Build a recall prompt from recent memories for a role.
- * Injects recent memory summaries into the new session.
- */
-function buildRecallPrompt(memories: Array<{ id: number; summary: string }>): string {
-  if (memories.length === 0) return "";
-
-  const summaries = memories
-    .map((m) => `- [#${m.id}] ${m.summary}`)
-    .join("\n");
-
-  return `## 近期工作回忆
-以下是你最近的工作记忆摘要，请在接下来的工作中参考这些上下文：
-${summaries}
-
-如需了解某条记忆的详细内容，可以通过 database_query 查询 memory 表。`;
-}
+// buildRecallPrompt is now in ../embedding/memory.ts with vector search support
 
 /**
  * Load the role prompt content from .win-agent/roles/{role}.md
@@ -151,7 +138,7 @@ export class SessionManager {
         const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
         if (jsonMatch) {
           const { summary, content } = JSON.parse(jsonMatch[1]);
-          insert("memory", {
+          await insertMemory({
             role,
             summary,
             content,
@@ -198,7 +185,7 @@ export class SessionManager {
           const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
           if (jsonMatch) {
             const { summary, content } = JSON.parse(jsonMatch[1]);
-            insert("memory", { role, summary, content, trigger });
+            await insertMemory({ role, summary, content, trigger });
           }
         }
         console.log(`   ✓ ${role} 记忆已保存`);
@@ -245,21 +232,15 @@ export class SessionManager {
 
   /**
    * Recall recent memories for a role and inject them into the session.
+   * Uses vector similarity search when context is available.
    */
   private async recallMemories(
     sessionId: string,
-    role: string
+    role: string,
+    currentContext?: string
   ): Promise<void> {
     try {
-      const memories = rawQuery(
-        `SELECT id, summary FROM memory
-         WHERE role = ? AND created_at > datetime('now', '-7 days')
-         ORDER BY created_at DESC
-         LIMIT 10`,
-        [role]
-      );
-
-      const prompt = buildRecallPrompt(memories);
+      const prompt = await buildVectorRecallPrompt(role, currentContext);
       if (!prompt) return;
 
       await this.client.session.prompt({
