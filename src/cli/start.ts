@@ -18,6 +18,7 @@ import { SessionManager } from "../engine/session-manager.js";
 import { insertKnowledge } from "../embedding/knowledge.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
+import { startSchedulerLoop, stopSchedulerLoop } from "../engine/scheduler.js";
 
 /** Global references for cleanup on stop */
 let serverHandle: OpencodeServerHandle | null = null;
@@ -164,21 +165,23 @@ export async function startCommand() {
   console.log(`   opencode: ${serverHandle.url}`);
   console.log("   输入 npx win-agent talk 打开与产品经理的对话页面");
 
-  // TODO: 阶段 5 — 启动调度器主循环
-  // await startSchedulerLoop(config, serverHandle.client, sessionManager);
+  // Graceful shutdown on signals
+  const cleanup = async () => {
+    console.log("\n🛑 收到终止信号，正在停止...");
+    stopSchedulerLoop();
+    if (sessionManager) {
+      console.log("   → 保存角色记忆...");
+      await sessionManager.writeAllMemories("engine_stop");
+    }
+    serverHandle?.close();
+    removePidFile();
+    process.exit(0);
+  };
+  process.on("SIGTERM", cleanup);
+  process.on("SIGINT", cleanup);
 
-  // Keep process alive (engine is a long-running process)
-  // The scheduler main loop (Phase 5) will replace this
-  await new Promise<void>((resolve) => {
-    const cleanup = () => {
-      console.log("\n🛑 收到终止信号，正在停止...");
-      serverHandle?.close();
-      removePidFile();
-      resolve();
-    };
-    process.on("SIGTERM", cleanup);
-    process.on("SIGINT", cleanup);
-  });
+  // Start the scheduler main loop (blocks until stopSchedulerLoop is called)
+  await startSchedulerLoop(serverHandle.client, sessionManager, workspace);
 }
 
 /**

@@ -229,11 +229,11 @@ win-agent/
 参考：[implementation.md 引擎主循环](../win-agent-design/docs/implementation.md#4-引擎主循环)、[消息调度](../win-agent-design/docs/implementation.md#5-消息调度引擎如何触发角色)
 
 #### 5.1 角色状态管理 (`src/engine/role-manager.ts`)
-- [ ] `busyRoles: Set<string>`
-- [ ] `isBusy(role)` / `setBusy(role, busy)`
+- [x] `busyRoles: Set<string>`
+- [x] `isBusy(role)` / `setBusy(role, busy)`
 
 #### 5.2 消息调度 (`src/engine/dispatcher.ts`)
-- [ ] `dispatchToRole(client, sessionManager, role, messages)`：
+- [x] `dispatchToRole(client, sessionManager, role, messages)`：
   1. 获取或创建 session
   2. 查询相关知识库条目（向量检索）
   3. 查询当前工作流阶段信息
@@ -241,40 +241,40 @@ win-agent/
   5. 调用 `session.prompt()`
   6. 标记消息为 read
   7. 检查上下文占用率，必要时轮转 session
-- [ ] `buildDispatchPrompt(role, messages, knowledge, workflowContext)`：
+- [x] `buildDispatchPrompt(role, messages, knowledge, workflowContext)`：
   - 待处理消息区
   - 当前工作流上下文区（模板 + 阶段 + roles_guide）
   - 相关知识库区
   - 操作提示区
 
 #### 5.3 自动触发检测 (`src/engine/auto-trigger.ts`)
-- [ ] 检查迭代回顾触发条件：
+- [x] 检查迭代回顾触发条件：
   - 当前迭代所有任务 done → 触发 OPS
   - 打回率 > 30% → 触发 OPS
-- [ ] 防止重复触发（记录已触发的 workflow_id + 条件）
+- [x] 防止重复触发（记录已触发的 workflow_id + 条件）
 
 #### 5.4 工作流完成检测 (`src/engine/workflow-checker.ts`)
-- [ ] 遍历 active workflow_instances
-- [ ] 加载对应流程模板的 completion.condition
-- [ ] new-feature / bug-fix：关联任务全部 done → 推进到 done 阶段 + 通知 PM
-- [ ] iteration-review：PM 完成归档 → 更新 workflow + iteration 状态
+- [x] 遍历 active workflow_instances
+- [x] 加载对应流程模板的 completion.condition
+- [x] new-feature / bug-fix：关联任务全部 done → 推进到 done 阶段 + 通知 PM
+- [x] iteration-review：PM 完成归档 → 更新 workflow + iteration 状态
 
 #### 5.5 调度器主循环 (`src/engine/scheduler.ts`)
-- [ ] `mainLoop(client, sessionManager)`：
+- [x] `mainLoop(client, sessionManager)`：
   1. 遍历 ALL_ROLES，检查未读消息
   2. 空闲角色有消息 → setBusy → dispatchToRole → setIdle
   3. checkAutoTriggers()
   4. checkWorkflowCompletion()
   5. sleep(1000) 避免空转
-- [ ] PM 的特殊处理：当 PM busy 时，角色消息排队等待
-- [ ] V1 串行：每轮只处理一个角色
+- [x] PM 的特殊处理：当 PM busy 时，角色消息排队等待
+- [x] V1 串行：每轮只处理一个角色
 
 #### 5.6 Session 轮转 (`src/engine/memory-rotator.ts`)
-- [ ] 检测上下文占用率 > 60%
-- [ ] 向当前 session 发送"写记忆"指令 → 角色总结当前工作
-- [ ] 记忆写入 memory 表（含 embedding）
-- [ ] 创建新 session → 注入身份 → 回忆相关记忆
-- [ ] 更新 session 映射
+- [x] 检测上下文占用率 > 60%
+- [x] 向当前 session 发送"写记忆"指令 → 角色总结当前工作
+- [x] 记忆写入 memory 表（含 embedding）
+- [x] 创建新 session → 注入身份 → 回忆相关记忆
+- [x] 更新 session 映射
 
 ---
 
@@ -304,49 +304,169 @@ win-agent/
 
 ---
 
-### 阶段 7：迭代回顾 + OPS
+### 阶段 7：Onboarding + Proposal + 角色自我反思
+
+**目标**：首次启动时通过 PM 引导用户定制团队角色；角色具备自我反思能力；提供异步提案通道供角色上报非紧急但重要的事项。
+
+#### 7.1 Proposals 表 (`src/db/schema.ts`)
+
+新增 `proposals` 表——角色到用户的异步提案通道，用于"不阻塞当前工作、但用户迟早该知道"的事项：
+
+```sql
+CREATE TABLE IF NOT EXISTS proposals (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  category    TEXT NOT NULL DEFAULT 'suggestion',  -- suggestion / question / risk / improvement
+  submitted_by TEXT NOT NULL,                       -- 提交角色
+  status      TEXT NOT NULL DEFAULT 'pending',      -- pending / accepted / rejected / archived
+  resolution  TEXT,                                 -- PM 处理后的说明
+  related_task_id     INTEGER REFERENCES tasks(id),
+  related_workflow_id INTEGER REFERENCES workflow_instances(id),
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+**定位**：区别于 messages（紧急/阻塞 → 走消息找 PM 立即处理），proposals 是非紧急的异步通道。角色在任何时候发现值得上报的事项都可以写入，不需要特定触发时机。
+
+**典型场景**：
+- SA 设计方案时发现两种路线各有利弊，选了一种但想让用户知道 trade-off
+- DEV 实现中发现某个需求可能有更好的做法，但不在当前任务范围内
+- QA 验收时发现验收标准之外的体验问题
+- OPS 迭代回顾时识别出系统性问题
+- 任何角色反思时偶尔产出（有就写，没有不强求）
+
+**权限设计**：
+- 所有角色：select + insert（任何角色都可以提交和查阅）
+- PM：额外拥有 update 权限（修改 status、填写 resolution）
+
+**生命周期**：
+```
+角色随时提交 (pending) → 用户与 PM 对话时查阅 → PM 处理：
+  ├── accepted  → PM 据此创建任务/发消息/修改配置
+  ├── rejected  → PM 填写拒绝理由
+  └── archived  → 已处理完毕归档
+```
+
+#### 7.2 角色权限更新 (`src/db/permissions.ts`)
+
+- [ ] 所有角色新增 `proposals` 表的 `select` 和 `insert` 权限
+- [ ] PM 新增 `proposals` 表的 `update` 权限
+- [ ] PM 新增 `.win-agent/roles/` 目录的文件写权限（用于 onboarding）
+
+#### 7.3 Onboarding 流程
+
+**触发条件**：`project_config` 中无 `onboarding_completed` 键
+
+**引擎侧** (`src/cli/start.ts`)：
+- [ ] Session 初始化后，检测 `onboarding_completed`
+- [ ] 未完成时，向 PM session 注入 onboarding 系统消息，告知 PM 进入 onboarding 模式
+- [ ] Onboarding 完成后，PM 写入 `project_config.onboarding_completed = true`
+- [ ] 引擎检测到 onboarding 完成 → 重新执行 `syncAgents()` 使更新后的角色 prompt 生效
+
+**PM 侧** (`src/templates/roles/PM.md`)：
+- [ ] 新增「团队 Onboarding」工作流章节
+- [ ] PM 向用户介绍 5 个角色的定位和协作方式
+- [ ] 逐个角色与用户讨论期望：
+  - SA：技术决策风格（保守/激进）、方案详细程度、任务拆分粒度
+  - DEV：编码风格偏好、commit 规范、自测要求
+  - QA：验收严格程度、是否关注标准外问题、回归测试范围
+  - OPS：回顾频率、优化激进程度
+  - PM 自身：汇报频率、沟通风格、决策自主度
+- [ ] PM 讨论工作流偏好（MVP 优先 vs 一步到位、迭代节奏等）
+- [ ] PM 综合所有输入，改写每个角色的 `.win-agent/roles/*.md`
+- [ ] PM 写入 `project_config.onboarding_completed = true`
+
+**Agent 配置** (`src/workspace/sync-agents.ts`)：
+- [ ] PM 的 opencode agent 配置加入 `.win-agent/roles/` 目录的 write 权限
+
+#### 7.4 角色自我反思
+
+在每个角色的 prompt（`src/templates/roles/*.md`）中新增「自我反思」章节。
+
+**触发时机**：
+- 工作流结束时：引擎通过 `workflow-checker.ts` 向参与角色发送反思触发消息
+- DEV 被 QA 打回时：DEV 立即反思本次问题的根因
+- 迭代回顾时：OPS 汇总所有角色反思 + 指标数据
+
+**反思产出**：
+- **记忆**（写入 memory 表）：记住具体经验教训，供下次 session 回忆
+- **Proposal**（可选，写入 proposals 表）：如果反思中发现了需要用户决策的系统性问题，才写入；没有则不写
+
+**各角色反思重点**：
+- PM：需求理解准确度、沟通效率、信息流转是否及时
+- SA：方案可行性、任务拆分合理性、验收标准清晰度
+- DEV：代码质量、自测充分性、被打回原因分析
+- QA：验收标准适用性、缺陷描述质量、是否有遗漏
+- OPS：上轮优化是否生效、指标变化趋势
+
+**引擎侧改动**：
+- [ ] `workflow-checker.ts`：工作流完成时，向所有参与角色发反思触发消息
+- [ ] `src/templates/roles/*.md`：所有角色新增「自我反思」章节
+
+#### 7.5 PM 的 Proposal 管理
+
+PM prompt 中新增 Proposal 处理流程：
+- [ ] 用户对话时，PM 主动提及有未处理的 proposals（如有）
+- [ ] 用户可查询 proposals 列表、查看详情
+- [ ] PM 根据用户指令处理：accept → 转化为行动（创建任务/发消息/调整配置），reject → 填写理由，archive → 归档
+- [ ] PM 处理完毕后更新 proposal 状态和 resolution 字段
+
+#### 7.6 角色 Prompt 更新汇总
+
+所有角色 prompt 需新增的内容：
+- [ ] 所有角色：新增「Proposal 提交」说明——在工作中发现不紧急但用户应知道的事项时，写入 proposals 表
+- [ ] 所有角色：新增「自我反思」章节——描述反思时机、反思重点、产出格式
+- [ ] PM：新增「团队 Onboarding」工作流章节
+- [ ] PM：新增「Proposal 管理」工作流章节
+
+---
+
+### 阶段 8：迭代回顾 + OPS
 
 **目标**：iteration-review 工作流跑通，OPS 能分析指标和执行优化。
 
 参考：[workflows/iteration-review.json](../win-agent-design/workflows/iteration-review.json)、[roles/OPS.md](../win-agent-design/roles/OPS.md)
 
-#### 7.1 迭代管理
+#### 8.1 迭代管理
 - [ ] 迭代自动创建：PM 审核通过任务时，无 active 迭代则自动创建
 - [ ] 迭代完成检测：关联任务全部 done → 标记 completed
 - [ ] 迭代回顾自动触发：completed → 创建 iteration-review workflow + 通知 OPS
 
-#### 7.2 OPS 工作流
+#### 8.2 OPS 工作流
 - [ ] OPS 统计指标（打回率、阻塞率等）→ 发回顾报告给 PM
+- [ ] OPS 汇总各角色的自我反思和 proposals，综合分析
 - [ ] PM 审核优化方案 → 发消息给 OPS 批准/驳回
 - [ ] OPS 执行优化：修改 .win-agent/roles/*.md、维护 knowledge、调整 workflows
 - [ ] OPS 文件写操作前自动备份到 .win-agent/backups/
 
-#### 7.3 打回率阈值触发
+#### 8.3 打回率阈值触发
 - [ ] 实时检测打回率 > 30% → 自动触发 iteration-review
 - [ ] 防重复触发机制
 
 ---
 
-### 阶段 8：健壮性 + 边界处理
+### 阶段 9：健壮性 + 边界处理
 
 **目标**：处理各种异常情况，使系统可靠运行。
 
-#### 8.1 错误处理
+#### 9.1 错误处理
 - [ ] opencode server 连接失败重试
 - [ ] session.prompt() 超时处理
 - [ ] LLM 返回格式不符合预期的兜底
 - [ ] SQLite 并发写入保护（WAL 模式）
 
-#### 8.2 PM 双通道冲突处理
+#### 9.2 PM 双通道冲突处理
 - [ ] 用户对话期间 PM busy → 角色消息排队
 - [ ] PM 空闲后优先处理用户消息，再处理角色消息
 - [ ] 参考 [architecture.md PM session 冲突处理](../win-agent-design/docs/architecture.md#2-调度器scheduler)
 
-#### 8.3 记忆过期清理
+#### 9.3 记忆过期清理
 - [ ] 迭代回顾时清理 > 30 天的记忆
 - [ ] 7-30 天记忆仅高相似度召回
 
-#### 8.4 日志记录
+#### 9.4 日志记录
 - [ ] 所有角色操作写入 logs 表
 - [ ] 引擎关键事件日志（调度、触发、轮转、错误）
 - [ ] 终端输出格式化日志
@@ -368,9 +488,11 @@ win-agent/
     ↓
 阶段 6  ━━━━━━━━━━━━━━━━━━━━━━  端到端流程打通 (new-feature + bug-fix)
     ↓
-阶段 7  ━━━━━━━━━━━━━━━━━━━━━━  迭代回顾 + OPS 优化
+阶段 7  ━━━━━━━━━━━━━━━━━━━━━━  Onboarding + 角色自我反思 + Proposal
     ↓
-阶段 8  ━━━━━━━━━━━━━━━━━━━━━━  健壮性 + 边界处理
+阶段 8  ━━━━━━━━━━━━━━━━━━━━━━  迭代回顾 + OPS 优化
+    ↓
+阶段 9  ━━━━━━━━━━━━━━━━━━━━━━  健壮性 + 边界处理
 ```
 
 ---
@@ -383,3 +505,6 @@ win-agent/
 4. **DEV/QA 按任务创建 session**：不在启动时创建，被调度时按需创建。
 5. **PM 是唯一面向用户的角色**：其他角色的消息通过 PM session 间接呈现给用户。
 6. **.win-agent/roles/*.md 是 prompt 源文件**：引擎启动时加上 frontmatter 同步到 .opencode/agents/*.md。
+7. **Onboarding 由 PM 直接写文件**：首次启动时 PM 拥有 `.win-agent/roles/` 写权限，直接改写角色 prompt。这是一次性的特殊流程，用户全程在对话中参与即等同于审批。
+8. **Proposal 是角色到用户的异步提案通道**：区别于 messages（紧急阻塞），proposals 用于"不阻塞但用户应知道"的事项。角色在任何时候都可以提交，不需要特定触发时机。只在用户主动与 PM 交互时才处理。PM 是唯一可以变更 proposal 状态的角色。
+9. **自我反思只在关键节点触发**：工作流结束和被打回时反思，session 轮转时只写记忆不做反思，避免噪音。
