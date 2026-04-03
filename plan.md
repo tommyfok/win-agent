@@ -430,20 +430,20 @@ PM prompt 中新增 Proposal 处理流程：
 参考：[workflows/iteration-review.json](../win-agent-design/workflows/iteration-review.json)、[roles/OPS.md](../win-agent-design/roles/OPS.md)
 
 #### 8.1 迭代管理
-- [ ] 迭代自动创建：PM 审核通过任务时，无 active 迭代则自动创建
-- [ ] 迭代完成检测：关联任务全部 done → 标记 completed
-- [ ] 迭代回顾自动触发：completed → 创建 iteration-review workflow + 通知 OPS
+- [x] 迭代自动创建：PM 审核通过任务时，无 active 迭代则自动创建
+- [x] 迭代完成检测：关联任务全部 done → 标记 completed
+- [x] 迭代回顾自动触发：completed → 创建 iteration-review workflow + 通知 OPS
 
 #### 8.2 OPS 工作流
-- [ ] OPS 统计指标（打回率、阻塞率等）→ 发回顾报告给 PM
-- [ ] OPS 汇总各角色的自我反思和 proposals，综合分析
-- [ ] PM 审核优化方案 → 发消息给 OPS 批准/驳回
-- [ ] OPS 执行优化：修改 .win-agent/roles/*.md、维护 knowledge、调整 workflows
-- [ ] OPS 文件写操作前自动备份到 .win-agent/backups/
+- [x] OPS 统计指标（打回率、阻塞率等）→ 发回顾报告给 PM
+- [x] OPS 汇总各角色的自我反思和 proposals，综合分析
+- [x] PM 审核优化方案 → 发消息给 OPS 批准/驳回
+- [x] OPS 执行优化：修改 .win-agent/roles/*.md、维护 knowledge、调整 workflows
+- [x] OPS 文件写操作前自动备份到 .win-agent/backups/
 
 #### 8.3 打回率阈值触发
-- [ ] 实时检测打回率 > 30% → 自动触发 iteration-review
-- [ ] 防重复触发机制
+- [x] 实时检测打回率 > 30% → 自动触发 iteration-review
+- [x] 防重复触发机制
 
 ---
 

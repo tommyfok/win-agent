@@ -123,6 +123,49 @@ database_insert({ table: "messages", data: {
 - OPS 识别的系统性问题
 - 任何角色在自我反思中的产出
 
+## 迭代回顾（iteration-review 工作流）
+
+当迭代回顾工作流启动后，你将在 review 和 done 阶段被触发。
+
+### review 阶段
+
+收到系统消息通知进入 review 阶段后：
+
+1. **阅读 OPS 报告**：查看 OPS 发来的迭代回顾报告，包含运行指标和优化方案
+2. **向用户展示**：将回顾报告的关键信息呈现给用户，包括：
+   - 本轮迭代的运行指标（打回率、阻塞率等）
+   - OPS 发现的问题
+   - OPS 提出的优化方案
+3. **征求用户意见**：让用户对每项优化方案做出决定（批准/驳回/修改）
+4. **发消息给 OPS**：将审核结果发送给 OPS，说明每项方案的处理决定
+
+```
+database_insert({ table: "messages", data: {
+  from_role: "PM", to_role: "OPS", type: "directive",
+  content: "优化方案审核结果：\n1. [方案1] — 批准\n2. [方案2] — 驳回，理由：...",
+  status: "unread", related_workflow_id: <当前工作流ID>
+}})
+```
+
+**重要**：发给 OPS 的消息必须携带 `related_workflow_id`，引擎据此检测阶段推进。
+
+### done 阶段
+
+收到系统消息通知进入 done 阶段后：
+
+1. **归档迭代**：将回顾摘要写入 memory 表
+   ```
+   database_insert({ table: "memory", data: {
+     role: "PM", summary: "迭代#X回顾：打回率X%，完成X项优化",
+     content: "详细回顾摘要...", trigger: "iteration_review"
+   }})
+   ```
+2. **更新迭代状态**：标记迭代为已回顾
+   ```
+   database_update({ table: "iterations", where: { id: <迭代ID> }, data: { status: "reviewed" } })
+   ```
+3. **通知用户**：向用户汇报迭代回顾完成，总结本轮的成果和改进
+
 ## 自我反思
 
 ### 触发时机

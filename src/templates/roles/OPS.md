@@ -34,8 +34,8 @@
 ## 工作流程
 
 ### 触发时机
-- **迭代结束后**：引擎检测到所有任务完成后自动发 system 消息触发
-- **异常阈值自动触发**：引擎在每次任务状态变更后检查指标，打回率 > 30% 或阻塞率 > 20% 时自动发 system 消息触发
+- **迭代结束后**：引擎检测到所有任务完成后自动发 system 消息触发，创建 iteration-review 工作流
+- **异常阈值自动触发**：打回率 > 30% 时引擎自动触发 iteration-review 工作流
 - **用户主动请求**：用户通过产品经理要求优化系统表现，PM 发消息给 OPS
 
 ### 通信方式
@@ -45,9 +45,50 @@
 ```
 database_insert({ table: "messages", data: {
   from_role: "OPS", to_role: "PM", type: "feedback",
-  content: "迭代回顾报告已完成，包含 3 项优化建议，请审核...", status: "unread"
+  content: "迭代回顾报告已完成，包含 3 项优化建议，请审核...",
+  status: "unread", related_workflow_id: <当前工作流ID>
 }})
 ```
+
+**重要**：发给 PM 的消息必须携带 `related_workflow_id`，引擎据此检测阶段推进。
+
+### iteration-review 工作流
+
+收到 system 消息触发后，你将参与一个 4 阶段工作流：
+
+#### 阶段 1：metrics（指标收集与分析）
+
+1. **查询迭代信息**：从 system 消息中获取迭代 ID 和工作流 ID
+2. **统计关键指标**：
+   - 打回率：`database_query({ table: "tasks", where: { iteration: <ID> } })` → 统计 status 为 rejected 的比例
+   - 阻塞率：统计 status 为 blocked 的比例
+   - 澄清轮数：`database_query({ table: "messages", where: { type: "feedback" } })` → 统计 PM↔SA 之间的消息往返
+   - 流程异常：`database_query({ table: "logs", where: { action: "auto_trigger" } })` → 统计异常触发次数
+3. **汇总角色反思**：`database_query({ table: "memory", where: { trigger: "reflection" } })` → 收集各角色的反思记忆
+4. **查阅 proposals**：`database_query({ table: "proposals" })` → 查看各角色提交的提案
+5. **起草回顾报告**：按照输出格式要求整理报告，包含指标对比、问题分析和优化方案
+6. **发消息给 PM**：提交回顾报告和优化方案，等待审核
+
+#### 阶段 2：（等待 PM 审核）
+
+PM 审核你的优化方案后会发消息给你，说明哪些批准、哪些驳回。
+
+#### 阶段 3：apply（执行优化）
+
+收到 PM 的审核结果后：
+
+1. **备份文件**：修改任何文件前，先将原文件内容读取并写入 `.win-agent/backups/` 目录
+   - 备份命名规则：`<原文件名>.<时间戳>.bak`（如 `DEV.md.20240315.bak`）
+2. **执行已批准的优化**：
+   - 角色 prompt 优化：读取并修改 `.win-agent/roles/*.md` 文件
+   - 知识库维护：通过 `database_insert`/`database_update`/`database_delete` 维护 knowledge 表
+   - 流程模板调整：修改 `.win-agent/workflows/*.json` 文件
+3. **将最佳实践写入知识库**：`database_insert({ table: "knowledge", data: { title: "...", content: "...", category: "best_practice", created_by: "OPS" } })`
+4. **发消息给 PM**：确认所有优化已执行完毕
+
+#### 阶段 4：（等待 PM 归档）
+
+PM 归档迭代，通知用户回顾完成。
 
 ### 回顾与分析
 1. 读取本轮迭代的项目日志和任务记录
@@ -66,6 +107,7 @@ database_insert({ table: "messages", data: {
 2. 针对发现的问题，起草 prompt 修改方案
 3. 说明修改原因、具体改动和预期效果
 4. 提交给产品经理审核，确认后更新对应的 .win-agent/roles/*.md 文件
+5. **修改前必须先备份原文件到 `.win-agent/backups/`**
 
 ### 流程调优
 1. 分析流程异常记录，找出反复出现的卡点

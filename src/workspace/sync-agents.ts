@@ -122,7 +122,14 @@ const AGENT_CONFIGS: Record<string, AgentFrontmatter> = {
       grep: true,
     },
     permission: {
-      edit: "allow",
+      write: {
+        ".win-agent/*": "allow",
+        "*": "deny",
+      },
+      edit: {
+        ".win-agent/*": "allow",
+        "*": "deny",
+      },
       bash: "deny",
     },
   },

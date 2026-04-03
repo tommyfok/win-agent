@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { select, update, insert } from "../db/repository.js";
+import { select, update, insert, rawQuery } from "../db/repository.js";
 import type { SessionManager } from "./session-manager.js";
 
 /**
@@ -17,6 +17,9 @@ export function checkWorkflowCompletion(
   const activeWorkflows = select("workflow_instances", { status: "active" });
 
   for (const wf of activeWorkflows) {
+    // Check phase advancement for multi-phase workflows before completion
+    checkPhaseAdvancement(wf);
+
     const completed = checkCompletion(wf, workspace);
     if (completed) {
       // Update workflow status
@@ -106,6 +109,83 @@ function checkIterationReviewDone(wf: any): boolean {
   // and the phase is updated by message handling, we look for
   // the done phase explicitly.
   return wf.phase === "done";
+}
+
+/**
+ * Check if a multi-phase workflow should advance to the next phase.
+ * Phase transitions are detected by messages between roles after the last phase change.
+ */
+function checkPhaseAdvancement(wf: any): void {
+  if (wf.template !== "iteration-review") return;
+
+  const phase = wf.phase as string;
+
+  // Define phase transition rules: current phase → {from, to, next}
+  // When a message from `from` to `to` is found after the last phase update, advance to `next`
+  const transitions: Record<string, { from: string; to: string; next: string }> = {
+    metrics: { from: "OPS", to: "PM", next: "review" },
+    review:  { from: "PM",  to: "OPS", next: "apply" },
+    apply:   { from: "OPS", to: "PM", next: "done" },
+  };
+
+  const rule = transitions[phase];
+  if (!rule) return;
+
+  // Look for messages after the workflow's last update that match the transition pattern
+  const triggerMessages = rawQuery(
+    `SELECT id FROM messages
+     WHERE related_workflow_id = ?
+       AND from_role = ? AND to_role = ?
+       AND created_at > ?
+     LIMIT 1`,
+    [wf.id, rule.from, rule.to, wf.updated_at],
+  );
+
+  if (triggerMessages.length === 0) return;
+
+  // Advance phase
+  update("workflow_instances", { id: wf.id }, { phase: rule.next });
+
+  // Update the in-memory wf object so completion check sees the new phase
+  wf.phase = rule.next;
+
+  insert("logs", {
+    role: "system",
+    action: "phase_advanced",
+    content: `工作流 #${wf.id} (${wf.template}) 阶段推进: ${phase} → ${rule.next}`,
+  });
+
+  console.log(
+    `   ➡️  工作流 #${wf.id} (${wf.template}) 阶段: ${phase} → ${rule.next}`,
+  );
+
+  // Notify the role responsible for the next phase
+  const phaseNotify: Record<string, { role: string; guidance: string }> = {
+    review: {
+      role: "PM",
+      guidance: "OPS 已提交迭代回顾报告和优化方案，请审核并逐条批准或驳回，然后发消息给 OPS。",
+    },
+    apply: {
+      role: "OPS",
+      guidance: "PM 已完成审核，请执行已批准的优化（更新角色 prompt、知识库、流程模板），完成后发消息给 PM 确认。注意：修改文件前先备份到 .win-agent/backups/。",
+    },
+    done: {
+      role: "PM",
+      guidance: "OPS 已完成优化执行，请归档本轮迭代并通知用户回顾完成。",
+    },
+  };
+
+  const notify = phaseNotify[rule.next];
+  if (notify) {
+    insert("messages", {
+      from_role: "system",
+      to_role: notify.role,
+      type: "system",
+      content: `工作流 #${wf.id} (iteration-review) 进入「${rule.next}」阶段。${notify.guidance}`,
+      status: "unread",
+      related_workflow_id: wf.id,
+    });
+  }
 }
 
 /**
