@@ -4,6 +4,7 @@ import { input, confirm } from "@inquirer/prompts";
 import {
   checkEngineRunning,
   writePidFile,
+  removePidFile,
   loadConfig,
   getDbPath,
 } from "../config/index.js";
@@ -11,6 +12,21 @@ import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
 import { openDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert, rawQuery } from "../db/repository.js";
+import { startOpencodeServer, type OpencodeServerHandle } from "../engine/opencode-server.js";
+import { syncAgents, deployTools } from "../workspace/sync-agents.js";
+import { SessionManager } from "../engine/session-manager.js";
+
+/** Global references for cleanup on stop */
+let serverHandle: OpencodeServerHandle | null = null;
+let sessionManager: SessionManager | null = null;
+
+export function getServerHandle(): OpencodeServerHandle | null {
+  return serverHandle;
+}
+
+export function getSessionManager(): SessionManager | null {
+  return sessionManager;
+}
 
 export async function startCommand() {
   // ── 1️⃣ 冲突检测 ──
@@ -54,6 +70,13 @@ export async function startCommand() {
     openDb(dbPath);
   }
 
+  // Sync agent configs and deploy tools
+  console.log("   → Agent 配置同步...");
+  const synced = syncAgents(workspace);
+  console.log(`   ✓ ${synced.length} 个角色已同步到 .opencode/agents/`);
+  deployTools(workspace);
+  console.log("   ✓ 数据库工具已部署到 .opencode/tools/");
+
   // ── 4️⃣ 首次启动引导 ──
   console.log("\n4️⃣  首次启动引导");
   const projectNameRows = dbSelect("project_config", { key: "projectName" });
@@ -81,17 +104,50 @@ export async function startCommand() {
     console.log("   ⏭  已有项目，跳过");
   }
 
-  // ── 6️⃣ Session 初始化 (stub — 需要 opencode SDK，阶段 3 实现) ──
-  console.log("\n6️⃣  Session 初始化");
+  // ── 6️⃣ opencode Server + Session 初始化 ──
+  console.log("\n6️⃣  opencode Server + Session 初始化");
+
+  console.log("   → 启动 opencode server...");
+  try {
+    serverHandle = await startOpencodeServer(workspace);
+    console.log(`   ✓ opencode server 已启动: ${serverHandle.url}`);
+  } catch (err) {
+    console.log(`   ❌ opencode server 启动失败: ${err}`);
+    removePidFile();
+    process.exit(1);
+  }
+
+  // Create session manager and init persistent sessions
+  console.log("   → 初始化角色 Session...");
+  sessionManager = new SessionManager(serverHandle.client, workspace);
+  try {
+    await sessionManager.initPersistentSessions();
+    console.log("   ✓ PM/SA/OPS Session 已创建");
+  } catch (err) {
+    console.log(`   ❌ Session 初始化失败: ${err}`);
+    serverHandle.close();
+    removePidFile();
+    process.exit(1);
+  }
+
+  // Check for memories and active workflows
   const memoryCount = rawQuery("SELECT COUNT(*) as cnt FROM memory")[0].cnt;
   if (memoryCount > 0) {
-    console.log(`   ⏳ 发现 ${memoryCount} 条记忆（回忆功能将在 opencode 集成后启用）`);
+    console.log(`   ✓ 已回忆 ${memoryCount} 条近期记忆`);
   }
+
   const activeWorkflows = dbSelect("workflow_instances", { status: "active" });
   if (activeWorkflows.length > 0) {
-    console.log(`   △ 发现 ${activeWorkflows.length} 个活跃工作流（恢复功能将在 opencode 集成后启用）`);
+    // Notify PM about recovered workflows
+    dbInsert("messages", {
+      from_role: "system",
+      to_role: "PM",
+      type: "system",
+      content: `引擎已重启恢复，有 ${activeWorkflows.length} 个工作流继续执行。`,
+      status: "unread",
+    });
+    console.log(`   △ 发现 ${activeWorkflows.length} 个活跃工作流，已通知 PM`);
   }
-  console.log("   ⏳ Session 初始化将在 opencode SDK 集成后启用");
 
   // ── 启动完成 ──
   const projectName = dbSelect("project_config", { key: "projectName" })[0]?.value ?? "未命名";
@@ -99,10 +155,24 @@ export async function startCommand() {
   console.log(`   项目: ${projectName}`);
   console.log(`   工作空间: ${workspace}`);
   console.log(`   数据库: .win-agent/win-agent.db`);
+  console.log(`   opencode: ${serverHandle.url}`);
   console.log("   输入 npx win-agent talk 打开与产品经理的对话页面");
 
   // TODO: 阶段 5 — 启动调度器主循环
-  // await startSchedulerLoop(config);
+  // await startSchedulerLoop(config, serverHandle.client, sessionManager);
+
+  // Keep process alive (engine is a long-running process)
+  // The scheduler main loop (Phase 5) will replace this
+  await new Promise<void>((resolve) => {
+    const cleanup = () => {
+      console.log("\n🛑 收到终止信号，正在停止...");
+      serverHandle?.close();
+      removePidFile();
+      resolve();
+    };
+    process.on("SIGTERM", cleanup);
+    process.on("SIGINT", cleanup);
+  });
 }
 
 /**

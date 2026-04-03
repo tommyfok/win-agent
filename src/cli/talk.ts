@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { platform } from "node:os";
 import { checkEngineRunning } from "../config/index.js";
+import { getSessionManager } from "./start.js";
 
 export async function talkCommand() {
   // 1. Check engine is running
@@ -12,10 +13,21 @@ export async function talkCommand() {
   }
 
   // 2. Get PM session ID
-  // TODO: 阶段 3 — 从 SessionManager 获取 PM 的 session ID
-  // For now, use a placeholder
   const port = 4096;
-  const pmSessionId = "pm-session-placeholder";
+  const sm = getSessionManager();
+  let pmSessionId: string;
+  if (sm) {
+    pmSessionId = sm.getPmSessionId();
+  } else {
+    // Fallback: engine is running in a different process,
+    // session manager is not available in this process.
+    // User should open the opencode web UI directly.
+    console.log("⚠️  当前进程无法获取 PM Session ID");
+    console.log("   请直接访问 opencode Web UI:");
+    console.log(`   http://localhost:${port}`);
+    openBrowser(`http://localhost:${port}`);
+    return;
+  }
 
   // 3. Build URL and open browser
   const url = `http://localhost:${port}/session/${pmSessionId}`;

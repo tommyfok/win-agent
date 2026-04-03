@@ -165,36 +165,36 @@ win-agent/
 参考：[implementation.md 进程模型](../win-agent-design/docs/implementation.md#1-进程模型)
 
 #### 3.1 opencode Server 启动
-- [ ] 通过 `@opencode-ai/sdk` 的 `createOpencode()` 启动 server
-- [ ] 传入 provider 配置（从 config 读取）
-- [ ] 健康检查等待 server 就绪
+- [x] 通过 `@opencode-ai/sdk` 的 `createOpencode()` 启动 server
+- [x] 传入 provider 配置（从 config 读取）
+- [x] 健康检查等待 server 就绪
 
 #### 3.2 Agent 配置同步 (`src/workspace/sync-agents.ts`)
-- [ ] 读取 `.win-agent/roles/*.md`（纯 prompt 内容）
-- [ ] 为每个角色加上 opencode frontmatter（tools, permission 配置）
+- [x] 读取 `.win-agent/roles/*.md`（纯 prompt 内容）
+- [x] 为每个角色加上 opencode frontmatter（tools, permission 配置）
   - PM/SA：无文件操作工具，有 database 工具
   - DEV：全部工具，edit/bash allow
   - QA：bash（git diff, npm test），database 工具
   - OPS：read/write 仅限 .win-agent/ 目录，database 工具
-- [ ] 输出到 `.opencode/agents/*.md`
-- [ ] 参考 [implementation.md 工具权限配置](../win-agent-design/docs/implementation.md#工具权限按角色配置)
+- [x] 输出到 `.opencode/agents/*.md`
+- [x] 参考 [implementation.md 工具权限配置](../win-agent-design/docs/implementation.md#工具权限按角色配置)
 
 #### 3.3 自定义工具部署 (`src/tools/database.ts`)
-- [ ] 实现 `database_query`：查询数据库，内部权限校验
-- [ ] 实现 `database_insert`：插入记录，内部权限校验
-- [ ] 实现 `database_update`：更新记录，内部权限校验
-- [ ] 部署到 `.opencode/tools/database.ts`
-- [ ] 权限校验逻辑：查询 role_permissions 表，匹配 role + table + operation + conditions
-- [ ] 参考 [implementation.md 自定义工具](../win-agent-design/docs/implementation.md#6-自定义工具数据库操作)
+- [x] 实现 `database_query`：查询数据库，内部权限校验
+- [x] 实现 `database_insert`：插入记录，内部权限校验
+- [x] 实现 `database_update`：更新记录，内部权限校验
+- [x] 部署到 `.opencode/tools/database.ts`
+- [x] 权限校验逻辑：查询 role_permissions 表，匹配 role + table + operation + conditions
+- [x] 参考 [implementation.md 自定义工具](../win-agent-design/docs/implementation.md#6-自定义工具数据库操作)
 
 #### 3.4 Session 管理器 (`src/engine/session-manager.ts`)
-- [ ] `activeSessions: Map<string, string>`（role → sessionId）
-- [ ] `taskSessions: Map<number, string>`（taskId → sessionId）
-- [ ] `getSession(role)`：获取 PM/SA/OPS 的当前 session
-- [ ] `getTaskSession(taskId, role)`：为 DEV/QA 按需创建任务 session
-- [ ] `rotateSession(role, sessionId, taskId?)`：写记忆 → 新建 session → 回忆
-- [ ] `releaseTaskSession(taskId)`：任务完成后清理
-- [ ] 参考 [implementation.md Session 管理器](../win-agent-design/docs/implementation.md#session-管理器)
+- [x] `activeSessions: Map<string, string>`（role → sessionId）
+- [x] `taskSessions: Map<number, string>`（taskId → sessionId）
+- [x] `getSession(role)`：获取 PM/SA/OPS 的当前 session
+- [x] `getTaskSession(taskId, role)`：为 DEV/QA 按需创建任务 session
+- [x] `rotateSession(role, sessionId, taskId?)`：写记忆 → 新建 session → 回忆
+- [x] `releaseTaskSession(taskId)`：任务完成后清理
+- [x] 参考 [implementation.md Session 管理器](../win-agent-design/docs/implementation.md#session-管理器)
 
 ---
 

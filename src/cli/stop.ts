@@ -5,6 +5,7 @@ import {
   getDbPath,
 } from "../config/index.js";
 import { openDb, getDb, closeDb } from "../db/connection.js";
+import { getServerHandle, getSessionManager } from "./start.js";
 
 export async function stopCommand() {
   const { running, pid } = checkEngineRunning();
@@ -15,9 +16,21 @@ export async function stopCommand() {
 
   console.log(`\n🛑 正在停止 win-agent (PID: ${pid})...`);
 
-  // TODO: 阶段 5 — 触发所有角色写记忆（trigger='engine_stop'）
-  // await triggerMemoryWrite('engine_stop');
-  console.log("   ⏳ 记忆写入将在 opencode SDK 集成后启用");
+  // Trigger memory writes for all roles
+  const sm = getSessionManager();
+  if (sm) {
+    console.log("   → 保存角色记忆...");
+    await sm.writeAllMemories("engine_stop");
+  } else {
+    console.log("   ⏭  非引擎进程，跳过记忆写入");
+  }
+
+  // Close opencode server if in this process
+  const server = getServerHandle();
+  if (server) {
+    server.close();
+    console.log("   ✓ opencode server 已停止");
+  }
 
   // Close DB if open in this process
   const workspace = getWorkspacePath();
