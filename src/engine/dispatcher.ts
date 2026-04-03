@@ -30,6 +30,17 @@ interface WorkflowContext {
   roleGuide: string;
 }
 
+/** Task context injected for DEV/QA roles */
+interface TaskContext {
+  id: number;
+  title: string;
+  description: string | null;
+  acceptanceCriteria: string | null;
+  acceptanceProcess: string | null;
+  status: string;
+  dependencies: Array<{ id: number; title: string; status: string }>;
+}
+
 /**
  * Dispatch a batch of unread messages to a role.
  *
@@ -62,8 +73,13 @@ export async function dispatchToRole(
   // 3. Get workflow context (from first message with workflow_id)
   const workflowContext = getWorkflowContext(messages, workspace);
 
+  // 3b. Get task context for DEV/QA (task details + dependencies)
+  const taskContext = (role === "DEV" || role === "QA")
+    ? getTaskContext(messages)
+    : null;
+
   // 4. Build and send prompt
-  const prompt = buildDispatchPrompt(role, messages, knowledge, workflowContext);
+  const prompt = buildDispatchPrompt(role, messages, knowledge, workflowContext, taskContext);
 
   const result = await client.session.prompt({
     path: { id: sessionId },
@@ -160,6 +176,55 @@ function getWorkflowContext(
 }
 
 /**
+ * Get task context for DEV/QA roles.
+ * Includes task details and dependency status.
+ */
+function getTaskContext(messages: MessageRow[]): TaskContext | null {
+  const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
+  if (!taskId) return null;
+
+  const tasks = select("tasks", { id: taskId }) as Array<{
+    id: number;
+    title: string;
+    description: string | null;
+    acceptance_criteria: string | null;
+    acceptance_process: string | null;
+    status: string;
+  }>;
+  if (tasks.length === 0) return null;
+
+  const task = tasks[0];
+
+  // Get dependency tasks
+  const deps = select("task_dependencies", { task_id: taskId }) as Array<{ depends_on: number }>;
+  const dependencies: TaskContext["dependencies"] = [];
+  for (const dep of deps) {
+    const depTasks = select("tasks", { id: dep.depends_on }) as Array<{
+      id: number;
+      title: string;
+      status: string;
+    }>;
+    if (depTasks.length > 0) {
+      dependencies.push({
+        id: depTasks[0].id,
+        title: depTasks[0].title,
+        status: depTasks[0].status,
+      });
+    }
+  }
+
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    acceptanceCriteria: task.acceptance_criteria,
+    acceptanceProcess: task.acceptance_process,
+    status: task.status,
+    dependencies,
+  };
+}
+
+/**
  * Build the dispatch prompt injected into the role's session.
  *
  * Sections:
@@ -173,6 +238,7 @@ export function buildDispatchPrompt(
   messages: MessageRow[],
   knowledge: KnowledgeEntry[],
   workflowContext: WorkflowContext | null,
+  taskContext?: TaskContext | null,
 ): string {
   const parts: string[] = [];
 
@@ -192,7 +258,25 @@ export function buildDispatchPrompt(
     );
   }
 
-  // 3. Relevant knowledge
+  // 3. Task context (for DEV/QA)
+  if (taskContext) {
+    const depLines = taskContext.dependencies.length > 0
+      ? taskContext.dependencies
+          .map((d) => `  - task#${d.id} ${d.title} [${d.status}]`)
+          .join("\n")
+      : "  无前置依赖";
+    parts.push(
+      `## 当前任务 (task#${taskContext.id})\n` +
+      `- 标题: ${taskContext.title}\n` +
+      `- 状态: ${taskContext.status}\n` +
+      (taskContext.description ? `- 描述: ${taskContext.description}\n` : "") +
+      (taskContext.acceptanceCriteria ? `- 验收标准:\n${taskContext.acceptanceCriteria}\n` : "") +
+      (taskContext.acceptanceProcess ? `- 验收流程:\n${taskContext.acceptanceProcess}\n` : "") +
+      `- 前置依赖:\n${depLines}`,
+    );
+  }
+
+  // 4. Relevant knowledge
   if (knowledge.length > 0) {
     parts.push("## 相关知识库");
     for (const k of knowledge) {
@@ -200,7 +284,7 @@ export function buildDispatchPrompt(
     }
   }
 
-  // 4. Action hints
+  // 5. Action hints
   parts.push(
     "## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。",
   );

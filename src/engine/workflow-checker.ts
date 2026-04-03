@@ -1,14 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { select, update, insert } from "../db/repository.js";
+import type { SessionManager } from "./session-manager.js";
 
 /**
  * Check all active workflow instances for completion conditions.
  * When a workflow's completion condition is met:
  * 1. Update workflow status to 'completed' and phase to 'done'
- * 2. Send a system message to PM to trigger final reporting
+ * 2. Release task sessions for DEV/QA
+ * 3. Send a system message to PM to trigger final reporting
  */
-export function checkWorkflowCompletion(workspace: string): void {
+export function checkWorkflowCompletion(
+  workspace: string,
+  sessionManager?: SessionManager | null,
+): void {
   const activeWorkflows = select("workflow_instances", { status: "active" });
 
   for (const wf of activeWorkflows) {
@@ -20,6 +25,14 @@ export function checkWorkflowCompletion(workspace: string): void {
         { id: wf.id },
         { status: "completed", phase: "done" },
       );
+
+      // Release task sessions for completed tasks
+      if (sessionManager) {
+        const tasks = select("tasks", { workflow_id: wf.id }) as Array<{ id: number }>;
+        for (const task of tasks) {
+          sessionManager.releaseTaskSession(task.id);
+        }
+      }
 
       // Send notification to PM
       insert("messages", {

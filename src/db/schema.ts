@@ -133,6 +133,17 @@ function getVectorTableSQL(): string[] {
   ];
 }
 
+/** Indexes for scheduler polling and common queries */
+const INDEX_STATEMENTS: string[] = [
+  "CREATE INDEX IF NOT EXISTS idx_messages_dispatch ON messages(to_role, status)",
+  "CREATE INDEX IF NOT EXISTS idx_messages_workflow ON messages(related_workflow_id)",
+  "CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id)",
+  "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, assigned_to)",
+  "CREATE INDEX IF NOT EXISTS idx_tasks_iteration ON tasks(iteration)",
+  "CREATE INDEX IF NOT EXISTS idx_memory_role ON memory(role, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)",
+];
+
 // Table creation order matters due to foreign key references
 const CREATE_ORDER = [
   "workflow_instances",
@@ -152,6 +163,9 @@ export function createAllTables(db: Database.Database): void {
     db.exec(TABLE_SCHEMAS[table]);
   }
   for (const stmt of getVectorTableSQL()) {
+    db.exec(stmt);
+  }
+  for (const stmt of INDEX_STATEMENTS) {
     db.exec(stmt);
   }
 }
@@ -192,6 +206,10 @@ export function patchMissingTables(db: Database.Database): string[] {
   }
   if (missing.includes("memory_vec")) {
     db.exec(vecSQL[1]);
+  }
+  // Always ensure indexes exist
+  for (const stmt of INDEX_STATEMENTS) {
+    db.exec(stmt);
   }
   return missing;
 }

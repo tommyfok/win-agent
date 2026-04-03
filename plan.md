@@ -283,24 +283,24 @@ win-agent/
 **目标**：跑通一个完整的 new-feature 工作流。
 
 #### 6.1 启动流程串联
-- [ ] `win-engine start` 完整流程：环境检查 → 初始化 → opencode 启动 → agent 同步 → session 创建 → 主循环启动
-- [ ] `win-engine talk` 打开浏览器 → 用户与 PM 对话
+- [x] `win-engine start` 完整流程：环境检查 → 初始化 → opencode 启动 → agent 同步 → session 创建 → 主循环启动
+- [x] `win-engine talk` 打开浏览器 → 用户与 PM 对话
 
 #### 6.2 new-feature 工作流验证
 按 [README.md 核心工作流程](../win-agent-design/README.md#核心工作流程) 逐步验证：
-- [ ] 用户与 PM 对话描述需求 → PM 写入 knowledge + 发消息给 SA
-- [ ] 调度器检测到 SA 有消息 → 触发 SA session → SA 设计方案 + 拆分任务
-- [ ] SA 发消息给 PM 审核 → PM 审核通过 → PM 发消息给 DEV
-- [ ] DEV 领取任务 → 编码 → 自测 → 发消息给 QA
-- [ ] QA 验收 → 通过/打回 → 消息流转
-- [ ] 所有任务完成 → 引擎检测 → 通知 PM → PM 向用户汇报
+- [x] 用户与 PM 对话描述需求 → PM 写入 knowledge + 发消息给 SA
+- [x] 调度器检测到 SA 有消息 → 触发 SA session → SA 设计方案 + 拆分任务
+- [x] SA 发消息给 PM 审核 → PM 审核通过 → PM 发消息给 DEV
+- [x] DEV 领取任务 → 编码 → 自测 → 发消息给 QA
+- [x] QA 验收 → 通过/打回 → 消息流转
+- [x] 所有任务完成 → 引擎检测 → 通知 PM → PM 向用户汇报
 
 #### 6.3 bug-fix 工作流验证
-- [ ] 用户报告 Bug → PM 确认 → SA 分析 → DEV 修复 → QA 验证 → PM 反馈
+- [x] 用户报告 Bug → PM 确认 → SA 分析 → DEV 修复 → QA 验证 → PM 反馈
 
 #### 6.4 中断恢复验证
-- [ ] `win-engine stop` 后重新 `start`，验证记忆回忆和工作流恢复
-- [ ] 检查 active workflow 被正确恢复
+- [x] `win-engine stop` 后重新 `start`，验证记忆回忆和工作流恢复
+- [x] 检查 active workflow 被正确恢复
 
 ---
 

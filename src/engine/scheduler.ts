@@ -116,5 +116,5 @@ async function schedulerTick(
   // Always check triggers and completion, even if nothing was dispatched
   // (tasks may have been updated by a previous dispatch's tool calls)
   checkAutoTriggers();
-  checkWorkflowCompletion(workspace);
+  checkWorkflowCompletion(workspace, sessionManager);
 }
