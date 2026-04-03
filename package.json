@@ -1,0 +1,33 @@
+{
+  "name": "win-agent",
+  "version": "0.1.0",
+  "description": "Multi-agent workflow engine powered by opencode SDK",
+  "type": "module",
+  "bin": {
+    "win-agent": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.3.2",
+    "better-sqlite3": "^11.8.1",
+    "commander": "^13.1.0",
+    "sqlite-vec": "^0.1.9"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.13.10",
+    "tsup": "^8.4.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

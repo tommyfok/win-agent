@@ -1,0 +1,49 @@
+{
+  "name": "bug-fix",
+  "description": "从 Bug 报告到修复验证的流程",
+  "phases": [
+    {
+      "id": "confirm",
+      "name": "Bug 确认",
+      "description": "PM 与用户确认 Bug 现象、复现步骤和影响范围",
+      "advance_when": "PM 确认是 Bug 并发消息给 SA；或判定非 Bug 直接关闭"
+    },
+    {
+      "id": "analysis",
+      "name": "Bug 分析",
+      "description": "SA 分析根因和影响范围，创建修复任务",
+      "advance_when": "SA 创建修复任务并发消息给 DEV"
+    },
+    {
+      "id": "fix",
+      "name": "修复与验证",
+      "description": "DEV 修复，QA 验证修复效果和回归",
+      "advance_when": "修复任务状态为 done"
+    },
+    {
+      "id": "done",
+      "name": "修复完成",
+      "description": "PM 向用户反馈修复结果"
+    }
+  ],
+  "roles_guide": {
+    "PM": {
+      "confirm": "与用户确认 Bug 详情，整理为结构化 Bug 报告。是 Bug：写入 knowledge，发消息给 SA。非 Bug：向用户解释，关闭 workflow",
+      "fix": "处理 DEV 的阻塞消息，必要时协调 SA 重新分析",
+      "done": "向用户反馈修复结果和验证报告"
+    },
+    "SA": {
+      "analysis": "分析 Bug 根因，给出修复方案，创建修复任务（可直接 pending_dev 跳过审核），发消息给 DEV"
+    },
+    "DEV": {
+      "fix": "按修复方案编码修复，自测后更新为 pending_qa，发消息给 QA"
+    },
+    "QA": {
+      "fix": "验证 Bug 是否修复 + 回归测试。通过：更新为 done，发消息给 PM。不通过：更新为 rejected，发消息给 DEV"
+    }
+  },
+  "completion": {
+    "condition": "修复任务状态为 done，或 PM 判定非 Bug",
+    "action": "引擎更新 workflow 为 completed，发 system 消息给 PM 触发反馈"
+  }
+}

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.tmp/
+.agent-script/
+*.log
+
+# Dev/debug scripts
+loop-run-opencode.js
+feature_list.json
+
+# Runtime data
+.win-agent/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,50 @@
+{
+  "name": "iteration-review",
+  "description": "迭代结束后的回顾和系统优化流程",
+  "trigger": {
+    "conditions": [
+      { "type": "all_tasks_done", "description": "当前迭代的所有任务状态均为 done" },
+      { "type": "manual", "description": "用户通过 PM 主动请求迭代回顾" },
+      { "type": "threshold", "metric": "rejection_rate", "value": 0.3, "description": "任务打回率超过 30% 时自动触发" }
+    ]
+  },
+  "phases": [
+    {
+      "id": "metrics",
+      "name": "指标收集与分析",
+      "description": "OPS 统计运行指标，识别问题并起草优化方案",
+      "advance_when": "OPS 发消息给 PM 提交回顾报告和优化方案"
+    },
+    {
+      "id": "review",
+      "name": "优化方案审核",
+      "description": "PM 审核 OPS 提出的优化方案",
+      "advance_when": "PM 审核完成并发消息给 OPS（批准/驳回）"
+    },
+    {
+      "id": "apply",
+      "name": "执行优化",
+      "description": "OPS 执行已批准的优化（角色 prompt、知识库、流程模板）",
+      "advance_when": "OPS 完成变更并发消息给 PM 确认"
+    },
+    {
+      "id": "done",
+      "name": "迭代归档",
+      "description": "PM 归档本轮迭代，通知用户回顾完成"
+    }
+  ],
+  "roles_guide": {
+    "OPS": {
+      "metrics": "统计本轮打回率、阻塞率、澄清轮数等指标，分析问题根因，起草优化方案，发消息给 PM",
+      "apply": "执行 PM 批准的优化：更新 .win-agent/roles/*.md、维护 knowledge 表、调整 .win-agent/workflows/*.json，发消息给 PM 确认"
+    },
+    "PM": {
+      "review": "审核 OPS 的优化方案，逐条批准或驳回，发消息给 OPS",
+      "done": "将回顾摘要写入 memory 表，更新迭代状态为 reviewed，通知用户"
+    }
+  },
+  "completion": {
+    "condition": "PM 完成迭代归档",
+    "action": "引擎更新 workflow 和 iteration 状态"
+  }
+}

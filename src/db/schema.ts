@@ -1,0 +1,184 @@
+import type Database from "better-sqlite3";
+
+const TABLE_SCHEMAS: Record<string, string> = {
+  messages: `
+    CREATE TABLE IF NOT EXISTS messages (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_role   TEXT NOT NULL,
+      to_role     TEXT NOT NULL,
+      type        TEXT NOT NULL DEFAULT 'directive',
+      content     TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'unread',
+      related_task_id INTEGER REFERENCES tasks(id),
+      related_workflow_id INTEGER REFERENCES workflow_instances(id),
+      attachments  TEXT,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+  tasks: `
+    CREATE TABLE IF NOT EXISTS tasks (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      title           TEXT NOT NULL,
+      description     TEXT,
+      acceptance_criteria TEXT,
+      acceptance_process  TEXT,
+      priority        TEXT NOT NULL DEFAULT 'medium',
+      status          TEXT NOT NULL DEFAULT 'pending_dev',
+      assigned_to     TEXT,
+      implementation_notes TEXT,
+      rejection_reason    TEXT,
+      workflow_id     INTEGER REFERENCES workflow_instances(id),
+      iteration       INTEGER NOT NULL DEFAULT 0,
+      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+  task_dependencies: `
+    CREATE TABLE IF NOT EXISTS task_dependencies (
+      task_id      INTEGER NOT NULL REFERENCES tasks(id),
+      depends_on   INTEGER NOT NULL REFERENCES tasks(id),
+      PRIMARY KEY (task_id, depends_on)
+    )`,
+
+  knowledge: `
+    CREATE TABLE IF NOT EXISTS knowledge (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      title       TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      category    TEXT NOT NULL,
+      tags        TEXT,
+      status      TEXT NOT NULL DEFAULT 'active',
+      created_by  TEXT NOT NULL,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+  logs: `
+    CREATE TABLE IF NOT EXISTS logs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      role            TEXT NOT NULL,
+      action          TEXT NOT NULL,
+      content         TEXT NOT NULL,
+      related_task_id INTEGER REFERENCES tasks(id),
+      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+  memory: `
+    CREATE TABLE IF NOT EXISTS memory (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      role        TEXT NOT NULL,
+      summary     TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      trigger     TEXT NOT NULL DEFAULT 'context_limit',
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+  workflow_instances: `
+    CREATE TABLE IF NOT EXISTS workflow_instances (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      template        TEXT NOT NULL,
+      phase           TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'active',
+      context         TEXT,
+      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+  iterations: `
+    CREATE TABLE IF NOT EXISTS iterations (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      status       TEXT NOT NULL DEFAULT 'active',
+      created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME
+    )`,
+
+  role_permissions: `
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role        TEXT NOT NULL,
+      table_name  TEXT NOT NULL,
+      operation   TEXT NOT NULL,
+      conditions  TEXT,
+      PRIMARY KEY (role, table_name, operation)
+    )`,
+
+  project_config: `
+    CREATE TABLE IF NOT EXISTS project_config (
+      key         TEXT PRIMARY KEY,
+      value       TEXT NOT NULL,
+      updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+};
+
+// Virtual tables for vector search (sqlite-vec)
+const VECTOR_TABLES = [
+  `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vec USING vec0(
+    id INTEGER PRIMARY KEY,
+    embedding float[1536]
+  )`,
+  `CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
+    id INTEGER PRIMARY KEY,
+    embedding float[1536]
+  )`,
+];
+
+// Table creation order matters due to foreign key references
+const CREATE_ORDER = [
+  "workflow_instances",
+  "tasks",
+  "task_dependencies",
+  "messages",
+  "knowledge",
+  "logs",
+  "memory",
+  "iterations",
+  "role_permissions",
+  "project_config",
+];
+
+export function createAllTables(db: Database.Database): void {
+  for (const table of CREATE_ORDER) {
+    db.exec(TABLE_SCHEMAS[table]);
+  }
+  for (const stmt of VECTOR_TABLES) {
+    db.exec(stmt);
+  }
+}
+
+export function getMissingTables(db: Database.Database): string[] {
+  const existing = new Set(
+    db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+      )
+      .all()
+      .map((row: any) => row.name as string)
+  );
+
+  const missing: string[] = [];
+  for (const table of CREATE_ORDER) {
+    if (!existing.has(table)) {
+      missing.push(table);
+    }
+  }
+  // Check virtual tables
+  if (!existing.has("knowledge_vec")) missing.push("knowledge_vec");
+  if (!existing.has("memory_vec")) missing.push("memory_vec");
+  return missing;
+}
+
+export function patchMissingTables(db: Database.Database): string[] {
+  const missing = getMissingTables(db);
+  for (const table of missing) {
+    if (TABLE_SCHEMAS[table]) {
+      db.exec(TABLE_SCHEMAS[table]);
+    }
+  }
+  // Patch virtual tables
+  if (missing.includes("knowledge_vec")) {
+    db.exec(VECTOR_TABLES[0]);
+  }
+  if (missing.includes("memory_vec")) {
+    db.exec(VECTOR_TABLES[1]);
+  }
+  return missing;
+}
