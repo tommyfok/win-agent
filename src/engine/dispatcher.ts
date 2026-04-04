@@ -82,26 +82,6 @@ export async function dispatchToRole(
   // 4. Build and send prompt
   const prompt = buildDispatchPrompt(role, messages, knowledge, workflowContext, taskContext);
 
-  // Debug: raw HTTP call to see actual server response
-  console.log(`   [debug] testing raw HTTP call to opencode...`);
-  try {
-    const serverUrl = (client as any)._client?.getConfig?.()?.baseUrl ?? "";
-    const rawRes = await fetch(`${serverUrl}/session/${sessionId}/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parts: [{ type: "text", text: "回复OK" }] }),
-      signal: AbortSignal.timeout(120_000),
-    });
-    const rawHeaders: Record<string, string> = {};
-    rawRes.headers.forEach((v, k) => { rawHeaders[k] = v; });
-    const rawBody = await rawRes.text();
-    console.log(`   [debug] raw response: status=${rawRes.status}, Content-Length=${rawRes.headers.get("Content-Length")}`);
-    console.log(`   [debug] raw headers: ${JSON.stringify(rawHeaders)}`);
-    console.log(`   [debug] raw body (first 500): ${rawBody.slice(0, 500)}`);
-  } catch (err) {
-    console.log(`   [debug] raw HTTP call failed: ${err}`);
-  }
-
   // session.prompt with retry + timeout (5 min per attempt, 3 attempts)
   const result = await withRetry(
     () =>
@@ -125,18 +105,6 @@ export async function dispatchToRole(
   }
 
   // 6. Extract token usage and LLM output for traceability
-  // Debug: dump full response structure
-  console.log(`   [debug] result keys: ${Object.keys(result)}`);
-  console.log(`   [debug] result.data keys: ${result.data ? Object.keys(result.data) : "null"}`);
-  console.log(`   [debug] result.error: ${JSON.stringify(result.error ?? null)}`);
-  console.log(`   [debug] result.data?.info: ${JSON.stringify(result.data?.info ?? null)}`);
-  console.log(`   [debug] result.data?.parts count: ${result.data?.parts?.length ?? 0}`);
-  if (result.data?.parts?.length) {
-    for (const p of result.data.parts.slice(0, 3)) {
-      console.log(`   [debug] part type=${p.type}, preview=${JSON.stringify(p).slice(0, 200)}`);
-    }
-  }
-
   const inputTokens = result.data?.info?.tokens?.input ?? 0;
   const outputTokens = result.data?.info?.tokens?.output ?? 0;
 

@@ -268,9 +268,29 @@ function parseJsonArg(val: any): any {
   return val;
 }
 
+function ensureObject(val: any, label: string): Record<string, any> {
+  if (Array.isArray(val) || typeof val !== "object" || val === null) {
+    throw new Error(\`\${label} 必须是 JSON 对象（如 {"id":1}），收到: \${JSON.stringify(val)}\`);
+  }
+  return val;
+}
+
+function ensureNonEmpty(obj: Record<string, any>, label: string): void {
+  if (Object.keys(obj).length === 0) {
+    throw new Error(\`\${label} 不能为空对象\`);
+  }
+}
+
+/** Cache PRAGMA results per table to avoid repeated calls within one tool invocation */
+const _colCache = new Map<string, string[]>();
 function getTableColumns(db: InstanceType<typeof Database>, table: string): string[] {
-  const cols = db.prepare(\`PRAGMA table_info(\${table})\`).all() as Array<{ name: string }>;
-  return cols.map((c: any) => c.name);
+  let cached = _colCache.get(table);
+  if (!cached) {
+    const cols = db.prepare(\`PRAGMA table_info(\${table})\`).all() as Array<{ name: string }>;
+    cached = cols.map((c: any) => c.name);
+    _colCache.set(table, cached);
+  }
+  return cached;
 }
 
 function validateColumns(db: InstanceType<typeof Database>, table: string, keys: string[]): void {
@@ -283,6 +303,33 @@ function validateColumns(db: InstanceType<typeof Database>, table: string, keys:
   }
 }
 
+/** Validate order_by to prevent SQL injection. Only allows "col [ASC|DESC][, ...]" */
+function validateOrderBy(db: InstanceType<typeof Database>, table: string, orderBy: string): void {
+  const validCols = getTableColumns(db, table);
+  const parts = orderBy.split(",").map((p: string) => p.trim());
+  for (const part of parts) {
+    const tokens = part.split(/\\s+/);
+    const col = tokens[0];
+    const dir = tokens[1]?.toUpperCase();
+    if (!validCols.includes(col)) {
+      throw new Error(\`order_by 列名错误: \${col} 不存在于 \${table} 表。有效列: \${validCols.join(", ")}\`);
+    }
+    if (dir && dir !== "ASC" && dir !== "DESC") {
+      throw new Error(\`order_by 排序方向错误: \${dir}，只允许 ASC 或 DESC\`);
+    }
+    if (tokens.length > 2) {
+      throw new Error(\`order_by 格式错误: "\${part}"，格式应为 "列名 [ASC|DESC]"\`);
+    }
+  }
+}
+
+/** Serialize a value for SQLite binding. Objects/arrays → JSON string. */
+function toSqlValue(val: any): any {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "object" && !ArrayBuffer.isView(val)) return JSON.stringify(val);
+  return val;
+}
+
 export const query = tool({
   description: "查询数据库表记录",
   args: {
@@ -293,18 +340,20 @@ export const query = tool({
   },
   async execute(args: any, ctx: any) {
     const db = await getDb(ctx.directory);
-    const where = parseJsonArg(args.where);
+    const rawWhere = parseJsonArg(args.where);
 
     const params: any[] = [];
     let sql = \`SELECT * FROM \${args.table}\`;
 
-    if (where && typeof where === "object" && Object.keys(where).length > 0) {
+    const where = rawWhere && typeof rawWhere === "object" && !Array.isArray(rawWhere) ? rawWhere : null;
+    if (where && Object.keys(where).length > 0) {
       validateColumns(db, args.table, Object.keys(where));
       const clauses: string[] = [];
       for (const [key, value] of Object.entries(where)) {
         if (value === null) {
           clauses.push(\`\${key} IS NULL\`);
         } else if (Array.isArray(value)) {
+          if (value.length === 0) { clauses.push("0"); continue; }
           clauses.push(\`\${key} IN (\${value.map(() => "?").join(", ")})\`);
           params.push(...value);
         } else {
@@ -314,7 +363,10 @@ export const query = tool({
       }
       sql += \` WHERE \${clauses.join(" AND ")}\`;
     }
-    if (args.order_by) sql += \` ORDER BY \${args.order_by}\`;
+    if (args.order_by) {
+      validateOrderBy(db, args.table, args.order_by);
+      sql += \` ORDER BY \${args.order_by}\`;
+    }
     if (args.limit != null) { sql += " LIMIT ?"; params.push(args.limit); }
 
     const rows = db.prepare(sql).all(...params);
@@ -331,13 +383,14 @@ export const insert = tool({
   async execute(args: any, ctx: any) {
     const db = await getDb(ctx.directory);
 
-    const data = parseJsonArg(args.data);
+    const data = ensureObject(parseJsonArg(args.data), "data");
+    ensureNonEmpty(data, "data");
 
     const keys = Object.keys(data);
     validateColumns(db, args.table, keys);
     const placeholders = keys.map(() => "?").join(", ");
     const sql = \`INSERT INTO \${args.table} (\${keys.join(", ")}) VALUES (\${placeholders})\`;
-    const values = keys.map((k: string) => data[k]);
+    const values = keys.map((k: string) => toSqlValue(data[k]));
     const result = db.prepare(sql).run(...values);
     return JSON.stringify({ id: Number(result.lastInsertRowid) });
   },
@@ -353,8 +406,10 @@ export const update = tool({
   async execute(args: any, ctx: any) {
     const db = await getDb(ctx.directory);
 
-    const where = parseJsonArg(args.where);
-    const data = parseJsonArg(args.data);
+    const where = ensureObject(parseJsonArg(args.where), "where");
+    const data = ensureObject(parseJsonArg(args.data), "data");
+    ensureNonEmpty(where, "where");
+    ensureNonEmpty(data, "data");
 
     validateColumns(db, args.table, Object.keys(data));
     validateColumns(db, args.table, Object.keys(where));
@@ -365,14 +420,14 @@ export const update = tool({
         if (prev) {
           db.prepare(
             "INSERT INTO task_events (task_id, from_status, to_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)"
-          ).run(where.id, prev.status, data.status, ctx.agent, data.rejection_reason || null);
+          ).run(where.id, prev.status, data.status, ctx.agent || "unknown", data.rejection_reason || null);
         }
       } catch {}
     }
 
     const params: any[] = [];
     const setClauses = Object.keys(data).map((key: string) => {
-      params.push(data[key]);
+      params.push(toSqlValue(data[key]));
       return \`\${key} = ?\`;
     });
     if (!data.updated_at) {
@@ -386,6 +441,10 @@ export const update = tool({
     for (const [key, value] of Object.entries(where)) {
       if (value === null) {
         whereClauses.push(\`\${key} IS NULL\`);
+      } else if (Array.isArray(value)) {
+        if (value.length === 0) { whereClauses.push("0"); continue; }
+        whereClauses.push(\`\${key} IN (\${value.map(() => "?").join(", ")})\`);
+        params.push(...value);
       } else {
         whereClauses.push(\`\${key} = ?\`);
         params.push(value);

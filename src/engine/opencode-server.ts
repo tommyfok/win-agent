@@ -204,9 +204,6 @@ export async function startOpencodeServer(
   // 3. Start a new server (port=0 lets the OS assign a free port)
   const opcodeConfig = buildOpencodeConfig(config.provider);
 
-  // Debug: show what we're sending to opencode
-  console.log(`   [debug] config → opencode: model=${opcodeConfig.model}, provider keys=${Object.keys(opcodeConfig.provider)}`);
-
   // Spawn opencode server manually so we can see its stderr/stdout
   const opcodeConfigWithLog = { ...opcodeConfig, logLevel: "DEBUG" };
   const proc = spawn("opencode", ["serve", `--hostname=127.0.0.1`, `--port=0`, `--log-level=DEBUG`], {
@@ -275,16 +272,6 @@ export async function startOpencodeServer(
       }
     },
   };
-
-  // Debug: check what opencode actually loaded
-  try {
-    const cfgResult = await client.config.get();
-    const loadedModel = cfgResult.data?.model;
-    const loadedProviders = cfgResult.data?.provider ? Object.keys(cfgResult.data.provider) : [];
-    console.log(`   [debug] opencode loaded: model=${loadedModel}, providers=${JSON.stringify(loadedProviders)}`);
-  } catch (err) {
-    console.log(`   [debug] config.get() failed: ${err}`);
-  }
 
   // Health check
   try {
