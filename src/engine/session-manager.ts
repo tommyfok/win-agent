@@ -297,7 +297,8 @@ export class SessionManager {
     );
     const sessionId = sessionResult.data!.id;
 
-    // Inject role identity using agent parameter
+    // Inject role identity: load full role prompt so the agent knows its responsibilities
+    const rolePrompt = loadRolePrompt(this.workspace, role);
     await withRetry(
       () =>
         withTimeout(
@@ -309,7 +310,7 @@ export class SessionManager {
               parts: [
                 {
                   type: "text",
-                  text: `你是 ${role} 角色，已准备就绪。等待引擎调度器为你分配任务。`,
+                  text: `# 你的身份：${role}\n\n请仔细阅读以下角色定义，这是你的工作职责和行为准则：\n\n${rolePrompt}\n\n---\n你已准备就绪。等待引擎调度器为你分配任务。`,
                 },
               ],
             },
