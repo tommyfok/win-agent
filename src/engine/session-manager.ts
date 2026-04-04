@@ -53,8 +53,8 @@ function loadRolePrompt(workspace: string, role: string): string {
 export class SessionManager {
   /** role → sessionId for persistent roles (PM, SA, OPS) */
   private activeSessions: Map<string, string> = new Map();
-  /** taskId → sessionId for task-scoped roles (DEV, QA) */
-  private taskSessions: Map<number, string> = new Map();
+  /** "taskId-role" → sessionId for task-scoped roles (DEV, QA) */
+  private taskSessions: Map<string, string> = new Map();
   /** Unique prefix for this workspace's sessions */
   private sessionPrefix: string;
 
@@ -148,11 +148,12 @@ export class SessionManager {
    * Otherwise create a new session with role identity and memory recall.
    */
   async getTaskSession(taskId: number, role: "DEV" | "QA"): Promise<string> {
-    const existing = this.taskSessions.get(taskId);
+    const key = `${taskId}-${role}`;
+    const existing = this.taskSessions.get(key);
     if (existing) return existing;
 
     const sessionId = await this.createRoleSession(role);
-    this.taskSessions.set(taskId, sessionId);
+    this.taskSessions.set(key, sessionId);
     return sessionId;
   }
 
@@ -160,7 +161,8 @@ export class SessionManager {
    * Release a task session after task completion.
    */
   releaseTaskSession(taskId: number): void {
-    this.taskSessions.delete(taskId);
+    this.taskSessions.delete(`${taskId}-DEV`);
+    this.taskSessions.delete(`${taskId}-QA`);
   }
 
   /**
@@ -224,7 +226,7 @@ export class SessionManager {
 
     // 3. Update mapping
     if (taskId !== undefined) {
-      this.taskSessions.set(taskId, newSessionId);
+      this.taskSessions.set(`${taskId}-${role}`, newSessionId);
     } else {
       this.activeSessions.set(role, newSessionId);
       this.persistSessionIds();

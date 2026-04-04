@@ -447,6 +447,221 @@ PM prompt 中新增 Proposal 处理流程：
 
 ---
 
+### 阶段 9：任务灵活管理增强
+
+**目标**：让系统更接近真实小团队，支持任务的取消、暂停、优先级调整、内容修改、用户实时干预。
+
+#### 背景
+
+真实小团队中，任务调整随时发生：紧急 bug 插队、需求变更导致任务暂停、阻塞等待外部依赖等。当前系统只能整体取消工作流，无法对单个任务做精细操作。
+
+#### 9.1 扩展任务状态
+
+新增 2 个正式状态：`paused`（用户主动暂停）和 `blocked`（依赖阻塞）。
+
+**状态全景：**
+```
+                    paused ←──────┐ (用户主动)
+                      ↓ (resume)  │
+pending_dev → in_dev → pending_qa → in_qa → done
+     ↑          ↑                    ↓
+     │        rejected ←──────── in_qa
+     │
+   blocked → (依赖完成后自动恢复)
+```
+
+**转换规则：**
+| 操作 | 来源状态 | 目标状态 | 触发者 |
+|------|---------|---------|--------|
+| pause | pending_dev, in_dev, pending_qa, in_qa, rejected | paused | user（CLI） |
+| resume | paused | 暂停前状态（从 task_events 恢复） | user（CLI） |
+| block | pending_dev, in_dev | blocked | system（依赖检查）或 DEV |
+| unblock | blocked | 阻塞前状态 | system（依赖满足）|
+
+**Schema**：无需改表结构，status 是 TEXT 类型。需要改动：
+- [ ] `src/engine/scheduler.ts`：调度时跳过 paused/blocked 任务的消息
+- [ ] `src/engine/dispatcher.ts`：dispatch 前检查关联任务状态
+- [ ] `src/cli/status.ts`：展示新状态的中文标签
+- [ ] 角色 prompt：说明 paused/blocked 状态的含义和行为
+
+#### 9.2 CLI 任务管理命令
+
+新增 `win-agent task` 子命令组：
+
+```bash
+win-agent task list                              # 列出活跃任务
+win-agent task show <task_id>                    # 查看任务详情（含事件历史）
+win-agent task pause <task_id>                   # 暂停任务
+win-agent task resume <task_id>                  # 恢复暂停的任务
+win-agent task cancel <task_id>                  # 取消单个任务
+win-agent task reprioritize <task_id> <priority> # 调整优先级 (high/medium/low)
+win-agent task edit <task_id>                    # 交互式修改描述/验收标准
+```
+
+**实现模式**（沿用 cancel.ts 的 CLI→DB 模式）：
+1. 检查引擎运行状态（`checkEngineRunning()`）
+2. 打开数据库连接
+3. 验证任务存在且状态合法
+4. 执行数据库更新
+5. 插入 task_event 记录（changed_by: "user"）
+6. 发送通知消息给相关角色（PM + assigned_to）
+
+**文件变更：**
+- [ ] 新建 `src/cli/task.ts` — 子命令组实现
+- [ ] 修改 `src/index.ts` — 注册 task 子命令
+
+#### 9.3 用户指令优先机制
+
+**问题**：用户通过 `talk` 给 PM 发的消息和角色间消息同等优先级，可能被延迟。
+
+**方案**：scheduler tick 开头优先检测用户消息：
+
+```typescript
+// scheduler.ts tick loop 开头
+const userMessages = select("messages", { from_role: "user", status: "unread" });
+if (userMessages.length > 0) {
+  // 立即调度 PM，跳过 cooldown
+  await dispatchToRole(client, sessionManager, "PM", userMessages, workspace);
+  continue;
+}
+```
+
+CLI task 命令产生的通知也标记为高优先级：
+- `from_role: "user"` → PM 优先处理
+- `type: "notification"` → 角色知晓即可，无需回复
+
+**文件变更：**
+- [ ] 修改 `src/engine/scheduler.ts` — 用户消息优先检测
+
+#### 9.4 调度感知任务状态
+
+scheduler/dispatcher 需要感知 paused/blocked 状态，避免无效调度：
+
+**方案 A：dispatch 前检查（推荐）**
+```typescript
+// dispatcher.ts — dispatchToRole 开头
+// 对 DEV/QA，检查关联任务状态
+for (const msg of messages) {
+  if (msg.related_task_id) {
+    const task = select("tasks", { id: msg.related_task_id })[0];
+    if (task && ["paused", "cancelled", "blocked"].includes(task.status)) {
+      // 标记为 read，跳过
+      update("messages", { id: msg.id }, { status: "read" });
+    }
+  }
+}
+// 过滤掉已标记 read 的消息
+messages = messages.filter(m => m.status === "unread");
+if (messages.length === 0) return;
+```
+
+**方案 B：task 操作时清理未读消息**
+```typescript
+// task.ts — pause/cancel 时
+update("messages",
+  { related_task_id: taskId, status: "unread" },
+  { status: "read" }
+);
+```
+
+两种方案互补使用：B 清理已有消息，A 防止新消息。
+
+**文件变更：**
+- [ ] 修改 `src/engine/dispatcher.ts` — dispatch 前检查任务状态
+- [ ] 修改 `src/cli/task.ts` — 操作后清理未读消息
+
+#### 9.5 依赖自动阻塞与解除
+
+当前 `task_dependencies` 有记录但不强制执行。
+
+**自动阻塞**（dispatch 时检查）：
+```typescript
+// dispatcher.ts — DEV dispatch 前
+const unmetDeps = rawQuery(
+  `SELECT t.id, t.title FROM task_dependencies td
+   JOIN tasks t ON t.id = td.depends_on
+   WHERE td.task_id = ? AND t.status != 'done'`,
+  [taskId]
+);
+if (unmetDeps.length > 0) {
+  update("tasks", { id: taskId }, { status: "blocked" });
+  insert("task_events", {
+    task_id: taskId, from_status: currentStatus, to_status: "blocked",
+    changed_by: "system",
+    reason: `依赖未完成: ${unmetDeps.map(d => `#${d.id}`).join(", ")}`
+  });
+  return; // 不 dispatch
+}
+```
+
+**自动解除**（每 tick 检查）：
+```typescript
+// 新建 dependency-checker.ts
+const blockedTasks = select("tasks", { status: "blocked" });
+for (const task of blockedTasks) {
+  const unmet = rawQuery(
+    `SELECT 1 FROM task_dependencies td
+     JOIN tasks t ON t.id = td.depends_on
+     WHERE td.task_id = ? AND t.status != 'done' LIMIT 1`,
+    [task.id]
+  );
+  if (unmet.length === 0) {
+    // 恢复到阻塞前状态
+    const lastEvent = rawQuery(
+      `SELECT from_status FROM task_events
+       WHERE task_id = ? AND to_status = 'blocked'
+       ORDER BY created_at DESC LIMIT 1`,
+      [task.id]
+    );
+    const restoreStatus = lastEvent[0]?.from_status || "pending_dev";
+    update("tasks", { id: task.id }, { status: restoreStatus });
+    insert("task_events", { ... });
+    insert("messages", {
+      from_role: "system", to_role: "PM", type: "notification",
+      content: `任务 #${task.id} 依赖已满足，已自动解除阻塞`,
+      related_task_id: task.id,
+    });
+  }
+}
+```
+
+**文件变更：**
+- [ ] 新建 `src/engine/dependency-checker.ts`
+- [ ] 修改 `src/engine/scheduler.ts` — 每 tick 调用依赖检查
+- [ ] 修改 `src/engine/dispatcher.ts` — DEV dispatch 前检查依赖
+
+#### 9.6 实现优先级
+
+| Phase | 内容 | 优先级 |
+|-------|------|--------|
+| Phase 1 | 9.1 + 9.2（状态扩展 + CLI 命令） | 最高 |
+| Phase 2 | 9.3 + 9.4（用户优先 + 调度感知） | 高 |
+| Phase 3 | 9.5（依赖自动管理） | 中 |
+| Phase 4 | 9.2 的 `edit` 子命令 | 低 |
+
+#### 文件变更汇总
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `src/cli/task.ts` | 新建 | 任务管理子命令组 |
+| `src/index.ts` | 修改 | 注册 task 子命令 |
+| `src/engine/scheduler.ts` | 修改 | 用户消息优先 + 跳过 paused/blocked + 依赖检查 |
+| `src/engine/dispatcher.ts` | 修改 | dispatch 前检查任务状态和依赖 |
+| `src/engine/dependency-checker.ts` | 新建 | 依赖自动检查与解除 |
+| `src/cli/status.ts` | 修改 | 新增 paused/blocked 状态展示 |
+| `.win-agent/roles/PM.md` | 修改 | 说明新状态和用户指令处理 |
+| `.win-agent/roles/DEV.md` | 修改 | 说明 paused/blocked 行为 |
+| `.win-agent/roles/QA.md` | 修改 | 说明 paused 行为 |
+
+#### 注意事项
+
+1. **向后兼容**：paused/blocked 是新增状态值，不改表结构，不影响已有任务
+2. **CLI-Engine 通信**：沿用 cancel 命令模式，CLI 直接操作 DB + 插入消息通知引擎
+3. **并发安全**：SQLite WAL 模式已启用，CLI 和 Engine 并发写入安全
+4. **审计完整性**：所有状态变更记录 task_events，changed_by 区分 "user"/"system"/"角色名"
+
+---
+
 ### 阶段 9：健壮性 + 边界处理
 
 **目标**：处理各种异常情况，使系统可靠运行。
