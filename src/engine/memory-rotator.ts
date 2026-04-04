@@ -1,5 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
+import { insert } from "../db/repository.js";
 
 /**
  * Default context window size (tokens) for rotation calculation.
@@ -35,6 +36,11 @@ export async function checkAndRotate(
     console.log(
       `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%，执行 session 轮转`,
     );
+    insert("logs", {
+      role: "system",
+      action: "session_rotation",
+      content: `${role} 上下文使用率 ${Math.round(usage * 100)}%，执行 session 轮转`,
+    });
     const newSessionId = await sessionManager.rotateSession(
       role,
       sessionId,

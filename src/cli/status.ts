@@ -1,6 +1,5 @@
 import {
   checkEngineRunning,
-  getWorkspacePath,
   getDbPath,
 } from "../config/index.js";
 import { openDb, getDb } from "../db/connection.js";
@@ -15,11 +14,7 @@ export async function statusCommand() {
     process.exit(1);
   }
 
-  const workspace = getWorkspacePath();
-  if (!workspace) {
-    console.log("⚠️  工作空间未配置");
-    process.exit(1);
-  }
+  const workspace = process.cwd();
 
   // Open DB (the engine process has it open, but status runs as a separate process)
   const dbPath = getDbPath(workspace);

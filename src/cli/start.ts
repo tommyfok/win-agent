@@ -5,14 +5,13 @@ import {
   checkEngineRunning,
   writePidFile,
   removePidFile,
-  loadConfig,
   getDbPath,
 } from "../config/index.js";
 import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
 import { openDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert, rawQuery } from "../db/repository.js";
-import { startOpencodeServer, type OpencodeServerHandle } from "../engine/opencode-server.js";
+import { startOpencodeServer, removeServerInfo, type OpencodeServerHandle } from "../engine/opencode-server.js";
 import { syncAgents, deployTools } from "../workspace/sync-agents.js";
 import { SessionManager } from "../engine/session-manager.js";
 import { insertKnowledge } from "../embedding/knowledge.js";
@@ -33,6 +32,20 @@ export function getSessionManager(): SessionManager | null {
 }
 
 export async function startCommand() {
+  try {
+    await _startCommand();
+  } catch (err: any) {
+    // inquirer throws ExitPromptError on Ctrl+C during prompts
+    if (err?.name === "ExitPromptError" || err?.message?.includes("User force closed")) {
+      console.log("\n👋 已取消");
+      removePidFile();
+      process.exit(0);
+    }
+    throw err;
+  }
+}
+
+async function _startCommand() {
   // ── 1️⃣ 冲突检测 ──
   console.log("\n1️⃣  冲突检测");
   const { running, pid } = checkEngineRunning();
@@ -46,8 +59,7 @@ export async function startCommand() {
 
   // ── 2️⃣ 环境检查 ──
   console.log("\n2️⃣  环境检查");
-  const config = await runEnvCheck();
-  const workspace = config.workspace!;
+  const { workspace } = await runEnvCheck();
 
   // Set embedding dimension before DB init (affects vector table schema)
   setEmbeddingDimension(getEmbeddingDimension());
@@ -184,6 +196,14 @@ export async function startCommand() {
 
   // ── 启动完成 ──
   const projectName = dbSelect("project_config", { key: "projectName" })[0]?.value ?? "未命名";
+
+  // Log engine start
+  dbInsert("logs", {
+    role: "system",
+    action: "engine_start",
+    content: `引擎启动 (PID: ${process.pid})，项目: ${projectName}`,
+  });
+
   console.log(`\n🚀 win-agent 已启动 (PID: ${process.pid})`);
   console.log(`   项目: ${projectName}`);
   console.log(`   工作空间: ${workspace}`);
@@ -192,19 +212,48 @@ export async function startCommand() {
   console.log("   输入 npx win-agent talk 打开与产品经理的对话页面");
 
   // Graceful shutdown on signals
+  let shuttingDown = false;
   const cleanup = async () => {
+    if (shuttingDown) return; // prevent re-entrant cleanup
+    shuttingDown = true;
     console.log("\n🛑 收到终止信号，正在停止...");
     stopSchedulerLoop();
-    if (sessionManager) {
-      console.log("   → 保存角色记忆...");
-      await sessionManager.writeAllMemories("engine_stop");
+    try {
+      if (sessionManager) {
+        console.log("   → 保存角色记忆...");
+        await sessionManager.writeAllMemories("engine_stop");
+      }
+    } catch (err) {
+      console.error(`   ⚠️  记忆保存失败: ${err}`);
     }
-    serverHandle?.close();
+    try {
+      dbInsert("logs", {
+        role: "system",
+        action: "engine_stop",
+        content: `引擎停止 (PID: ${process.pid})`,
+      });
+    } catch {
+      // DB may already be closing
+    }
+    if (serverHandle?.owned) {
+      try { serverHandle.close(); } catch {}
+      removeServerInfo(workspace);
+    }
     removePidFile();
+    console.log("   ✅ 已安全退出");
     process.exit(0);
   };
   process.on("SIGTERM", cleanup);
   process.on("SIGINT", cleanup);
+  // Suppress noisy errors from in-flight promises interrupted by shutdown
+  process.on("uncaughtException", (err) => {
+    if (shuttingDown) return; // swallow errors during shutdown
+    console.error(`   ❌ 未捕获异常: ${err}`);
+  });
+  process.on("unhandledRejection", (err) => {
+    if (shuttingDown) return;
+    console.error(`   ❌ 未处理的 Promise 拒绝: ${err}`);
+  });
 
   // Start the scheduler main loop (blocks until stopSchedulerLoop is called)
   await startSchedulerLoop(serverHandle.client, sessionManager, workspace);

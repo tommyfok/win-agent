@@ -20,8 +20,8 @@ let provider: EmbeddingProvider | null = null;
 /**
  * Get the embedding dimension for the configured provider.
  */
-export function getEmbeddingDimension(): number {
-  const config = loadConfig();
+export function getEmbeddingDimension(workspace?: string): number {
+  const config = loadConfig(workspace);
   const type = config.embedding?.type ?? "local";
   return DIMENSIONS[type] ?? 384;
 }
@@ -29,10 +29,10 @@ export function getEmbeddingDimension(): number {
 /**
  * Get the configured embedding provider (singleton).
  */
-export function getEmbeddingProvider(): EmbeddingProvider {
+export function getEmbeddingProvider(workspace?: string): EmbeddingProvider {
   if (provider) return provider;
 
-  const config = loadConfig();
+  const config = loadConfig(workspace);
   const embeddingConfig = config.embedding;
 
   // Default to local if not configured

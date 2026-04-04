@@ -91,12 +91,12 @@ export async function buildRecallPrompt(
   const placeholders = ids.map(() => "?").join(", ");
   const distMap = new Map(vecResults.map((r) => [r.id, r.distance]));
 
-  // Fetch memories with time window filtering
+  // Fetch memories within 90 days (90+ are cleaned by cleanExpiredMemories)
   const memories = db
     .prepare(
       `SELECT id, summary, created_at FROM memory
        WHERE role = ? AND id IN (${placeholders})
-         AND created_at > datetime('now', '-30 days')
+         AND created_at > datetime('now', '-90 days')
        ORDER BY created_at DESC`
     )
     .all(role, ...ids) as Array<{
@@ -108,13 +108,14 @@ export async function buildRecallPrompt(
   // Apply time-decay filtering
   const now = Date.now();
   const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
   const filtered = memories.filter((m) => {
     const age = now - new Date(m.created_at).getTime();
     const distance = distMap.get(m.id) ?? 1;
 
     // Last 7 days: include all
     if (age <= SEVEN_DAYS) return true;
-    // 7-30 days: only high similarity (low distance)
+    // 7-90 days: only high similarity (low distance)
     return distance < 0.3;
   });
 
@@ -127,16 +128,22 @@ export async function buildRecallPrompt(
 }
 
 /**
- * Clean up expired memories (30+ days old).
+ * Clean up expired memories (90+ days old).
  * Called during iteration review.
+ *
+ * Memory lifecycle:
+ * - 0-7 days: always recalled
+ * - 7-30 days: recalled only if semantically relevant (distance < 0.3)
+ * - 30-90 days: recalled only if highly relevant (distance < 0.3)
+ * - 90+ days: deleted by this function
  */
 export function cleanExpiredMemories(): number {
   const db = getDb();
 
-  // Get IDs of expired memories
+  // Get IDs of expired memories (90+ days)
   const expired = db
     .prepare(
-      "SELECT id FROM memory WHERE created_at < datetime('now', '-30 days')"
+      "SELECT id FROM memory WHERE created_at < datetime('now', '-90 days')"
     )
     .all() as Array<{ id: number }>;
 

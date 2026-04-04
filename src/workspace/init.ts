@@ -14,7 +14,7 @@ function getTemplatesDir(): string {
   // We need to look for them relative to the project root
   const candidates = [
     path.resolve(__dirname, "../templates"),       // dev: src/workspace -> src/templates
-    path.resolve(__dirname, "../../src/templates"), // dist: dist/ -> src/templates
+    path.resolve(__dirname, "../src/templates"),     // dist: dist/ -> src/templates
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;

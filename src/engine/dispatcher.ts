@@ -8,6 +8,7 @@ import {
   type KnowledgeEntry,
 } from "../embedding/knowledge.js";
 import { insert as dbInsert } from "../db/repository.js";
+import { withRetry, withTimeout } from "./retry.js";
 
 /** Message row from the messages table */
 export interface MessageRow {
@@ -81,21 +82,95 @@ export async function dispatchToRole(
   // 4. Build and send prompt
   const prompt = buildDispatchPrompt(role, messages, knowledge, workflowContext, taskContext);
 
-  const result = await client.session.prompt({
-    path: { id: sessionId },
-    body: {
-      agent: role,
-      parts: [{ type: "text", text: prompt }],
-    },
-  });
+  // Debug: raw HTTP call to see actual server response
+  console.log(`   [debug] testing raw HTTP call to opencode...`);
+  try {
+    const serverUrl = (client as any)._client?.getConfig?.()?.baseUrl ?? "";
+    const rawRes = await fetch(`${serverUrl}/session/${sessionId}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text: "回复OK" }] }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const rawHeaders: Record<string, string> = {};
+    rawRes.headers.forEach((v, k) => { rawHeaders[k] = v; });
+    const rawBody = await rawRes.text();
+    console.log(`   [debug] raw response: status=${rawRes.status}, Content-Length=${rawRes.headers.get("Content-Length")}`);
+    console.log(`   [debug] raw headers: ${JSON.stringify(rawHeaders)}`);
+    console.log(`   [debug] raw body (first 500): ${rawBody.slice(0, 500)}`);
+  } catch (err) {
+    console.log(`   [debug] raw HTTP call failed: ${err}`);
+  }
+
+  // session.prompt with retry + timeout (5 min per attempt, 3 attempts)
+  const result = await withRetry(
+    () =>
+      withTimeout(
+        client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            agent: role,
+            parts: [{ type: "text", text: prompt }],
+          },
+        }),
+        5 * 60 * 1000,
+        `${role} session.prompt`,
+      ),
+    { maxAttempts: 3, label: `${role} dispatch` },
+  );
 
   // 5. Mark messages as read
   for (const msg of messages) {
     update("messages", { id: msg.id }, { status: "read" });
   }
 
-  // 6. Extract token usage for rotation check
+  // 6. Extract token usage and LLM output for traceability
+  // Debug: dump full response structure
+  console.log(`   [debug] result keys: ${Object.keys(result)}`);
+  console.log(`   [debug] result.data keys: ${result.data ? Object.keys(result.data) : "null"}`);
+  console.log(`   [debug] result.error: ${JSON.stringify(result.error ?? null)}`);
+  console.log(`   [debug] result.data?.info: ${JSON.stringify(result.data?.info ?? null)}`);
+  console.log(`   [debug] result.data?.parts count: ${result.data?.parts?.length ?? 0}`);
+  if (result.data?.parts?.length) {
+    for (const p of result.data.parts.slice(0, 3)) {
+      console.log(`   [debug] part type=${p.type}, preview=${JSON.stringify(p).slice(0, 200)}`);
+    }
+  }
+
   const inputTokens = result.data?.info?.tokens?.input ?? 0;
+  const outputTokens = result.data?.info?.tokens?.output ?? 0;
+
+  // Extract text parts for logging and persistence
+  const textParts = result.data?.parts?.filter(
+    (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
+  );
+  const outputText = textParts?.map((p) => p.text).join("\n") ?? "";
+
+  // Print LLM response summary to terminal for visibility
+  if (outputText.length > 0) {
+    const preview = outputText.slice(0, 200).replace(/\n/g, " ");
+    console.log(`   💬 ${role} 回复: ${preview}${outputText.length > 200 ? "..." : ""}`);
+  } else {
+    console.log(`   ⚠️  ${role} 无文本回复 (tokens: in=${inputTokens} out=${outputTokens})`);
+  }
+
+  // Persist LLM output to role_outputs for auditability
+  try {
+    if (outputText.length > 0) {
+      dbInsert("role_outputs", {
+        role,
+        session_id: sessionId,
+        input_summary: prompt.slice(0, 500),
+        output_text: outputText,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        related_task_id: messages[0]?.related_task_id ?? null,
+        related_workflow_id: messages[0]?.related_workflow_id ?? null,
+      });
+    }
+  } catch {
+    // Non-fatal — output persistence failure shouldn't block dispatch
+  }
 
   // Log dispatch
   dbInsert("logs", {

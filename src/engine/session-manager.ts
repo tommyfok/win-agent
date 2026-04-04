@@ -5,6 +5,9 @@ import {
   insertMemory,
   buildRecallPrompt as buildVectorRecallPrompt,
 } from "../embedding/memory.js";
+import { withRetry, withTimeout } from "./retry.js";
+import { insert as dbInsert } from "../db/repository.js";
+import { ensureWorkspaceId } from "../config/index.js";
 
 type Role = "PM" | "SA" | "DEV" | "QA" | "OPS";
 const PERSISTENT_ROLES: Role[] = ["PM", "SA", "OPS"];
@@ -52,21 +55,45 @@ export class SessionManager {
   private activeSessions: Map<string, string> = new Map();
   /** taskId → sessionId for task-scoped roles (DEV, QA) */
   private taskSessions: Map<number, string> = new Map();
+  /** Unique prefix for this workspace's sessions */
+  private sessionPrefix: string;
 
   constructor(
     private client: OpencodeClient,
     private workspace: string,
-  ) {}
+  ) {
+    const wsId = ensureWorkspaceId(workspace);
+    this.sessionPrefix = `wa-${wsId}`;
+  }
 
   /**
    * Initialize sessions for persistent roles (PM, SA, OPS).
-   * Creates a session for each, injects role identity via the agent parameter,
-   * and recalls recent memories for existing projects.
+   * Cleans up old win-agent sessions first, then creates fresh ones.
    */
   async initPersistentSessions(): Promise<void> {
+    await this.cleanupOldSessions();
     for (const role of PERSISTENT_ROLES) {
       const sessionId = await this.createRoleSession(role);
       this.activeSessions.set(role, sessionId);
+    }
+  }
+
+  /**
+   * Delete leftover sessions from previous runs of THIS workspace only.
+   */
+  private async cleanupOldSessions(): Promise<void> {
+    try {
+      const listResult = await this.client.session.list();
+      const sessions = (listResult.data ?? []) as Array<{ id: string; title: string }>;
+      for (const s of sessions) {
+        if (s.title?.startsWith(this.sessionPrefix)) {
+          try {
+            await this.client.session.delete({ path: { id: s.id } });
+          } catch { /* ignore */ }
+        }
+      }
+    } catch {
+      // non-fatal
     }
   }
 
@@ -120,31 +147,45 @@ export class SessionManager {
     sessionId: string,
     taskId?: number
   ): Promise<string> {
-    // 1. Ask role to write memory
+    // 1. Ask role to write memory (with timeout, no retry — best effort)
     try {
-      const result = await this.client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
-        },
-      });
+      const result = await withTimeout(
+        this.client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
+          },
+        }),
+        3 * 60 * 1000,
+        `${role} memory write`,
+      );
 
-      // Try to extract memory from the response
+      // Try to extract memory from the response — try JSON block first, then plain text fallback
       const textParts = result.data?.parts?.filter(
         (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
       );
       if (textParts && textParts.length > 0) {
         const text = textParts[0].text || "";
-        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-        if (jsonMatch) {
-          const { summary, content } = JSON.parse(jsonMatch[1]);
+        const parsed = parseMemoryResponse(text);
+        if (parsed) {
           await insertMemory({
             role,
-            summary,
-            content,
+            summary: parsed.summary,
+            content: parsed.content,
             trigger: "context_limit",
           });
         }
+        // Persist memory-write output for traceability
+        try {
+          dbInsert("role_outputs", {
+            role,
+            session_id: sessionId,
+            input_summary: WRITE_MEMORY_PROMPT.slice(0, 500),
+            output_text: text,
+            input_tokens: result.data?.info?.tokens?.input ?? 0,
+            output_tokens: result.data?.info?.tokens?.output ?? 0,
+          });
+        } catch { /* Non-fatal */ }
       }
     } catch {
       // Memory write failed — continue with rotation anyway
@@ -170,27 +211,42 @@ export class SessionManager {
   async writeAllMemories(trigger: string): Promise<void> {
     for (const [role, sessionId] of this.activeSessions) {
       try {
-        const result = await this.client.session.prompt({
-          path: { id: sessionId },
-          body: {
-            parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
-          },
-        });
+        const result = await withTimeout(
+          this.client.session.prompt({
+            path: { id: sessionId },
+            body: {
+              parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
+            },
+          }),
+          3 * 60 * 1000,
+          `${role} memory write`,
+        );
 
         const textParts = result.data?.parts?.filter(
           (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
         );
         if (textParts && textParts.length > 0) {
           const text = textParts[0].text || "";
-          const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-          if (jsonMatch) {
-            const { summary, content } = JSON.parse(jsonMatch[1]);
-            await insertMemory({ role, summary, content, trigger });
+          const parsed = parseMemoryResponse(text);
+          if (parsed) {
+            await insertMemory({ role, summary: parsed.summary, content: parsed.content, trigger });
           }
+          // Persist memory-write output for traceability
+          try {
+            dbInsert("role_outputs", {
+              role,
+              session_id: sessionId,
+              input_summary: WRITE_MEMORY_PROMPT.slice(0, 500),
+              output_text: text,
+              input_tokens: result.data?.info?.tokens?.input ?? 0,
+              output_tokens: result.data?.info?.tokens?.output ?? 0,
+            });
+          } catch { /* Non-fatal */ }
         }
         console.log(`   ✓ ${role} 记忆已保存`);
-      } catch {
-        console.log(`   ⚠️  ${role} 记忆写入失败`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`   ⚠️  ${role} 记忆写入失败: ${msg}`);
       }
     }
   }
@@ -202,27 +258,37 @@ export class SessionManager {
    * Then recalls recent memories.
    */
   private async createRoleSession(role: string): Promise<string> {
-    // Create session
-    const sessionResult = await this.client.session.create({
-      body: { title: `win-agent-${role}` },
-    });
+    // Create session (with retry for transient server issues)
+    const sessionResult = await withRetry(
+      () => this.client.session.create({
+        body: { title: `${this.sessionPrefix}-${role}` },
+      }),
+      { maxAttempts: 3, label: `${role} session.create` },
+    );
     const sessionId = sessionResult.data!.id;
 
     // Inject role identity using agent parameter
-    // The agent's system prompt comes from .opencode/agents/{role}.md
-    await this.client.session.prompt({
-      path: { id: sessionId },
-      body: {
-        agent: role,
-        noReply: true,
-        parts: [
-          {
-            type: "text",
-            text: `你是 ${role} 角色，已准备就绪。等待引擎调度器为你分配任务。`,
-          },
-        ],
-      },
-    });
+    await withRetry(
+      () =>
+        withTimeout(
+          this.client.session.prompt({
+            path: { id: sessionId },
+            body: {
+              agent: role,
+              noReply: true,
+              parts: [
+                {
+                  type: "text",
+                  text: `你是 ${role} 角色，已准备就绪。等待引擎调度器为你分配任务。`,
+                },
+              ],
+            },
+          }),
+          2 * 60 * 1000,
+          `${role} identity inject`,
+        ),
+      { maxAttempts: 2, label: `${role} identity inject` },
+    );
 
     // Recall recent memories (last 7 days)
     await this.recallMemories(sessionId, role);
@@ -265,4 +331,44 @@ export class SessionManager {
       ...this.taskSessions.values(),
     ];
   }
+}
+
+/**
+ * Parse LLM memory response with fallback.
+ * Tries JSON code block first, then raw JSON, then plain text fallback.
+ */
+function parseMemoryResponse(
+  text: string,
+): { summary: string; content: string } | null {
+  // Try ```json block
+  const jsonBlockMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+  if (jsonBlockMatch) {
+    try {
+      const { summary, content } = JSON.parse(jsonBlockMatch[1]);
+      if (summary && content) return { summary, content };
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Try raw JSON (LLM may omit code fences)
+  const jsonMatch = text.match(/\{[\s\S]*"summary"[\s\S]*"content"[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const { summary, content } = JSON.parse(jsonMatch[0]);
+      if (summary && content) return { summary, content };
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Plain text fallback: use first line as summary, rest as content
+  const trimmed = text.trim();
+  if (trimmed.length > 0) {
+    const lines = trimmed.split("\n");
+    const summary = lines[0].slice(0, 200);
+    return { summary, content: trimmed };
+  }
+
+  return null;
 }

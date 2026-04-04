@@ -25,7 +25,7 @@
 
 | 指标 | 说明 | 优化方向 |
 |------|------|---------|
-| 任务打回率 | QA验收不通过的比例 | 反映任务描述/验收标准的清晰度，或程序员角色 prompt 的质量 |
+| 任务打回率 | QA验收不通过的比例（可查 `task_events` 表获取精确打回次数） | 反映任务描述/验收标准的清晰度，或程序员角色 prompt 的质量 |
 | 需求澄清轮数 | 产品经理与用户/架构师的平均沟通轮数 | 过多说明角色理解力不足，过少可能遗漏细节 |
 | 任务阻塞率 | 因描述不清等原因被标记阻塞的任务比例 | 反映架构师任务拆分的质量 |
 | 流程异常次数 | 流程卡住或需人工干预的次数 | 反映流程模板的健壮性 |
@@ -60,7 +60,7 @@ database_insert({ table: "messages", data: {
 
 1. **查询迭代信息**：从 system 消息中获取迭代 ID 和工作流 ID
 2. **统计关键指标**：
-   - 打回率：`database_query({ table: "tasks", where: { iteration: <ID> } })` → 统计 status 为 rejected 的比例
+   - 打回率：`database_query({ table: "task_events", where: { to_status: "rejected" } })` → 按 task_id 统计精确打回次数（比 tasks.status 更准确，因为 tasks 表只保留最终态）
    - 阻塞率：统计 status 为 blocked 的比例
    - 澄清轮数：`database_query({ table: "messages", where: { type: "feedback" } })` → 统计 PM↔SA 之间的消息往返
    - 流程异常：`database_query({ table: "logs", where: { action: "auto_trigger" } })` → 统计异常触发次数

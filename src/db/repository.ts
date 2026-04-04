@@ -73,9 +73,12 @@ export function update(
     return `${key} = ?`;
   });
 
-  // Auto-update updated_at if the table has it
+  // Auto-update updated_at if the table has the column
   if (!data.updated_at) {
-    setClauses.push("updated_at = CURRENT_TIMESTAMP");
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (cols.some((c) => c.name === "updated_at")) {
+      setClauses.push("updated_at = CURRENT_TIMESTAMP");
+    }
   }
 
   const whereClauses: string[] = [];

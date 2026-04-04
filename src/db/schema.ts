@@ -122,6 +122,31 @@ const TABLE_SCHEMAS: Record<string, string> = {
       value       TEXT NOT NULL,
       updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+
+  role_outputs: `
+    CREATE TABLE IF NOT EXISTS role_outputs (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      role                TEXT NOT NULL,
+      session_id          TEXT NOT NULL,
+      input_summary       TEXT NOT NULL,
+      output_text         TEXT NOT NULL,
+      input_tokens        INTEGER DEFAULT 0,
+      output_tokens       INTEGER DEFAULT 0,
+      related_task_id     INTEGER REFERENCES tasks(id),
+      related_workflow_id INTEGER REFERENCES workflow_instances(id),
+      created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+  task_events: `
+    CREATE TABLE IF NOT EXISTS task_events (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id     INTEGER NOT NULL REFERENCES tasks(id),
+      from_status TEXT,
+      to_status   TEXT NOT NULL,
+      changed_by  TEXT NOT NULL,
+      reason      TEXT,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
 };
 
 /** Default embedding dimension (512 for local bge-small-zh-v1.5, 1536 for OpenAI) */
@@ -158,6 +183,8 @@ const INDEX_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS idx_memory_role ON memory(role, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, submitted_by)",
+  "CREATE INDEX IF NOT EXISTS idx_role_outputs_role ON role_outputs(role, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)",
 ];
 
 // Table creation order matters due to foreign key references
@@ -173,6 +200,8 @@ const CREATE_ORDER = [
   "proposals",
   "role_permissions",
   "project_config",
+  "role_outputs",
+  "task_events",
 ];
 
 export function createAllTables(db: Database.Database): void {

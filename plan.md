@@ -452,24 +452,111 @@ PM prompt 中新增 Proposal 处理流程：
 **目标**：处理各种异常情况，使系统可靠运行。
 
 #### 9.1 错误处理
-- [ ] opencode server 连接失败重试
-- [ ] session.prompt() 超时处理
-- [ ] LLM 返回格式不符合预期的兜底
-- [ ] SQLite 并发写入保护（WAL 模式）
+- [x] opencode server 连接失败重试
+- [x] session.prompt() 超时处理
+- [x] LLM 返回格式不符合预期的兜底
+- [x] SQLite 并发写入保护（WAL 模式）
 
 #### 9.2 PM 双通道冲突处理
-- [ ] 用户对话期间 PM busy → 角色消息排队
-- [ ] PM 空闲后优先处理用户消息，再处理角色消息
-- [ ] 参考 [architecture.md PM session 冲突处理](../win-agent-design/docs/architecture.md#2-调度器scheduler)
+- [x] 用户对话期间 PM busy → 角色消息排队
+- [x] PM 空闲后优先处理用户消息，再处理角色消息
+- [x] 参考 [architecture.md PM session 冲突处理](../win-agent-design/docs/architecture.md#2-调度器scheduler)
 
 #### 9.3 记忆过期清理
-- [ ] 迭代回顾时清理 > 30 天的记忆
-- [ ] 7-30 天记忆仅高相似度召回
+- [x] 迭代回顾时清理 > 90 天的记忆
+- [x] 30~90 天记忆仅高相似度召回
 
 #### 9.4 日志记录
-- [ ] 所有角色操作写入 logs 表
-- [ ] 引擎关键事件日志（调度、触发、轮转、错误）
-- [ ] 终端输出格式化日志
+- [x] 所有角色操作写入 logs 表
+- [x] 引擎关键事件日志（调度、触发、轮转、错误）
+- [x] 终端输出格式化日志
+
+---
+
+### 阶段 10：数据可追溯性
+
+**目标**：补全开发过程中的关键数据缺口，使角色决策可审计、任务历史可回溯。
+
+#### 10.1 LLM 输出持久化 (`role_outputs` 表)
+
+**问题**：`dispatchToRole()` 拿到 LLM 响应后只取了 token 数，角色的推理过程和完整输出没有存储。LLM 的动作（创建任务、发消息）已分散记录在 tasks/messages 表，但决策过程和推理上下文丢失。session 轮转后不可恢复。
+
+**方案**：新建 `role_outputs` 表，在 dispatcher 和 session-manager 中自动记录。
+
+```sql
+CREATE TABLE IF NOT EXISTS role_outputs (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  role                TEXT NOT NULL,
+  session_id          TEXT NOT NULL,
+  input_summary       TEXT NOT NULL,       -- 注入 prompt 的摘要（前 500 字）
+  output_text         TEXT NOT NULL,       -- LLM 完整文本输出
+  input_tokens        INTEGER DEFAULT 0,
+  output_tokens       INTEGER DEFAULT 0,
+  related_task_id     INTEGER REFERENCES tasks(id),
+  related_workflow_id INTEGER REFERENCES workflow_instances(id),
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+**写入点**：
+- `dispatcher.ts`：`dispatchToRole()` 在收到 LLM 响应后写入
+- `session-manager.ts`：`rotateSession()` 和 `writeAllMemories()` 中的记忆写入环节写入
+
+**清理策略**：90 天后清理（与 messages 对齐），在 `cleanExpiredMemories()` 旁增加 `cleanExpiredOutputs()`
+
+**权限**：所有角色 select，system 写入（引擎自动记录，角色无需感知）
+
+实现清单：
+- [x] `schema.ts`：新增 `role_outputs` 表 + 索引 `idx_role_outputs_role ON role_outputs(role, created_at)`
+- [x] `dispatcher.ts`：`dispatchToRole()` 返回前提取 LLM 文本输出并写入 `role_outputs`
+- [x] `session-manager.ts`：`rotateSession()` 和 `writeAllMemories()` 中写入记忆写入环节的输出
+- [x] `permissions.ts`：所有角色对 `role_outputs` 表的 `select` 权限
+- [x] `workflow-checker.ts`：迭代回顾完成时调用 `cleanExpiredOutputs()` 清理 90 天前记录
+- [x] `sync-agents.ts`：database tool 的 TABLES 常量加入 `role_outputs`
+
+#### 10.2 任务状态变更历史 (`task_events` 表)
+
+**问题**：tasks 表只存最终态。任务被打回 2 次再通过，`rejection_reason` 被覆盖，只留最后一次。OPS 统计打回率时无法区分"当前被打回"和"曾经被打回过"。
+
+**方案**：新建 `task_events` 事件表，由 database tool 的 update 函数自动拦截 tasks 表的 status 变更并记录。对角色 prompt 零侵入。
+
+```sql
+CREATE TABLE IF NOT EXISTS task_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     INTEGER NOT NULL REFERENCES tasks(id),
+  from_status TEXT,              -- 旧状态（首次创建时为 NULL）
+  to_status   TEXT NOT NULL,     -- 新状态
+  changed_by  TEXT NOT NULL,     -- 触发变更的角色名
+  reason      TEXT,              -- 变更原因（打回理由、阻塞原因等）
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+**写入机制**：
+- 修改 `sync-agents.ts` 中 database tool 模板的 `update` 函数
+- 当 `table === 'tasks'` 且 `data` 中包含 `status` 字段时：
+  1. 查询任务当前状态 `SELECT status FROM tasks WHERE id = ?`
+  2. 写入 `task_events`：`{ task_id, from_status: 旧状态, to_status: 新状态, changed_by: ctx.agent, reason: data.rejection_reason || null }`
+- 角色正常调用 `database_update({ table: "tasks", ... })` 即可，无需额外操作
+
+**清理策略**：跟随所属 task 生命周期，不主动清理（事件量小，每个任务平均 3-5 条）
+
+**权限**：所有角色 select（OPS 统计分析用），insert 由 database tool 内部自动写入（不需要角色显式权限）
+
+**OPS 指标查询示例**：
+```sql
+-- 累计打回次数（比当前的 tasks.status='rejected' 计数更准确）
+SELECT COUNT(*) FROM task_events WHERE to_status = 'rejected' AND task_id IN (SELECT id FROM tasks WHERE iteration = ?)
+-- 单个任务的完整生命周期
+SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at
+```
+
+实现清单：
+- [x] `schema.ts`：新增 `task_events` 表 + 索引 `idx_task_events_task ON task_events(task_id, created_at)`
+- [x] `sync-agents.ts`：database tool 的 `update` 函数增加 tasks status 变更拦截逻辑
+- [x] `sync-agents.ts`：database tool 的 TABLES 常量加入 `task_events`
+- [x] `permissions.ts`：所有角色对 `task_events` 表的 `select` 权限
+- [x] `templates/roles/OPS.md`：在关注指标部分提示 OPS 可查询 `task_events` 获取更精确的打回统计
 
 ---
 
@@ -493,6 +580,8 @@ PM prompt 中新增 Proposal 处理流程：
 阶段 8  ━━━━━━━━━━━━━━━━━━━━━━  迭代回顾 + OPS 优化
     ↓
 阶段 9  ━━━━━━━━━━━━━━━━━━━━━━  健壮性 + 边界处理
+    ↓
+阶段 10 ━━━━━━━━━━━━━━━━━━━━━━  数据可追溯性
 ```
 
 ---

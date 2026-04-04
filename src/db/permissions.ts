@@ -34,6 +34,8 @@ const DEFAULT_PERMISSIONS: PermissionRow[] = [
   { role: "PM", table_name: "project_config", operation: "select", conditions: null },
   { role: "PM", table_name: "project_config", operation: "insert", conditions: null },
   { role: "PM", table_name: "project_config", operation: "update", conditions: null },
+  { role: "PM", table_name: "role_outputs", operation: "select", conditions: null },
+  { role: "PM", table_name: "task_events", operation: "select", conditions: null },
 
   // SA permissions
   { role: "SA", table_name: "messages", operation: "select", conditions: null },
@@ -55,6 +57,8 @@ const DEFAULT_PERMISSIONS: PermissionRow[] = [
   { role: "SA", table_name: "workflow_instances", operation: "update", conditions: null },
   { role: "SA", table_name: "proposals", operation: "select", conditions: null },
   { role: "SA", table_name: "proposals", operation: "insert", conditions: null },
+  { role: "SA", table_name: "role_outputs", operation: "select", conditions: null },
+  { role: "SA", table_name: "task_events", operation: "select", conditions: null },
 
   // DEV permissions
   { role: "DEV", table_name: "messages", operation: "select", conditions: null },
@@ -69,6 +73,8 @@ const DEFAULT_PERMISSIONS: PermissionRow[] = [
   { role: "DEV", table_name: "memory", operation: "insert", conditions: JSON.stringify({ role: "DEV" }) },
   { role: "DEV", table_name: "proposals", operation: "select", conditions: null },
   { role: "DEV", table_name: "proposals", operation: "insert", conditions: null },
+  { role: "DEV", table_name: "role_outputs", operation: "select", conditions: null },
+  { role: "DEV", table_name: "task_events", operation: "select", conditions: null },
 
   // QA permissions
   { role: "QA", table_name: "messages", operation: "select", conditions: null },
@@ -82,6 +88,8 @@ const DEFAULT_PERMISSIONS: PermissionRow[] = [
   { role: "QA", table_name: "memory", operation: "insert", conditions: JSON.stringify({ role: "QA" }) },
   { role: "QA", table_name: "proposals", operation: "select", conditions: null },
   { role: "QA", table_name: "proposals", operation: "insert", conditions: null },
+  { role: "QA", table_name: "role_outputs", operation: "select", conditions: null },
+  { role: "QA", table_name: "task_events", operation: "select", conditions: null },
 
   // OPS permissions
   { role: "OPS", table_name: "messages", operation: "select", conditions: null },
@@ -102,6 +110,8 @@ const DEFAULT_PERMISSIONS: PermissionRow[] = [
   { role: "OPS", table_name: "proposals", operation: "select", conditions: null },
   { role: "OPS", table_name: "proposals", operation: "insert", conditions: null },
   { role: "OPS", table_name: "project_config", operation: "select", conditions: null },
+  { role: "OPS", table_name: "role_outputs", operation: "select", conditions: null },
+  { role: "OPS", table_name: "task_events", operation: "select", conditions: null },
 ];
 
 export function seedPermissions(db: Database.Database): void {

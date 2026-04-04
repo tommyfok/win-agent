@@ -1,72 +1,135 @@
-import { loadConfig, saveConfig, type WinEngineConfig } from "../config/index.js";
+import { loadConfig, saveConfig, type WinAgentConfig } from "../config/index.js";
 import { input, select } from "@inquirer/prompts";
 
-/**
- * Validate config completeness without interactive prompts.
- * Returns list of missing items. Empty list means all good.
- */
-export function validateConfig(config: WinEngineConfig): string[] {
-  const missing: string[] = [];
-  if (!config.workspace) missing.push("workspace");
-  if (!config.provider?.type || !config.provider?.apiKey || !config.provider?.model) {
-    missing.push("provider");
-  }
-  if (!config.embedding?.type) {
-    missing.push("embedding");
-  }
-  // OpenAI embedding needs apiKey; local does not
-  if (config.embedding?.type === "openai" && !config.embedding?.apiKey) {
-    missing.push("embedding");
-  }
-  return missing;
+interface ModelInfo {
+  id: string;
+  reasoning: boolean;
 }
 
 /**
- * Run interactive environment check. Prompts for missing config items.
- * Returns the validated config.
+ * Fetch model list from an OpenAI-compatible /models endpoint.
  */
-export async function runEnvCheck(): Promise<WinEngineConfig> {
-  console.log("\n🔍 环境检查中...\n");
+async function fetchModelsOpenAI(baseUrl: string, apiKey: string): Promise<string[]> {
+  try {
+    const url = baseUrl.replace(/\/+$/, "") + "/models";
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const body = await res.json() as { data?: Array<{ id: string }> };
+    return (body.data ?? []).map((m) => m.id).sort();
+  } catch {
+    return [];
+  }
+}
 
-  let config = loadConfig();
+/**
+ * Detect if a model supports reasoning by making a quick test call.
+ * Checks if the response contains `reasoning_content` in the message.
+ */
+async function detectReasoningOpenAI(baseUrl: string, apiKey: string, model: string): Promise<boolean> {
+  const url = baseUrl.replace(/\/+$/, "") + "/chat/completions";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "say OK" }],
+      max_tokens: 100,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) return false;
+  const body = await res.json() as {
+    choices?: Array<{ message?: { reasoning_content?: string } }>;
+  };
+  return body.choices?.[0]?.message?.reasoning_content !== undefined;
+}
+
+
+/**
+ * Run interactive environment check. Prompts for missing config items.
+ * Config is stored in <cwd>/.win-agent/config.json.
+ * Returns the validated config and workspace path.
+ */
+export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace: string }> {
+  const workspace = process.cwd();
+  console.log("\n🔍 环境检查中...\n");
+  console.log(`工作空间: ${workspace}`);
+
+  let config = loadConfig(workspace);
   let changed = false;
 
-  // 1. Workspace
-  console.log("1. 工作空间配置");
-  if (config.workspace) {
-    console.log(`   ✓ 已配置 → ${config.workspace}`);
-  } else {
-    const workspace = await input({
-      message: "请输入工作空间路径（项目代码所在目录）",
-    });
-    config.workspace = workspace;
-    changed = true;
-  }
-
-  // 2. Provider/Model
-  console.log("\n2. OpenCode Provider/Model 配置");
+  // 1. Provider/Model
+  console.log("\n1. LLM Provider 配置");
   if (config.provider?.type && config.provider?.apiKey && config.provider?.model) {
-    console.log(`   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}`);
+    console.log(`   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? " (推理模型)" : ""}`);
   } else {
     const type = await select({
       message: "请选择 LLM Provider",
       choices: [
         { value: "anthropic", name: "Anthropic" },
         { value: "openai", name: "OpenAI" },
-        { value: "custom", name: "自定义" },
+        { value: "custom-openai", name: "自定义（OpenAI 兼容接口）" },
+        { value: "custom-anthropic", name: "自定义（Anthropic 兼容接口）" },
       ],
     });
+    const isCustom = type === "custom-openai" || type === "custom-anthropic";
+    let baseUrl: string | undefined;
+    if (isCustom) {
+      baseUrl = await input({ message: "请输入 API Base URL（如 https://api.example.com/v1）" });
+    }
     const apiKey = await input({ message: "请输入 API Key" });
-    const model = await input({
-      message: "请输入模型名称",
-      default: type === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o",
-    });
-    config.provider = { type, apiKey, model };
+
+    // Try to fetch model list for custom providers
+    let model: string;
+    let reasoning = false;
+
+    if (type === "custom-openai" && baseUrl) {
+      console.log("   → 获取可用模型列表...");
+      const models = await fetchModelsOpenAI(baseUrl, apiKey);
+
+      if (models.length > 0) {
+        model = await select({
+          message: "请选择模型",
+          choices: models.map((m) => ({ value: m, name: m })),
+        });
+      } else {
+        console.log("   ⚠️  无法获取模型列表，请手动输入");
+        model = await input({ message: "请输入模型名称" });
+      }
+
+      // Auto-detect reasoning
+      console.log("   → 检测模型类型...");
+      reasoning = await detectReasoningOpenAI(baseUrl, apiKey, model);
+    } else if (type === "custom-anthropic") {
+      model = await input({ message: "请输入模型名称" });
+      if (reasoning) {
+        console.log(`   ✓ 检测到推理模型 (reasoning)`);
+      } else {
+        console.log(`   ✓ 普通模型`);
+      }
+    } else {
+      model = await input({
+        message: "请输入模型名称",
+        default: type === "anthropic" ? "claude-sonnet-4-20250514" : type === "openai" ? "gpt-4o" : undefined,
+      });
+    }
+
+    config.provider = {
+      type, apiKey, model,
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(reasoning ? { reasoning } : {}),
+    };
     changed = true;
   }
 
-  // 3. Embedding
-  console.log("\n3. Embedding 模型配置");
+  // 2. Embedding
+  console.log("\n2. Embedding 模型配置");
   if (config.embedding?.type) {
     console.log(`   ✓ 已配置 → ${config.embedding.type} / ${config.embedding.model || "default"}`);
   } else {
@@ -103,17 +166,24 @@ export async function runEnvCheck(): Promise<WinEngineConfig> {
   }
 
   if (changed) {
-    saveConfig(config);
+    saveConfig(config, workspace);
   }
 
   console.log("\n✅ 环境检查通过");
-  console.log(`   工作空间: ${config.workspace}`);
-  console.log(`   Provider: ${config.provider?.type} / ${config.provider?.model}`);
+  console.log(`   Provider: ${config.provider?.type} / ${config.provider?.model}${config.provider?.reasoning ? " (推理模型)" : ""}`);
   console.log(`   Embedding: ${config.embedding?.type} / ${config.embedding?.model}`);
 
-  return config;
+  return { config, workspace };
 }
 
 export async function checkCommand() {
-  await runEnvCheck();
+  try {
+    await runEnvCheck();
+  } catch (err: any) {
+    if (err?.name === "ExitPromptError" || err?.message?.includes("User force closed")) {
+      console.log("\n👋 已取消");
+      process.exit(0);
+    }
+    throw err;
+  }
 }

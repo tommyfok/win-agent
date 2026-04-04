@@ -14,6 +14,7 @@ export function openDb(dbPath: string): Database.Database {
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000"); // Wait up to 5s on SQLITE_BUSY
   sqliteVec.load(db);
   return db;
 }

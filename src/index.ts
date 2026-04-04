@@ -5,6 +5,7 @@ import { talkCommand } from "./cli/talk.js";
 import { statusCommand } from "./cli/status.js";
 import { cancelCommand } from "./cli/cancel.js";
 import { stopCommand } from "./cli/stop.js";
+import { cleanCommand } from "./cli/clean.js";
 
 const program = new Command();
 
@@ -38,5 +39,10 @@ program
   .command("stop")
   .description("Stop the engine")
   .action(stopCommand);
+
+program
+  .command("clean")
+  .description("Clean .win-agent and .opencode from current directory")
+  .action(cleanCommand);
 
 program.parse();

@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { select, update, insert, rawQuery } from "../db/repository.js";
 import type { SessionManager } from "./session-manager.js";
+import { cleanExpiredMemories } from "../embedding/memory.js";
+import { cleanExpiredOutputs } from "./output-cleaner.js";
 
 /**
  * Check all active workflow instances for completion conditions.
@@ -49,6 +51,28 @@ export function checkWorkflowCompletion(
 
       // Send reflection trigger to all participating roles
       sendReflectionTriggers(wf);
+
+      // Clean up expired memories and outputs on iteration-review completion
+      if (wf.template === "iteration-review") {
+        const cleaned = cleanExpiredMemories();
+        if (cleaned > 0) {
+          insert("logs", {
+            role: "system",
+            action: "memory_cleanup",
+            content: `已清理 ${cleaned} 条过期记忆（90+ 天）`,
+          });
+          console.log(`   🧹 已清理 ${cleaned} 条过期记忆`);
+        }
+        const cleanedOutputs = cleanExpiredOutputs();
+        if (cleanedOutputs > 0) {
+          insert("logs", {
+            role: "system",
+            action: "output_cleanup",
+            content: `已清理 ${cleanedOutputs} 条过期角色输出（90+ 天）`,
+          });
+          console.log(`   🧹 已清理 ${cleanedOutputs} 条过期角色输出`);
+        }
+      }
 
       insert("logs", {
         role: "system",

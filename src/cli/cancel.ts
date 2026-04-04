@@ -1,7 +1,6 @@
 import { confirm } from "@inquirer/prompts";
 import {
   checkEngineRunning,
-  getWorkspacePath,
   getDbPath,
 } from "../config/index.js";
 import { openDb, getDb } from "../db/connection.js";
@@ -21,11 +20,7 @@ export async function cancelCommand(workflowId: string) {
     process.exit(1);
   }
 
-  const workspace = getWorkspacePath();
-  if (!workspace) {
-    console.log("⚠️  工作空间未配置");
-    process.exit(1);
-  }
+  const workspace = process.cwd();
 
   // Open DB
   const dbPath = getDbPath(workspace);

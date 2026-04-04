@@ -1,8 +1,6 @@
 import {
   checkEngineRunning,
   removePidFile,
-  getWorkspacePath,
-  getDbPath,
 } from "../config/index.js";
 import { openDb, getDb, closeDb } from "../db/connection.js";
 import { getServerHandle, getSessionManager } from "./start.js";
@@ -33,16 +31,12 @@ export async function stopCommand() {
   }
 
   // Close DB if open in this process
-  const workspace = getWorkspacePath();
-  if (workspace) {
-    const dbPath = getDbPath(workspace);
-    try {
-      getDb();
-      closeDb();
-      console.log("   ✓ 数据库连接已关闭");
-    } catch {
-      // DB not open in this process, that's fine
-    }
+  try {
+    getDb();
+    closeDb();
+    console.log("   ✓ 数据库连接已关闭");
+  } catch {
+    // DB not open in this process, that's fine
   }
 
   // If the running PID is a different process, send SIGTERM

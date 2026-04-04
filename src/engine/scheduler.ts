@@ -5,7 +5,7 @@ import { dispatchToRole, type MessageRow } from "./dispatcher.js";
 import { checkAndRotate } from "./memory-rotator.js";
 import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
-import { select } from "../db/repository.js";
+import { select, insert } from "../db/repository.js";
 import { syncAgents } from "../workspace/sync-agents.js";
 
 /** Sleep helper */
@@ -16,6 +16,14 @@ let running = false;
 
 /** Track whether onboarding agent re-sync has been done */
 let onboardingSynced = false;
+
+/**
+ * PM cooldown: after PM finishes a dispatch, wait this many ms before
+ * dispatching role messages to PM again. This gives user messages
+ * (arriving via opencode web UI) priority over queued role messages.
+ */
+const PM_COOLDOWN_MS = 3000;
+let pmLastDispatchEnd = 0;
 
 /**
  * Start the scheduler main loop.
@@ -44,6 +52,16 @@ export async function startSchedulerLoop(
       await schedulerTick(client, sessionManager, roleManager, workspace);
     } catch (err) {
       console.error(`   ❌ 调度器异常: ${err}`);
+      // Log to database for diagnostics
+      try {
+        insert("logs", {
+          role: "system",
+          action: "scheduler_error",
+          content: `调度器异常: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      } catch {
+        // DB write failed too — nothing more we can do
+      }
       // Continue running — one bad tick shouldn't kill the engine
     }
 
@@ -81,6 +99,13 @@ async function schedulerTick(
   for (const role of ALL_ROLES) {
     if (roleManager.isBusy(role)) continue;
 
+    // PM cooldown: after PM finishes a dispatch, wait before injecting
+    // more role messages. This gives user messages (via opencode web UI)
+    // priority over queued role messages.
+    if (role === "PM" && Date.now() - pmLastDispatchEnd < PM_COOLDOWN_MS) {
+      continue;
+    }
+
     // Query unread messages for this role
     const messages = select(
       "messages",
@@ -91,6 +116,7 @@ async function schedulerTick(
     if (messages.length === 0) continue;
 
     // V1 serial: dispatch to this role and break
+    console.log(`   📨 调度 → ${role} (${messages.length} 条消息)`);
     roleManager.setBusy(role, true);
     try {
       const { sessionId, inputTokens } = await dispatchToRole(
@@ -110,8 +136,12 @@ async function schedulerTick(
         inputTokens,
         taskId ?? undefined,
       );
+      console.log(`   ✓ ${role} 调度完成`);
     } finally {
       roleManager.setBusy(role, false);
+      if (role === "PM") {
+        pmLastDispatchEnd = Date.now();
+      }
     }
 
     dispatched = true;
@@ -129,6 +159,11 @@ async function schedulerTick(
     if (rows.length > 0) {
       onboardingSynced = true;
       syncAgents(workspace);
+      insert("logs", {
+        role: "system",
+        action: "onboarding_sync",
+        content: "Onboarding 完成，已重新同步 Agent 配置",
+      });
       console.log("   ✓ Onboarding 完成，已重新同步 Agent 配置");
     }
   }
