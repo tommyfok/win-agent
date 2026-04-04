@@ -1,40 +1,47 @@
 import { exec } from "node:child_process";
 import { platform } from "node:os";
 import { checkEngineRunning } from "../config/index.js";
-import { getSessionManager } from "./start.js";
+import { SessionManager } from "../engine/session-manager.js";
 
 export async function talkCommand() {
+  const workspace = process.cwd();
+
   // 1. Check engine is running
-  const { running, pid } = checkEngineRunning();
+  const { running, pid } = checkEngineRunning(workspace);
   if (!running) {
     console.log("⚠️  win-agent 未运行");
     console.log("   请先执行: npx win-agent start");
     process.exit(1);
   }
 
-  // 2. Get PM session ID
-  const port = 4096;
-  const sm = getSessionManager();
-  let pmSessionId: string;
-  if (sm) {
-    pmSessionId = sm.getPmSessionId();
+  // 2. Read server URL from persisted info
+  let serverUrl = "http://localhost:4096";
+  try {
+    const { default: fs } = await import("node:fs");
+    const { default: path } = await import("node:path");
+    const infoFile = path.join(workspace, ".win-agent", "opencode-server.json");
+    if (fs.existsSync(infoFile)) {
+      const info = JSON.parse(fs.readFileSync(infoFile, "utf-8"));
+      if (info.url) serverUrl = info.url;
+    }
+  } catch { /* use default */ }
+
+  // 3. Build the full URL: {serverUrl}/{base64(workspace)}/session/{pmSessionId}
+  const sessions = SessionManager.loadPersistedSessions(workspace);
+  const pmSessionId = sessions?.PM;
+
+  let targetUrl: string;
+  if (pmSessionId) {
+    const workspaceBase64 = Buffer.from(workspace).toString("base64url");
+    targetUrl = `${serverUrl}/${workspaceBase64}/session/${pmSessionId}`;
   } else {
-    // Fallback: engine is running in a different process,
-    // session manager is not available in this process.
-    // User should open the opencode web UI directly.
-    console.log("⚠️  当前进程无法获取 PM Session ID");
-    console.log("   请直接访问 opencode Web UI:");
-    console.log(`   http://localhost:${port}`);
-    openBrowser(`http://localhost:${port}`);
-    return;
+    targetUrl = serverUrl;
   }
 
-  // 3. Build URL and open browser
-  const url = `http://localhost:${port}/session/${pmSessionId}`;
-  console.log("🔗 正在打开 PM 对话界面...");
-  console.log(`   ${url}`);
+  console.log("🔗 正在打开 PM 聊天页面...");
+  console.log(`   ${targetUrl}`);
 
-  openBrowser(url);
+  openBrowser(targetUrl);
 }
 
 function openBrowser(url: string): void {

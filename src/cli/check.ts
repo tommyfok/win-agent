@@ -1,4 +1,7 @@
-import { loadConfig, saveConfig, type WinAgentConfig } from "../config/index.js";
+import {
+  loadConfig, saveConfig, loadPresets, upsertPreset,
+  type WinAgentConfig, type ProviderPreset,
+} from "../config/index.js";
 import { input, select } from "@inquirer/prompts";
 
 interface ModelInfo {
@@ -50,6 +53,104 @@ async function detectReasoningOpenAI(baseUrl: string, apiKey: string, model: str
   return body.choices?.[0]?.message?.reasoning_content !== undefined;
 }
 
+/**
+ * Build a display label for a preset.
+ */
+function presetLabel(p: ProviderPreset): string {
+  return `${p.name} (${p.provider.type} / ${p.provider.model})`;
+}
+
+/**
+ * Prompt the user to configure a new provider interactively.
+ * Returns a partial config with provider and embedding filled in.
+ */
+async function promptNewProvider(existingProvider?: WinAgentConfig["provider"]): Promise<{
+  provider: WinAgentConfig["provider"];
+  embedding: WinAgentConfig["embedding"];
+}> {
+  const type = await select({
+    message: "请选择 LLM Provider",
+    choices: [
+      { value: "anthropic", name: "Anthropic" },
+      { value: "openai", name: "OpenAI" },
+      { value: "custom-openai", name: "自定义（OpenAI 兼容接口）" },
+      { value: "custom-anthropic", name: "自定义（Anthropic 兼容接口）" },
+    ],
+  });
+  const isCustom = type === "custom-openai" || type === "custom-anthropic";
+  let baseUrl: string | undefined;
+  if (isCustom) {
+    baseUrl = await input({ message: "请输入 API Base URL（如 https://api.example.com/v1）" });
+  }
+  const apiKey = await input({ message: "请输入 API Key" });
+
+  let model: string;
+  let reasoning = false;
+
+  if (type === "custom-openai" && baseUrl) {
+    console.log("   → 获取可用模型列表...");
+    const models = await fetchModelsOpenAI(baseUrl, apiKey);
+
+    if (models.length > 0) {
+      model = await select({
+        message: "请选择模型",
+        choices: models.map((m) => ({ value: m, name: m })),
+      });
+    } else {
+      console.log("   ⚠️  无法获取模型列表，请手动输入");
+      model = await input({ message: "请输入模型名称" });
+    }
+
+    console.log("   → 检测模型类型...");
+    reasoning = await detectReasoningOpenAI(baseUrl, apiKey, model);
+  } else if (type === "custom-anthropic") {
+    model = await input({ message: "请输入模型名称" });
+    if (reasoning) {
+      console.log(`   ✓ 检测到推理模型 (reasoning)`);
+    } else {
+      console.log(`   ✓ 普通模型`);
+    }
+  } else {
+    model = await input({
+      message: "请输入模型名称",
+      default: type === "anthropic" ? "claude-sonnet-4-20250514" : type === "openai" ? "gpt-4o" : undefined,
+    });
+  }
+
+  const provider = {
+    type, apiKey, model,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(reasoning ? { reasoning } : {}),
+  };
+
+  // Embedding
+  console.log("\n2. Embedding 模型配置");
+  const embType = await select({
+    message: "请选择 Embedding Provider",
+    choices: [
+      { value: "local", name: "本地模型 (bge-small-zh-v1.5, 无需 API)" },
+      { value: "openai", name: "OpenAI (text-embedding-3-small)" },
+    ],
+  });
+
+  let embedding: WinAgentConfig["embedding"];
+  if (embType === "local") {
+    embedding = { type: "local", apiKey: "", model: "Xenova/bge-small-zh-v1.5" };
+  } else {
+    const embApiKey = await input({
+      message: "请输入 Embedding API Key（留空则复用 Provider 的 Key）",
+      default: "",
+    });
+    const embModel = await input({
+      message: "请选择 Embedding 模型",
+      default: "text-embedding-3-small",
+    });
+    embedding = { type: embType, apiKey: embApiKey || apiKey, model: embModel };
+  }
+
+  return { provider, embedding };
+}
+
 
 /**
  * Run interactive environment check. Prompts for missing config items.
@@ -69,71 +170,67 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
   if (config.provider?.type && config.provider?.apiKey && config.provider?.model) {
     console.log(`   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? " (推理模型)" : ""}`);
   } else {
-    const type = await select({
-      message: "请选择 LLM Provider",
-      choices: [
-        { value: "anthropic", name: "Anthropic" },
-        { value: "openai", name: "OpenAI" },
-        { value: "custom-openai", name: "自定义（OpenAI 兼容接口）" },
-        { value: "custom-anthropic", name: "自定义（Anthropic 兼容接口）" },
-      ],
-    });
-    const isCustom = type === "custom-openai" || type === "custom-anthropic";
-    let baseUrl: string | undefined;
-    if (isCustom) {
-      baseUrl = await input({ message: "请输入 API Base URL（如 https://api.example.com/v1）" });
-    }
-    const apiKey = await input({ message: "请输入 API Key" });
+    // Check global presets
+    const presets = loadPresets();
 
-    // Try to fetch model list for custom providers
-    let model: string;
-    let reasoning = false;
+    if (presets.length > 0) {
+      const choice = await select({
+        message: "检测到已保存的 Provider 配置，请选择",
+        choices: [
+          ...presets.map((p) => ({ value: p.name, name: presetLabel(p) })),
+          { value: "__new__", name: "➕ 新建配置" },
+        ],
+      });
 
-    if (type === "custom-openai" && baseUrl) {
-      console.log("   → 获取可用模型列表...");
-      const models = await fetchModelsOpenAI(baseUrl, apiKey);
+      if (choice !== "__new__") {
+        const preset = presets.find((p) => p.name === choice)!;
+        config.provider = { ...preset.provider };
+        config.embedding = { ...preset.embedding };
+        changed = true;
+        console.log(`   ✓ 使用预设: ${presetLabel(preset)}`);
+      } else {
+        const result = await promptNewProvider(config.provider);
+        config.provider = result.provider;
+        config.embedding = result.embedding;
+        changed = true;
 
-      if (models.length > 0) {
-        model = await select({
-          message: "请选择模型",
-          choices: models.map((m) => ({ value: m, name: m })),
+        // Save to global presets
+        const presetName = await input({
+          message: "为此配置起个名字（方便下次复用）",
+          default: `${config.provider!.type}-${config.provider!.model}`,
         });
-      } else {
-        console.log("   ⚠️  无法获取模型列表，请手动输入");
-        model = await input({ message: "请输入模型名称" });
-      }
-
-      // Auto-detect reasoning
-      console.log("   → 检测模型类型...");
-      reasoning = await detectReasoningOpenAI(baseUrl, apiKey, model);
-    } else if (type === "custom-anthropic") {
-      model = await input({ message: "请输入模型名称" });
-      if (reasoning) {
-        console.log(`   ✓ 检测到推理模型 (reasoning)`);
-      } else {
-        console.log(`   ✓ 普通模型`);
+        upsertPreset({
+          name: presetName,
+          provider: config.provider!,
+          embedding: config.embedding!,
+        });
+        console.log(`   ✓ 已保存到全局预设: ${presetName}`);
       }
     } else {
-      model = await input({
-        message: "请输入模型名称",
-        default: type === "anthropic" ? "claude-sonnet-4-20250514" : type === "openai" ? "gpt-4o" : undefined,
-      });
-    }
+      // No presets — go through full setup
+      const result = await promptNewProvider(config.provider);
+      config.provider = result.provider;
+      config.embedding = result.embedding;
+      changed = true;
 
-    config.provider = {
-      type, apiKey, model,
-      ...(baseUrl ? { baseUrl } : {}),
-      ...(reasoning ? { reasoning } : {}),
-    };
-    changed = true;
+      // Save to global presets
+      const presetName = await input({
+        message: "为此配置起个名字（方便下次复用）",
+        default: `${config.provider!.type}-${config.provider!.model}`,
+      });
+      upsertPreset({
+        name: presetName,
+        provider: config.provider!,
+        embedding: config.embedding!,
+      });
+      console.log(`   ✓ 已保存到全局预设: ${presetName}`);
+    }
   }
 
-  // 2. Embedding
-  console.log("\n2. Embedding 模型配置");
-  if (config.embedding?.type) {
-    console.log(`   ✓ 已配置 → ${config.embedding.type} / ${config.embedding.model || "default"}`);
-  } else {
-    const type = await select({
+  // 2. Embedding (only prompt if not already set — may have been set via preset)
+  if (!config.embedding?.type) {
+    console.log("\n2. Embedding 模型配置");
+    const embType = await select({
       message: "请选择 Embedding Provider",
       choices: [
         { value: "local", name: "本地模型 (bge-small-zh-v1.5, 无需 API)" },
@@ -141,12 +238,8 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
       ],
     });
 
-    if (type === "local") {
-      config.embedding = {
-        type: "local",
-        apiKey: "",
-        model: "Xenova/bge-small-zh-v1.5",
-      };
+    if (embType === "local") {
+      config.embedding = { type: "local", apiKey: "", model: "Xenova/bge-small-zh-v1.5" };
     } else {
       const apiKey = await input({
         message: "请输入 Embedding API Key（留空则复用 Provider 的 Key）",
@@ -157,12 +250,15 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
         default: "text-embedding-3-small",
       });
       config.embedding = {
-        type,
+        type: embType,
         apiKey: apiKey || config.provider?.apiKey || "",
         model,
       };
     }
     changed = true;
+  } else if (!changed) {
+    console.log(`\n2. Embedding 模型配置`);
+    console.log(`   ✓ 已配置 → ${config.embedding.type} / ${config.embedding.model || "default"}`);
   }
 
   if (changed) {

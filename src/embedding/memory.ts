@@ -20,14 +20,20 @@ export async function insertMemory(data: MemoryData): Promise<number> {
   try {
     const embedding = await generateEmbedding(data.summary);
     const db = getDb();
+    // sqlite-vec vec0 checks sqlite3_value_type(id) == SQLITE_INTEGER at the C level.
+    // JS number binds as SQLITE_FLOAT; only BigInt binds as SQLITE_INTEGER.
+    // Embedding must be a Float32Array (bound as BLOB) per sqlite-vec docs.
+    const idInt = typeof lastInsertRowid === "bigint"
+      ? lastInsertRowid
+      : BigInt(lastInsertRowid);
     db.prepare(
       "INSERT INTO memory_vec(id, embedding) VALUES (?, ?)"
-    ).run(lastInsertRowid, JSON.stringify(embedding));
+    ).run(idInt, new Float32Array(embedding));
   } catch (err) {
     console.log(`   ⚠️  记忆 #${lastInsertRowid} embedding 生成失败: ${err}`);
   }
 
-  return lastInsertRowid;
+  return Number(lastInsertRowid);
 }
 
 export interface MemoryEntry {
@@ -78,7 +84,7 @@ export async function buildRecallPrompt(
     .prepare(
       "SELECT id, distance FROM memory_vec WHERE embedding MATCH ? AND k = ?"
     )
-    .all(JSON.stringify(queryEmbedding), limit * 3) as Array<{
+    .all(new Float32Array(queryEmbedding), limit * 3) as Array<{
     id: number;
     distance: number;
   }>;

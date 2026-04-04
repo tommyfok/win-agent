@@ -50,14 +50,14 @@ export function select(
 export function insert(
   table: string,
   data: Record<string, any>
-): { lastInsertRowid: number } {
+): { lastInsertRowid: number | bigint } {
   const db = getDb();
   const keys = Object.keys(data);
   const placeholders = keys.map(() => "?").join(", ");
   const sql = `INSERT INTO ${table} (${keys.join(", ")}) VALUES (${placeholders})`;
   const values = keys.map((k) => data[k]);
   const result = db.prepare(sql).run(...values);
-  return { lastInsertRowid: Number(result.lastInsertRowid) };
+  return { lastInsertRowid: result.lastInsertRowid };
 }
 
 export function update(

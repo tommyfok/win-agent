@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import net from "node:net";
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
 import {
@@ -97,38 +96,27 @@ function buildOpencodeConfig(provider: ProviderConfig) {
 }
 
 /**
- * Check if a port is available by attempting to listen on it briefly.
- */
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.once("error", () => resolve(false));
-    srv.once("listening", () => {
-      srv.close(() => resolve(true));
-    });
-    srv.listen(port, "127.0.0.1");
-  });
-}
-
-/**
- * Find an available port starting from the given port.
- */
-async function findAvailablePort(startPort: number, maxAttempts = 30): Promise<number> {
-  for (let i = 0; i < maxAttempts; i++) {
-    const port = startPort + i;
-    if (await isPortAvailable(port)) return port;
-  }
-  throw new Error(`No available port found in range ${startPort}-${startPort + maxAttempts - 1}`);
-}
-
-/**
  * Try connecting to an existing opencode server.
- * Returns client if healthy, null otherwise.
+ * Verifies ownership by checking that our persisted PM session ID exists on the server.
  */
-async function tryConnect(url: string): Promise<OpencodeClient | null> {
+async function tryConnect(url: string, workspace: string): Promise<OpencodeClient | null> {
   try {
     const client = createOpencodeClient({ baseUrl: url });
-    await client.session.list(); // health check
+    // Load our persisted session IDs
+    const { SessionManager } = await import("./session-manager.js");
+    const savedSessions = SessionManager.loadPersistedSessions(workspace);
+    const pmSessionId = savedSessions?.PM;
+    if (pmSessionId) {
+      // Verify this session exists on the server
+      try {
+        await client.session.get({ path: { id: pmSessionId } });
+      } catch {
+        return null; // Our session doesn't exist — not our server
+      }
+    } else {
+      // No saved sessions — just health check
+      await client.session.list();
+    }
     return client;
   } catch {
     return null;
@@ -156,7 +144,8 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
   }
 
   // 2. Tool dependencies (required by .opencode/tools/*.ts)
-  const toolDeps = ["better-sqlite3", "sqlite-vec"];
+  // bun:sqlite is built-in; only sqlite-vec needs npm install
+  const toolDeps = ["sqlite-vec"];
   for (const dep of toolDeps) {
     const depDir = path.join(opencodeDir, "node_modules", dep);
     if (!fs.existsSync(depDir)) needed.push(dep);
@@ -186,7 +175,6 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
  */
 export async function startOpencodeServer(
   workspace: string,
-  port = 4096
 ): Promise<OpencodeServerHandle> {
   const config = loadConfig(workspace);
   if (!config.provider) {
@@ -196,7 +184,7 @@ export async function startOpencodeServer(
   // 1. Try to reuse existing server
   const existing = loadServerInfo(workspace);
   if (existing) {
-    const client = await tryConnect(existing.url);
+    const client = await tryConnect(existing.url, workspace);
     if (client) {
       console.log(`   ✓ 复用已有 opencode server: ${existing.url}`);
       return {
@@ -213,12 +201,7 @@ export async function startOpencodeServer(
   // 2. Ensure all opencode packages are installed (provider SDK + tool deps)
   ensureOpencodePackages(workspace, config.provider);
 
-  // 3. Start a new server
-  const actualPort = await findAvailablePort(port);
-  if (actualPort !== port) {
-    console.log(`   ℹ️  端口 ${port} 被占用，使用 ${actualPort}`);
-  }
-
+  // 3. Start a new server (port=0 lets the OS assign a free port)
   const opcodeConfig = buildOpencodeConfig(config.provider);
 
   // Debug: show what we're sending to opencode
@@ -226,12 +209,18 @@ export async function startOpencodeServer(
 
   // Spawn opencode server manually so we can see its stderr/stdout
   const opcodeConfigWithLog = { ...opcodeConfig, logLevel: "DEBUG" };
-  const proc = spawn("opencode", ["serve", `--hostname=127.0.0.1`, `--port=${actualPort}`, `--log-level=DEBUG`], {
+  const proc = spawn("opencode", ["serve", `--hostname=127.0.0.1`, `--port=0`, `--log-level=DEBUG`], {
     env: {
       ...process.env,
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opcodeConfigWithLog),
     },
+    // Detach so the child doesn't receive SIGINT from the terminal's process group.
+    // This lets us write memories before shutting down the server.
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  // Don't let the detached child keep the parent alive if cleanup forgets to kill it.
+  proc.unref();
 
   // Forward stderr to console for debugging
   proc.stderr?.on("data", (chunk: Buffer) => {
@@ -275,7 +264,17 @@ export async function startOpencodeServer(
   });
 
   const client = createOpencodeClient({ baseUrl: serverUrl });
-  const server = { url: serverUrl, close: () => proc.kill() };
+  const server = {
+    url: serverUrl,
+    close: () => {
+      try {
+        // Kill the detached process group
+        if (proc.pid) process.kill(-proc.pid, "SIGTERM");
+      } catch {
+        try { proc.kill(); } catch {}
+      }
+    },
+  };
 
   // Debug: check what opencode actually loaded
   try {
@@ -296,9 +295,10 @@ export async function startOpencodeServer(
   }
 
   // Persist server info for reuse
+  const parsedUrl = new URL(server.url);
   saveServerInfo(workspace, {
     url: server.url,
-    port: actualPort,
+    port: parseInt(parsedUrl.port, 10),
     startedAt: new Date().toISOString(),
   });
 

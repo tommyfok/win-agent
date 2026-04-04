@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
@@ -22,12 +23,57 @@ export interface WinAgentConfig {
   embedding?: EmbeddingConfig;
 }
 
+/** A named provider+embedding preset stored globally. */
+export interface ProviderPreset {
+  name: string;
+  provider: ProviderConfig;
+  embedding: EmbeddingConfig;
+}
+
 /**
  * All config and state live under <workspace>/.win-agent/.
  * Workspace is always the current working directory.
  */
 function getWinAgentDir(workspace?: string): string {
   return path.join(workspace ?? process.cwd(), ".win-agent");
+}
+
+// ── Global presets (~/.win-agent/providers.json) ──
+
+function globalDir(): string {
+  return path.join(os.homedir(), ".win-agent");
+}
+
+function presetsFile(): string {
+  return path.join(globalDir(), "providers.json");
+}
+
+export function loadPresets(): ProviderPreset[] {
+  const file = presetsFile();
+  if (!fs.existsSync(file)) return [];
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch {
+    return [];
+  }
+}
+
+export function savePresets(presets: ProviderPreset[]): void {
+  const dir = globalDir();
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(presetsFile(), JSON.stringify(presets, null, 2), "utf-8");
+}
+
+/** Add or update a preset by name. */
+export function upsertPreset(preset: ProviderPreset): void {
+  const presets = loadPresets();
+  const idx = presets.findIndex((p) => p.name === preset.name);
+  if (idx >= 0) {
+    presets[idx] = preset;
+  } else {
+    presets.push(preset);
+  }
+  savePresets(presets);
 }
 
 function configFile(workspace?: string): string {
@@ -66,10 +112,10 @@ export function ensureWorkspaceId(workspace?: string): string {
   return id;
 }
 
-export function writePidFile(workspace?: string): void {
+export function writePidFile(workspace?: string, pid?: number): void {
   const dir = getWinAgentDir(workspace);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(pidFile(workspace), String(process.pid), "utf-8");
+  fs.writeFileSync(pidFile(workspace), String(pid ?? process.pid), "utf-8");
 }
 
 export function readPidFile(workspace?: string): number | null {

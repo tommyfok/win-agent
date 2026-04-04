@@ -1,56 +1,46 @@
 import {
   checkEngineRunning,
   removePidFile,
+  isProcessRunning,
 } from "../config/index.js";
-import { openDb, getDb, closeDb } from "../db/connection.js";
-import { getServerHandle, getSessionManager } from "./start.js";
 
 export async function stopCommand() {
   const { running, pid } = checkEngineRunning();
-  if (!running) {
+  if (!running || !pid) {
     console.log("⚠️  win-agent 未在运行");
     return;
   }
 
   console.log(`\n🛑 正在停止 win-agent (PID: ${pid})...`);
 
-  // Trigger memory writes for all roles
-  const sm = getSessionManager();
-  if (sm) {
-    console.log("   → 保存角色记忆...");
-    await sm.writeAllMemories("engine_stop");
-  } else {
-    console.log("   ⏭  非引擎进程，跳过记忆写入");
-  }
-
-  // Close opencode server if in this process
-  const server = getServerHandle();
-  if (server) {
-    server.close();
-    console.log("   ✓ opencode server 已停止");
-  }
-
-  // Close DB if open in this process
+  // Send SIGTERM — the daemon process handles memory writes and cleanup
   try {
-    getDb();
-    closeDb();
-    console.log("   ✓ 数据库连接已关闭");
+    process.kill(pid, "SIGTERM");
   } catch {
-    // DB not open in this process, that's fine
+    console.log(`   △ 进程 ${pid} 已不存在`);
+    removePidFile();
+    console.log("   ✓ PID 锁文件已清理");
+    return;
   }
 
-  // If the running PID is a different process, send SIGTERM
-  if (pid && pid !== process.pid) {
-    try {
-      process.kill(pid, "SIGTERM");
-      console.log(`   ✓ 已向进程 ${pid} 发送终止信号`);
-    } catch {
-      console.log(`   △ 进程 ${pid} 已不存在`);
+  // Wait for the daemon to exit (up to 120s for memory writes across multiple roles)
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (!isProcessRunning(pid)) {
+      console.log("   ✓ 引擎已停止");
+      // Daemon should have cleaned up PID file, but clean up just in case
+      removePidFile();
+      console.log("\n✅ win-agent 已停止");
+      return;
     }
   }
 
-  // Clean PID file
+  // Force kill if still running
+  console.log("   ⚠️  引擎未在 120s 内退出，强制终止...");
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {}
   removePidFile();
-  console.log("   ✓ PID 锁文件已清理");
-  console.log("\n✅ win-agent 已停止");
+  console.log("\n✅ win-agent 已停止 (强制)");
 }

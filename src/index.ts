@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { checkCommand } from "./cli/check.js";
 import { startCommand } from "./cli/start.js";
+import { engineCommand } from "./cli/engine.js";
 import { talkCommand } from "./cli/talk.js";
 import { statusCommand } from "./cli/status.js";
 import { cancelCommand } from "./cli/cancel.js";
@@ -44,5 +45,11 @@ program
   .command("clean")
   .description("Clean .win-agent and .opencode from current directory")
   .action(cleanCommand);
+
+// Internal command — spawned by `start` as a background daemon
+program
+  .command("_engine <workspace>")
+  .description(false as any) // hidden from help
+  .action(engineCommand);
 
 program.parse();

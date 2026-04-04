@@ -21,15 +21,21 @@ export async function insertKnowledge(data: KnowledgeData): Promise<number> {
   try {
     const embedding = await generateEmbedding(`${data.title} ${data.content}`);
     const db = getDb();
+    // sqlite-vec vec0 checks sqlite3_value_type(id) == SQLITE_INTEGER at the C level.
+    // JS number binds as SQLITE_FLOAT; only BigInt binds as SQLITE_INTEGER.
+    // Embedding must be a Float32Array (bound as BLOB) per sqlite-vec docs.
+    const idInt = typeof lastInsertRowid === "bigint"
+      ? lastInsertRowid
+      : BigInt(lastInsertRowid);
     db.prepare(
       "INSERT INTO knowledge_vec(id, embedding) VALUES (?, ?)"
-    ).run(lastInsertRowid, JSON.stringify(embedding));
+    ).run(idInt, new Float32Array(embedding));
   } catch (err) {
     // Embedding failure is non-fatal — knowledge is still searchable by category/text
     console.log(`   ⚠️  知识条目 #${lastInsertRowid} embedding 生成失败: ${err}`);
   }
 
-  return lastInsertRowid;
+  return Number(lastInsertRowid);
 }
 
 export interface KnowledgeEntry {
@@ -60,7 +66,7 @@ export async function queryRelevantKnowledge(
     .prepare(
       "SELECT id, distance FROM knowledge_vec WHERE embedding MATCH ? AND k = ?"
     )
-    .all(JSON.stringify(queryEmbedding), limit * 2) as Array<{
+    .all(new Float32Array(queryEmbedding), limit * 2) as Array<{
     id: number;
     distance: number;
   }>;

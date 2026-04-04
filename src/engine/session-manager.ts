@@ -76,6 +76,33 @@ export class SessionManager {
       const sessionId = await this.createRoleSession(role);
       this.activeSessions.set(role, sessionId);
     }
+    this.persistSessionIds();
+  }
+
+  /**
+   * Write active session IDs to .win-agent/sessions.json so other
+   * processes (e.g. `win-agent talk`) can read them.
+   */
+  private persistSessionIds(): void {
+    const data: Record<string, string> = {};
+    for (const [role, id] of this.activeSessions) {
+      data[role] = id;
+    }
+    const file = path.join(this.workspace, ".win-agent", "sessions.json");
+    fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf-8");
+  }
+
+  /**
+   * Load persisted session IDs from disk (for cross-process access).
+   */
+  static loadPersistedSessions(workspace: string): Record<string, string> | null {
+    const file = path.join(workspace, ".win-agent", "sessions.json");
+    if (!fs.existsSync(file)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf-8"));
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -200,6 +227,7 @@ export class SessionManager {
       this.taskSessions.set(taskId, newSessionId);
     } else {
       this.activeSessions.set(role, newSessionId);
+      this.persistSessionIds();
     }
 
     return newSessionId;

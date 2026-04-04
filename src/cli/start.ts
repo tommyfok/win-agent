@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { input, confirm } from "@inquirer/prompts";
 import {
   checkEngineRunning,
@@ -9,27 +10,15 @@ import {
 } from "../config/index.js";
 import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
-import { openDb } from "../db/connection.js";
-import { select as dbSelect, insert as dbInsert, rawQuery } from "../db/repository.js";
-import { startOpencodeServer, removeServerInfo, type OpencodeServerHandle } from "../engine/opencode-server.js";
+import { openDb, closeDb } from "../db/connection.js";
+import { select as dbSelect, insert as dbInsert } from "../db/repository.js";
 import { syncAgents, deployTools } from "../workspace/sync-agents.js";
-import { SessionManager } from "../engine/session-manager.js";
 import { insertKnowledge } from "../embedding/knowledge.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
-import { startSchedulerLoop, stopSchedulerLoop } from "../engine/scheduler.js";
 
-/** Global references for cleanup on stop */
-let serverHandle: OpencodeServerHandle | null = null;
-let sessionManager: SessionManager | null = null;
-
-export function getServerHandle(): OpencodeServerHandle | null {
-  return serverHandle;
-}
-
-export function getSessionManager(): SessionManager | null {
-  return sessionManager;
-}
+// Re-export for stop command compatibility
+export { getServerHandle, getSessionManager } from "./engine.js";
 
 export async function startCommand() {
   try {
@@ -123,140 +112,45 @@ async function _startCommand() {
     console.log("   ⏭  已有项目，跳过");
   }
 
-  // ── 6️⃣ opencode Server + Session 初始化 ──
-  console.log("\n6️⃣  opencode Server + Session 初始化");
+  // ── 6️⃣ 启动后台引擎 ──
+  console.log("\n6️⃣  启动后台引擎");
 
-  console.log("   → 启动 opencode server...");
-  try {
-    serverHandle = await startOpencodeServer(workspace);
-    console.log(`   ✓ opencode server 已启动: ${serverHandle.url}`);
-  } catch (err) {
-    console.log(`   ❌ opencode server 启动失败: ${err}`);
-    removePidFile();
-    process.exit(1);
-  }
-
-  // Create session manager and init persistent sessions
-  console.log("   → 初始化角色 Session...");
-  sessionManager = new SessionManager(serverHandle.client, workspace);
-  try {
-    await sessionManager.initPersistentSessions();
-    console.log("   ✓ PM/SA/OPS Session 已创建");
-  } catch (err) {
-    console.log(`   ❌ Session 初始化失败: ${err}`);
-    serverHandle.close();
-    removePidFile();
-    process.exit(1);
-  }
-
-  // Check for memories and active workflows
-  const memoryCount = rawQuery("SELECT COUNT(*) as cnt FROM memory")[0].cnt;
-  if (memoryCount > 0) {
-    console.log(`   ✓ 已回忆 ${memoryCount} 条近期记忆`);
-  }
-
-  const activeWorkflows = dbSelect("workflow_instances", { status: "active" });
-  if (activeWorkflows.length > 0) {
-    // Notify PM about recovered workflows
-    dbInsert("messages", {
-      from_role: "system",
-      to_role: "PM",
-      type: "system",
-      content: `引擎已重启恢复，有 ${activeWorkflows.length} 个工作流继续执行。`,
-      status: "unread",
-    });
-    console.log(`   △ 发现 ${activeWorkflows.length} 个活跃工作流，已通知 PM`);
-  }
-
-  // ── 7️⃣ Onboarding 检测 ──
-  const onboardingDone = dbSelect("project_config", { key: "onboarding_completed" });
-  if (onboardingDone.length === 0) {
-    console.log("\n7️⃣  首次 Onboarding");
-    // Send onboarding trigger to PM
-    dbInsert("messages", {
-      from_role: "system",
-      to_role: "PM",
-      type: "system",
-      content: [
-        "【Onboarding 模式】这是项目首次启动，请进入 Onboarding 流程：",
-        "1. 向用户介绍团队 5 个角色（PM/SA/DEV/QA/OPS）的定位和协作方式",
-        "2. 逐个角色与用户讨论期望和偏好设定",
-        "3. 讨论工作流偏好（MVP 优先 vs 一步到位、迭代节奏等）",
-        "4. 完成后请写入 project_config: key='onboarding_completed', value='true'",
-        "",
-        "用户即将通过 `npx win-agent talk` 与你对话，请等待用户消息后开始引导。",
-      ].join("\n"),
-      status: "unread",
-    });
-    console.log("   → 已向 PM 发送 Onboarding 引导消息");
-  } else {
-    console.log("\n7️⃣  Onboarding");
-    console.log("   ✓ 已完成");
-  }
-
-  // ── 启动完成 ──
   const projectName = dbSelect("project_config", { key: "projectName" })[0]?.value ?? "未命名";
 
-  // Log engine start
-  dbInsert("logs", {
-    role: "system",
-    action: "engine_start",
-    content: `引擎启动 (PID: ${process.pid})，项目: ${projectName}`,
+  // Close DB before spawning daemon (daemon will open its own connection)
+  closeDb();
+
+  // Spawn daemon process with output to log file
+  const logFile = path.join(workspace, ".win-agent", "engine.log");
+  const logFd = fs.openSync(logFile, "a");
+
+  // Find the win-agent bin path (could be npx or direct)
+  const binPath = process.argv[1];
+  const child = spawn(process.execPath, [binPath, "_engine", workspace], {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    env: process.env,
   });
 
-  console.log(`\n🚀 win-agent 已启动 (PID: ${process.pid})`);
+  if (!child.pid) {
+    console.log("   ❌ 后台引擎启动失败");
+    removePidFile();
+    fs.closeSync(logFd);
+    process.exit(1);
+  }
+
+  // Write daemon PID to lock file
+  writePidFile(workspace, child.pid);
+  child.unref();
+  fs.closeSync(logFd);
+
+  console.log(`   ✓ 引擎已在后台启动 (PID: ${child.pid})`);
+  console.log(`\n🚀 win-agent 已启动`);
   console.log(`   项目: ${projectName}`);
   console.log(`   工作空间: ${workspace}`);
-  console.log(`   数据库: .win-agent/win-agent.db`);
-  console.log(`   opencode: ${serverHandle.url}`);
-  console.log("   输入 npx win-agent talk 打开与产品经理的对话页面");
-
-  // Graceful shutdown on signals
-  let shuttingDown = false;
-  const cleanup = async () => {
-    if (shuttingDown) return; // prevent re-entrant cleanup
-    shuttingDown = true;
-    console.log("\n🛑 收到终止信号，正在停止...");
-    stopSchedulerLoop();
-    try {
-      if (sessionManager) {
-        console.log("   → 保存角色记忆...");
-        await sessionManager.writeAllMemories("engine_stop");
-      }
-    } catch (err) {
-      console.error(`   ⚠️  记忆保存失败: ${err}`);
-    }
-    try {
-      dbInsert("logs", {
-        role: "system",
-        action: "engine_stop",
-        content: `引擎停止 (PID: ${process.pid})`,
-      });
-    } catch {
-      // DB may already be closing
-    }
-    if (serverHandle?.owned) {
-      try { serverHandle.close(); } catch {}
-      removeServerInfo(workspace);
-    }
-    removePidFile();
-    console.log("   ✅ 已安全退出");
-    process.exit(0);
-  };
-  process.on("SIGTERM", cleanup);
-  process.on("SIGINT", cleanup);
-  // Suppress noisy errors from in-flight promises interrupted by shutdown
-  process.on("uncaughtException", (err) => {
-    if (shuttingDown) return; // swallow errors during shutdown
-    console.error(`   ❌ 未捕获异常: ${err}`);
-  });
-  process.on("unhandledRejection", (err) => {
-    if (shuttingDown) return;
-    console.error(`   ❌ 未处理的 Promise 拒绝: ${err}`);
-  });
-
-  // Start the scheduler main loop (blocks until stopSchedulerLoop is called)
-  await startSchedulerLoop(serverHandle.client, sessionManager, workspace);
+  console.log(`   日志: .win-agent/engine.log`);
+  console.log("   输入 npx win-agent talk  打开与产品经理的对话页面");
+  console.log("   输入 npx win-agent stop  停止引擎");
 }
 
 /**
