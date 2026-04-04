@@ -4,9 +4,9 @@ import { insert } from "../db/repository.js";
 
 /**
  * Default context window size (tokens) for rotation calculation.
- * Most models use 128k-200k; we use a conservative estimate.
+ * Unified to 200k to match typical large model context windows.
  */
-const DEFAULT_MAX_CONTEXT = 128_000;
+const DEFAULT_MAX_CONTEXT = 200_000;
 
 /**
  * Rotation threshold — rotate when input tokens exceed this fraction of max context.

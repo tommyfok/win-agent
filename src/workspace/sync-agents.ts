@@ -268,6 +268,21 @@ function parseJsonArg(val: any): any {
   return val;
 }
 
+function getTableColumns(db: InstanceType<typeof Database>, table: string): string[] {
+  const cols = db.prepare(\`PRAGMA table_info(\${table})\`).all() as Array<{ name: string }>;
+  return cols.map((c: any) => c.name);
+}
+
+function validateColumns(db: InstanceType<typeof Database>, table: string, keys: string[]): void {
+  const validCols = getTableColumns(db, table);
+  const invalid = keys.filter((k: string) => !validCols.includes(k));
+  if (invalid.length > 0) {
+    throw new Error(
+      \`列名错误: \${invalid.join(", ")} 不存在于 \${table} 表。有效列: \${validCols.join(", ")}\`
+    );
+  }
+}
+
 export const query = tool({
   description: "查询数据库表记录",
   args: {
@@ -284,6 +299,7 @@ export const query = tool({
     let sql = \`SELECT * FROM \${args.table}\`;
 
     if (where && typeof where === "object" && Object.keys(where).length > 0) {
+      validateColumns(db, args.table, Object.keys(where));
       const clauses: string[] = [];
       for (const [key, value] of Object.entries(where)) {
         if (value === null) {
@@ -318,6 +334,7 @@ export const insert = tool({
     const data = parseJsonArg(args.data);
 
     const keys = Object.keys(data);
+    validateColumns(db, args.table, keys);
     const placeholders = keys.map(() => "?").join(", ");
     const sql = \`INSERT INTO \${args.table} (\${keys.join(", ")}) VALUES (\${placeholders})\`;
     const values = keys.map((k: string) => data[k]);
@@ -338,6 +355,9 @@ export const update = tool({
 
     const where = parseJsonArg(args.where);
     const data = parseJsonArg(args.data);
+
+    validateColumns(db, args.table, Object.keys(data));
+    validateColumns(db, args.table, Object.keys(where));
 
     if (args.table === "tasks" && data.status && where?.id) {
       try {
