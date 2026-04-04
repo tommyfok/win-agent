@@ -55,6 +55,8 @@ export class SessionManager {
   private activeSessions: Map<string, string> = new Map();
   /** "taskId-role" → sessionId for task-scoped roles (DEV, QA) */
   private taskSessions: Map<string, string> = new Map();
+  /** sessionId → pending context (role identity + memories) to prepend on first dispatch */
+  private pendingContext: Map<string, string> = new Map();
   /** Unique prefix for this workspace's sessions */
   private sessionPrefix: string;
 
@@ -77,6 +79,45 @@ export class SessionManager {
       this.activeSessions.set(role, sessionId);
     }
     this.persistSessionIds();
+
+    // Wait for async agent bind prompts to complete.
+    // promptAsync returns immediately but the LLM processes in background.
+    // We need to wait so that: (1) the web UI sees proper assistant responses,
+    // (2) the scheduler doesn't conflict with in-progress bind responses.
+    await this.waitForSessionsReady();
+  }
+
+  /**
+   * Wait for all persistent sessions to become idle (bind responses complete).
+   * Polls session status via event stream with a timeout.
+   */
+  private async waitForSessionsReady(): Promise<void> {
+    const maxWait = 60_000; // 60s max
+    const pollInterval = 2_000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWait) {
+      let allIdle = true;
+      for (const [role, sessionId] of this.activeSessions) {
+        try {
+          // Check session messages - if assistant has responded, session is ready
+          const msgs = await this.client.session.messages({ path: { id: sessionId } });
+          const messages = (msgs.data ?? []) as Array<{ role?: string }>;
+          const hasAssistantResponse = messages.some((m) => m.role === "assistant");
+          if (!hasAssistantResponse) {
+            allIdle = false;
+            break;
+          }
+        } catch {
+          allIdle = false;
+          break;
+        }
+      }
+      if (allIdle) return;
+      await new Promise<void>((r) => setTimeout(r, pollInterval));
+    }
+    // Timeout — proceed anyway, sessions may work but bind might not be done
+    console.log("   ⚠️  Session 初始化等待超时，继续启动");
   }
 
   /**
@@ -283,9 +324,13 @@ export class SessionManager {
 
   /**
    * Create a new session for a role.
-   * Uses the opencode agent system: session.prompt with agent parameter
-   * to load the role's agent config from .opencode/agents/{role}.md.
-   * Then recalls recent memories.
+   *
+   * Only creates the session — does NOT call session.prompt.
+   * Role identity (from .opencode/agents/{role}.md) is loaded by opencode
+   * automatically when dispatcher passes `agent: role` in session.prompt.
+   *
+   * Pending context (role prompt + memories) is stored in pendingContext map
+   * and prepended to the first real dispatch prompt by the dispatcher.
    */
   private async createRoleSession(role: string): Promise<string> {
     // Create session (with retry for transient server issues)
@@ -297,60 +342,68 @@ export class SessionManager {
     );
     const sessionId = sessionResult.data!.id;
 
-    // Inject role identity: load full role prompt so the agent knows its responsibilities
-    const rolePrompt = loadRolePrompt(this.workspace, role);
+    // Associate agent with session via promptAsync.
+    // This binds the agent config (.opencode/agents/{role}.md) to the session
+    // and triggers LLM inference asynchronously. Using promptAsync (instead of
+    // prompt with noReply) ensures:
+    // 1. Returns immediately (HTTP 204) — doesn't block session creation
+    // 2. LLM generates a proper assistant response in the background
+    // 3. The web UI sees a normal user→assistant message pair (no "stuck thinking")
     await withRetry(
       () =>
-        withTimeout(
-          this.client.session.prompt({
-            path: { id: sessionId },
-            body: {
-              agent: role,
-              noReply: true,
-              parts: [
-                {
-                  type: "text",
-                  text: `# 你的身份：${role}\n\n请仔细阅读以下角色定义，这是你的工作职责和行为准则：\n\n${rolePrompt}\n\n---\n你已准备就绪。等待引擎调度器为你分配任务。`,
-                },
-              ],
-            },
-          }),
-          2 * 60 * 1000,
-          `${role} identity inject`,
-        ),
-      { maxAttempts: 2, label: `${role} identity inject` },
+        this.client.session.promptAsync({
+          path: { id: sessionId },
+          body: {
+            agent: role,
+            parts: [
+              {
+                type: "text",
+                text: `你是 ${role} 角色，已准备就绪。等待引擎调度器为你分配任务。`,
+              },
+            ],
+          },
+        }),
+      { maxAttempts: 2, label: `${role} agent bind` },
     );
 
-    // Recall recent memories (last 7 days)
-    await this.recallMemories(sessionId, role);
+    // Build pending context: role identity + memories
+    // This will be prepended to the first dispatch prompt
+    const parts: string[] = [];
+
+    // Role prompt (so agent knows its full responsibilities on first dispatch)
+    try {
+      const rolePrompt = loadRolePrompt(this.workspace, role);
+      parts.push(`# 你的身份：${role}\n\n以下是你的角色定义、工作职责和行为准则：\n\n${rolePrompt}`);
+    } catch {
+      // Role prompt not found — non-fatal
+    }
+
+    // Recent memories
+    try {
+      const recallPrompt = await buildVectorRecallPrompt(role);
+      if (recallPrompt) parts.push(recallPrompt);
+    } catch {
+      // Memory recall failed — non-fatal
+    }
+
+    if (parts.length > 0) {
+      this.pendingContext.set(sessionId, parts.join("\n\n---\n\n"));
+    }
 
     return sessionId;
   }
 
   /**
-   * Recall recent memories for a role and inject them into the session.
-   * Uses vector similarity search when context is available.
+   * Consume and return any pending context for a session (first dispatch only).
+   * Returns empty string if no pending context.
    */
-  private async recallMemories(
-    sessionId: string,
-    role: string,
-    currentContext?: string
-  ): Promise<void> {
-    try {
-      const prompt = await buildVectorRecallPrompt(role, currentContext);
-      if (!prompt) return;
-
-      await this.client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          agent: role,
-          noReply: true,
-          parts: [{ type: "text", text: prompt }],
-        },
-      });
-    } catch {
-      // Memory recall failed — non-fatal, session is still usable
+  consumePendingContext(sessionId: string): string {
+    const ctx = this.pendingContext.get(sessionId);
+    if (ctx) {
+      this.pendingContext.delete(sessionId);
+      return ctx;
     }
+    return "";
   }
 
   /**

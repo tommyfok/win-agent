@@ -775,6 +775,111 @@ SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at
 
 ---
 
+### 阶段 11：Harness 优化——基于 Anthropic 工程实践
+
+> 参考：[Harness design for long-running apps](https://www.anthropic.com/engineering/harness-design-long-running-apps)
+>
+> 核心原则：**Harness 中每个组件都是对模型能力局限性的假设。随着模型进步，需要定期验证这些假设是否仍然成立。不是越复杂越好，而是恰好匹配当前模型能力边界。**
+
+#### 11.1 Load-Bearing Components 审计
+
+**问题**：当前 5 角色 + 工作流模板系统可能过度设计。文章只用 3 个 agent（Planner → Generator → Evaluator）就构建了高质量的全栈开发系统。
+
+**审计清单**（每次模型升级后重新评估）：
+
+| 组件 | 假设的模型局限 | 验证方法 | 如果不再 load-bearing |
+|------|--------------|---------|---------------------|
+| SA 独立角色 | 模型无法同时做需求理解和技术设计 | 让 PM 直接输出任务拆分，比较质量 | 合并 SA 职责到 PM（PM = Planner） |
+| OPS 独立角色 | 模型无法自我优化 prompt 和流程 | 去掉 OPS，用定期人工审查替代 | 降级为周期性脚本而非常驻角色 |
+| PM/SA 分离 | 需求和技术设计放在一起上下文太长 | 测试合并后的 Planner 角色质量 | PM 吸收 SA，成为唯一的规划角色 |
+| 工作流模板系统 | 模型无法自主判断应该走什么流程 | 移除 workflow，让 PM 自行决定流程 | 简化为 PM 指令驱动，无需模板 |
+| 每 sprint QA 验收 | 模型生成代码不可靠，需要频繁检查 | 只在最终做一次 QA，比较缺陷率 | QA 改为最终一次性验收（文章验证有效） |
+
+**实施方案**（渐进式）：
+- [ ] 第一步：实验合并 PM + SA → 新建 `Planner` 角色，对比 3 个真实需求的任务拆分质量
+- [ ] 第二步：实验 OPS 降级 → 迭代回顾改为引擎自动统计 + PM 汇报，观察 2 个迭代
+- [ ] 第三步：实验去掉工作流模板 → PM 自行决定协作流程，观察是否失控
+- [ ] 根据实验结果决定最终架构（3 角色 vs 5 角色）
+
+#### 11.2 QA Evaluator 专项调优
+
+**问题**：文章明确指出"开箱即用的 Claude QA 很差"——会发现合理问题然后自己解释过去、测试表面化、遗漏边界情况。当前 win-agent 的 QA 角色很可能有同样问题。
+
+**调优策略**：
+
+1. **具体评分维度和硬阈值**（替代模糊的"是否通过"）：
+   - [ ] 定义评分维度：功能完整性、边界处理、代码质量、安全性
+   - [ ] 每个维度 1-5 分，任何维度 < 3 分即打回
+   - [ ] QA 必须输出结构化评分 JSON，不允许模糊通过
+
+2. **实际运行测试**（而非纯代码审查）：
+   - [ ] QA prompt 中强制要求运行测试命令（`npm test`, `npx vitest` 等）
+   - [ ] 要求 QA 执行 `git diff` 检查实际改动范围
+   - [ ] 如果有 UI，要求通过 bash 工具实际验证行为
+
+3. **反馈日志驱动调优**：
+   - [ ] 收集 QA 通过但后续发现 bug 的案例（false negative）
+   - [ ] 收集 QA 打回但理由不成立的案例（false positive）
+   - [ ] 每 5 个案例更新一次 QA prompt
+
+4. **分离 QA 评估与 QA 测试**：
+   - [ ] 测试阶段：QA 运行测试、检查代码、收集证据
+   - [ ] 评估阶段：基于收集的证据给出结构化评分
+   - [ ] 两阶段分开，防止"测试不充分就急于下结论"
+
+#### 11.3 Sprint Contract 模式
+
+**问题**：当前流程是 SA 拆分任务 → DEV 直接开发 → QA 验收。DEV 和 QA 之间缺少预实现协商，导致验收标准理解不一致。
+
+**方案**：DEV 开始实现前，与 QA 交换一轮消息确认验收标准。
+
+**流程变更**：
+```
+当前: SA → 任务 → DEV 开发 → QA 验收（理解可能不一致）
+改为: SA → 任务 → DEV 提出实现计划和验收标准 → QA 确认/补充 → DEV 开发 → QA 验收
+```
+
+**实现**：
+- [ ] DEV prompt 新增：接到任务后先输出实现计划和预期验收点，发消息给 QA 确认
+- [ ] QA prompt 新增：收到 DEV 的实现计划后，确认或补充验收标准，回复 DEV
+- [ ] 任务状态新增 `planning` 阶段（在 `pending_dev` 和 `in_dev` 之间）
+- [ ] DEV 收到 QA 确认后才进入 `in_dev`
+
+**注意**：这是文章中效果最显著的模式之一。但如果实验证明模型能力足够（11.1 审计），可以简化或去掉。
+
+#### 11.4 Context 管理优化
+
+**问题**：当前固定 60% 阈值触发 session 轮转。文章发现 Opus 4.6 可以单 session 连续运行 2+ 小时不需要分割。
+
+**改进**：
+- [ ] 轮转阈值从 60% 提高到 80%（减少不必要的轮转开销）
+- [ ] 动态阈值：通过 opencode API 获取实际模型 context limit（已在之前对话中计划）
+- [ ] 增加 "context anxiety" 检测：如果角色输出突然变短（< 前 3 次平均的 30%）且任务未完成，提前触发轮转
+- [ ] 轮转时使用 context reset（当前做法）而非 compaction（文章验证 reset 优于 compaction）
+
+#### 11.5 成本追踪与 ROI 分析
+
+**问题**：缺乏每个角色的成本效益分析。文章明确展示了 solo agent ($9) vs harness ($200) 的对比，以及简化后 harness ($125) 接近同等质量。
+
+**方案**：
+- [ ] `role_outputs` 表已有 `input_tokens` / `output_tokens`，新增定期汇总
+- [ ] 引擎每轮调度后累计统计各角色 token 消耗
+- [ ] `win-agent status` 增加成本概览：各角色 token 消耗、消息处理量、平均响应时间
+- [ ] OPS（或引擎自动）生成成本报告，识别 ROI 低的角色/环节
+- [ ] 基于成本数据验证 11.1 的审计结论
+
+#### 11.6 评分标准即引导（Criteria as Steering）
+
+**问题**：文章发现评分标准不仅是评估工具，还是输出引导工具——标准的措辞直接影响 agent 的工作方向。
+
+**应用**：
+- [ ] 审查所有角色 prompt 中的评价性描述，确保引导方向正确
+- [ ] SA 的任务拆分标准：强调"可独立交付"和"验收标准明确"，而非"拆分足够细"
+- [ ] QA 的验收标准：强调"核心功能可用"和"边界情况处理"，而非"代码风格完美"
+- [ ] DEV 的自测标准：强调"功能正确性"和"破坏性变更检查"，而非"100% 覆盖率"
+
+---
+
 ## 开发顺序总结
 
 ```
@@ -794,9 +899,17 @@ SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at
     ↓
 阶段 8  ━━━━━━━━━━━━━━━━━━━━━━  迭代回顾 + OPS 优化
     ↓
-阶段 9  ━━━━━━━━━━━━━━━━━━━━━━  健壮性 + 边界处理
+阶段 9  ━━━━━━━━━━━━━━━━━━━━━━  任务灵活管理 + 健壮性 + 数据可追溯性
     ↓
 阶段 10 ━━━━━━━━━━━━━━━━━━━━━━  数据可追溯性
+    ↓
+阶段 11 ━━━━━━━━━━━━━━━━━━━━━━  Harness 优化 (Anthropic 工程实践)
+                                 ├── 11.1 Load-Bearing 审计 (最高优先)
+                                 ├── 11.2 QA Evaluator 调优 (高)
+                                 ├── 11.3 Sprint Contract (中)
+                                 ├── 11.4 Context 管理优化 (中)
+                                 ├── 11.5 成本追踪 (低)
+                                 └── 11.6 评分标准即引导 (低)
 ```
 
 ---
@@ -805,10 +918,14 @@ SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at
 
 1. **消息驱动而非状态机**：流程模板只提供上下文（当前阶段、角色职责），不控制执行顺序。角色间的实际协作通过 messages 表自由流动。
 2. **双层权限**：opencode agent 配置控制工具可见性（静态），自定义工具内部 `checkPermission` 校验细粒度条件（动态）。
-3. **Session 不持久化**：每次启动创建新 session，通过 memory 表回忆恢复上下文。
+3. **Session 不持久化**：每次启动创建新 session，通过 memory 表回忆恢复上下文。这本质上是 Anthropic 推荐的 "context reset with structured handoff artifacts" 模式。
 4. **DEV/QA 按任务创建 session**：不在启动时创建，被调度时按需创建。
 5. **PM 是唯一面向用户的角色**：其他角色的消息通过 PM session 间接呈现给用户。
 6. **.win-agent/roles/*.md 是 prompt 源文件**：引擎启动时加上 frontmatter 同步到 .opencode/agents/*.md。
 7. **Onboarding 由 PM 直接写文件**：首次启动时 PM 拥有 `.win-agent/roles/` 写权限，直接改写角色 prompt。这是一次性的特殊流程，用户全程在对话中参与即等同于审批。
 8. **Proposal 是角色到用户的异步提案通道**：区别于 messages（紧急阻塞），proposals 用于"不阻塞但用户应知道"的事项。角色在任何时候都可以提交，不需要特定触发时机。只在用户主动与 PM 交互时才处理。PM 是唯一可以变更 proposal 状态的角色。
 9. **自我反思只在关键节点触发**：工作流结束和被打回时反思，session 轮转时只写记忆不做反思，避免噪音。
+10. **Generator-Evaluator 分离**（Anthropic 最佳实践）：DEV（generator）和 QA（evaluator）必须是独立角色。让 agent 自我评估不如让独立 evaluator 评估——"让怀疑者变得怀疑"比"让创造者变得自我批判"更容易调优。
+11. **Load-Bearing Components 原则**（Anthropic 最佳实践）：Harness 中每个组件都编码了对模型能力局限性的假设。模型升级时，必须重新验证每个组件是否仍然 load-bearing。不是越复杂越好，最优 harness 是恰好匹配当前模型能力边界的那个设计。当前 5 角色架构需要定期审计（见阶段 11.1）。
+12. **评分标准即引导**（Anthropic 最佳实践）：QA 的评分标准和角色 prompt 中的评价性描述不仅是评估工具，更是输出引导工具。标准的措辞直接影响 agent 的工作方向和质量。
+13. **Context Reset 优于 Compaction**（Anthropic 最佳实践）：清空上下文 + 结构化 handoff artifact 的效果优于原地摘要压缩。win-agent 的 session rotation（写记忆 → 新 session → 回忆）本质上就是 context reset 模式，方向正确。

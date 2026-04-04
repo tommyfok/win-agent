@@ -80,7 +80,9 @@ export async function dispatchToRole(
     : null;
 
   // 4. Build and send prompt
-  const prompt = buildDispatchPrompt(role, messages, knowledge, workflowContext, taskContext);
+  const pendingContext = sessionManager.consumePendingContext(sessionId);
+  const prompt = (pendingContext ? pendingContext + "\n\n---\n\n" : "")
+    + buildDispatchPrompt(role, messages, knowledge, workflowContext, taskContext);
 
   // session.prompt with retry + timeout (5 min per attempt, 3 attempts)
   const result = await withRetry(
