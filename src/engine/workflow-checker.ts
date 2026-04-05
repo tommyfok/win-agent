@@ -36,15 +36,19 @@ export function checkWorkflowCompletion(
         }
       }
 
-      // Send notification to PM
-      insert("messages", {
-        from_role: "system",
-        to_role: "PM",
-        type: "system",
-        content: buildCompletionMessage(wf),
-        status: "unread",
-        related_workflow_id: wf.id,
-      });
+      // Send notification to PM — skip for iteration-review since PM already
+      // sent the review-completion message that triggered this transition.
+      // Sending again would cause PM to re-archive and re-report redundantly.
+      if (wf.template !== "iteration-review") {
+        insert("messages", {
+          from_role: "system",
+          to_role: "PM",
+          type: "system",
+          content: buildCompletionMessage(wf),
+          status: "unread",
+          related_workflow_id: wf.id,
+        });
+      }
 
       // Send reflection trigger to all participating roles
       sendReflectionTriggers(wf);
@@ -103,7 +107,8 @@ function checkCompletion(wf: any): boolean {
 }
 
 /**
- * For new-feature and bug-fix: all associated tasks must be done.
+ * For new-feature and bug-fix: all non-cancelled tasks must be done,
+ * and at least one non-cancelled task must exist.
  */
 function checkAllTasksDone(workflowId: number): boolean {
   const tasks = select("tasks", { workflow_id: workflowId }) as Array<{
@@ -114,7 +119,8 @@ function checkAllTasksDone(workflowId: number): boolean {
   // No tasks yet — workflow not complete
   if (tasks.length === 0) return false;
 
-  return tasks.every((t) => t.status === "done");
+  const active = tasks.filter((t) => t.status !== "cancelled");
+  return active.length > 0 && active.every((t) => t.status === "done");
 }
 
 /**
@@ -148,7 +154,7 @@ function checkPhaseAdvancement(wf: any): void {
     `SELECT id FROM messages
      WHERE related_workflow_id = ?
        AND from_role = 'PM'
-       AND created_at > ?
+       AND created_at >= ?
      LIMIT 1`,
     [wf.id, wf.updated_at],
   );

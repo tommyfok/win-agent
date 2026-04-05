@@ -8,6 +8,7 @@ import {
 import { insert as dbInsert } from "../db/repository.js";
 import { checkAndBlockUnmetDependencies } from "./dependency-checker.js";
 import { withRetry, withTimeout } from "./retry.js";
+import { checkAndRotate } from "./memory-rotator.js";
 
 /**
  * Dispatch messages to a role, grouped by related_task_id.
@@ -20,7 +21,7 @@ export async function dispatchToRoleGrouped(
   role: string,
   messages: MessageRow[],
   workspace: string,
-): Promise<{ sessionId: string; inputTokens: number; outputTokens: number }> {
+): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // Group messages by related_task_id
   const groups = new Map<number | null, MessageRow[]>();
   for (const msg of messages) {
@@ -33,14 +34,25 @@ export async function dispatchToRoleGrouped(
     group.push(msg);
   }
 
-  // Dispatch each group separately, accumulate tokens
-  let lastSessionId = "";
+  // Dispatch each group separately; check rotation per group to avoid cross-task token accumulation
+  let lastSessionId: string | null = null;
   let totalInput = 0;
   let totalOutput = 0;
 
-  for (const [, group] of groups) {
+  for (const [taskKey, group] of groups) {
     const result = await dispatchToRole(client, sessionManager, role, group, workspace);
-    lastSessionId = result.sessionId || lastSessionId;
+    if (result.sessionId) {
+      // Rotation check uses this group's own sessionId and taskId (not accumulated totals)
+      await checkAndRotate(
+        sessionManager,
+        role,
+        result.sessionId,
+        result.inputTokens,
+        result.outputTokens,
+        taskKey ?? undefined,
+      );
+      lastSessionId = result.sessionId;
+    }
     totalInput += result.inputTokens;
     totalOutput += result.outputTokens;
   }
@@ -88,7 +100,7 @@ export async function dispatchToRole(
   role: string,
   messages: MessageRow[],
   workspace: string,
-): Promise<{ sessionId: string; inputTokens: number; outputTokens: number }> {
+): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
   if (role === "DEV" || role === "QA") {
     const SKIP_STATUSES = ["paused", "cancelled", "blocked"];
@@ -113,7 +125,7 @@ export async function dispatchToRole(
     }
     messages = filtered;
     if (messages.length === 0) {
-      return { sessionId: "", inputTokens: 0, outputTokens: 0 };
+      return { sessionId: null, inputTokens: 0, outputTokens: 0 };
     }
   }
 

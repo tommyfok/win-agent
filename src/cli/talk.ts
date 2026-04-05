@@ -1,5 +1,6 @@
 import { exec } from "node:child_process";
 import { platform } from "node:os";
+import { select } from "@inquirer/prompts";
 import { checkEngineRunning } from "../config/index.js";
 import { SessionManager } from "../engine/session-manager.js";
 
@@ -7,7 +8,7 @@ export async function talkCommand() {
   const workspace = process.cwd();
 
   // 1. Check engine is running
-  const { running, pid } = checkEngineRunning(workspace);
+  const { running } = checkEngineRunning(workspace);
   if (!running) {
     console.log("⚠️  win-agent 未运行");
     console.log("   请先执行: npx win-agent start");
@@ -26,22 +27,25 @@ export async function talkCommand() {
     }
   } catch { /* use default */ }
 
-  // 3. Build the full URL: {serverUrl}/{base64(workspace)}/session/{pmSessionId}
+  // 3. Let user pick a role
   const sessions = SessionManager.loadPersistedSessions(workspace);
-  const pmSessionId = sessions?.PM;
-
-  let targetUrl: string;
-  if (pmSessionId) {
-    const workspaceBase64 = Buffer.from(workspace).toString("base64url");
-    targetUrl = `${serverUrl}/${workspaceBase64}/session/${pmSessionId}`;
-  } else {
-    targetUrl = serverUrl;
+  if (!sessions || Object.keys(sessions).length === 0) {
+    console.log("⚠️  未找到任何 session，请确认 win-agent 已正常启动");
+    process.exit(1);
   }
 
-  console.log("🔗 正在打开 PM 聊天页面...");
-  console.log(`   ${targetUrl}`);
+  const workspaceBase64 = Buffer.from(workspace).toString("base64url");
+  const entries = Object.entries(sessions);
 
-  openBrowser(targetUrl);
+  const sessionId = await select({
+    message: "请选择要打开的角色",
+    choices: entries.map(([role, id]) => ({ name: role, value: id })),
+  });
+
+  const role = entries.find(([, id]) => id === sessionId)![0];
+  const url = `${serverUrl}/${workspaceBase64}/session/${sessionId}`;
+  console.log(`正在打开 ${role} 聊天页面...`);
+  openBrowser(url);
 }
 
 function openBrowser(url: string): void {
@@ -54,10 +58,9 @@ function openBrowser(url: string): void {
   } else {
     cmd = `xdg-open "${url}"`;
   }
-
   exec(cmd, (err) => {
     if (err) {
-      console.log("   ⚠️  无法自动打开浏览器，请手动访问上方链接");
+      console.log(`⚠️  无法自动打开浏览器，请手动访问: ${url}`);
     }
   });
 }

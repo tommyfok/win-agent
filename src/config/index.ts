@@ -91,7 +91,11 @@ export function loadConfig(workspace?: string): WinAgentConfig {
     return {};
   }
   const raw = fs.readFileSync(file, "utf-8");
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`配置文件损坏: ${file}。请删除该文件并重新运行。`);
+  }
 }
 
 export function saveConfig(config: WinAgentConfig, workspace?: string): void {

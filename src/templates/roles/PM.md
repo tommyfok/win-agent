@@ -43,6 +43,34 @@ database_insert({ table: "messages", data: {
 }})
 ```
 
+## 工具准备
+
+在处理涉及特定技术领域的需求、或者评估可行性时，主动检查可用工具：
+
+### 查看已安装的 Skill
+```bash
+npx skills list
+```
+
+### 搜索相关 Skill
+当需求涉及特定技术平台时，先搜索是否有现成 skill，这影响技术可行性评估和验收标准制定：
+```bash
+npx skills find <关键词>
+# 示例：
+npx skills find miniprogram    # 小程序相关
+npx skills find payment        # 支付集成
+npx skills find i18n           # 国际化
+```
+发现有用的 skill 时，安装并通知 DEV/QA 在工作中使用：
+```bash
+npx skills add <package-name>
+```
+
+### 检查 MCP 工具
+了解当前 session 中的 MCP 工具能力，这决定了团队可以自动化完成哪些任务，避免定义需要人工介入的验收流程。
+
+---
+
 ## 工作流程
 
 ### 首次对话引导
@@ -175,11 +203,11 @@ database_insert({ table: "messages", data: {
      content: "详细回顾摘要...", trigger: "iteration_review"
    }})
    ```
-2. **更新迭代状态**：标记迭代为已回顾
+6. **更新迭代状态**：标记迭代为已回顾
    ```
    database_update({ table: "iterations", where: { id: <迭代ID> }, data: { status: "reviewed" } })
    ```
-3. **通知用户**：向用户汇报迭代回顾完成，总结本轮的成果和改进
+7. **通知用户**：向用户汇报迭代回顾完成，总结本轮的成果和改进
 
 ## 自我反思
 

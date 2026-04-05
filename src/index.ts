@@ -7,6 +7,8 @@ import { statusCommand } from "./cli/status.js";
 import { cancelCommand } from "./cli/cancel.js";
 import { stopCommand } from "./cli/stop.js";
 import { cleanCommand } from "./cli/clean.js";
+import { logCommand } from "./cli/log.js";
+import { updateCommand } from "./cli/update.js";
 import { registerTaskCommands } from "./cli/task.js";
 
 const program = new Command();
@@ -41,6 +43,16 @@ program
   .command("stop")
   .description("Stop the engine")
   .action(stopCommand);
+
+program
+  .command("log")
+  .description("Tail the engine log file")
+  .action(logCommand);
+
+program
+  .command("update")
+  .description("Update role templates in workspace to the latest package version")
+  .action(updateCommand);
 
 program
   .command("clean")

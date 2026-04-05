@@ -1,5 +1,8 @@
 import { getDb } from "./connection.js";
 
+/** Cache of whether each table has an updated_at column (avoids repeated PRAGMA queries). */
+const tableHasUpdatedAt = new Map<string, boolean>();
+
 export interface QueryOptions {
   orderBy?: string;
   limit?: number;
@@ -33,6 +36,10 @@ export function select(
   }
 
   if (options?.orderBy) {
+    // Whitelist: allow "column [ASC|DESC]" or "table.column [ASC|DESC]"
+    if (!/^[\w.]+(\s+(ASC|DESC))?$/i.test(options.orderBy)) {
+      throw new Error(`Invalid orderBy value: ${options.orderBy}`);
+    }
     sql += ` ORDER BY ${options.orderBy}`;
   }
   if (options?.limit !== undefined) {
@@ -73,10 +80,15 @@ export function update(
     return `${key} = ?`;
   });
 
-  // Auto-update updated_at if the table has the column
+  // Auto-update updated_at if the table has the column (result cached per table)
   if (!data.updated_at) {
-    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    if (cols.some((c) => c.name === "updated_at")) {
+    let hasCol = tableHasUpdatedAt.get(table);
+    if (hasCol === undefined) {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      hasCol = cols.some((c) => c.name === "updated_at");
+      tableHasUpdatedAt.set(table, hasCol);
+    }
+    if (hasCol) {
       setClauses.push("updated_at = CURRENT_TIMESTAMP");
     }
   }

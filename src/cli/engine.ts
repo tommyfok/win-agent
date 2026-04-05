@@ -19,6 +19,7 @@ import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
 import { startSchedulerLoop, stopSchedulerLoop } from "../engine/scheduler.js";
 import { detectModelContextLimit } from "../engine/memory-rotator.js";
+import { setSimilarityThreshold } from "../embedding/memory.js";
 
 let serverHandle: OpencodeServerHandle | null = null;
 let sessionManager: SessionManager | null = null;
@@ -36,7 +37,15 @@ export async function engineCommand(workspace: string) {
   writePidFile(workspace);
 
   // Open database
-  setEmbeddingDimension(getEmbeddingDimension());
+  const embeddingDim = getEmbeddingDimension();
+  setEmbeddingDimension(embeddingDim);
+  // Adjust similarity threshold based on embedding model dimension.
+  // Default 0.3 is calibrated for local bge-small-zh-v1.5 (512-dim, L2 distance).
+  // OpenAI text-embedding-3-small (1536-dim) produces cosine-normalized L2 distances
+  // in [0, 2], requiring a higher threshold (~1.0) for meaningful filtering.
+  if (embeddingDim === 1536) {
+    setSimilarityThreshold(1.0);
+  }
   const dbPath = getDbPath(workspace);
   openDb(dbPath);
 

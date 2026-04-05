@@ -1,34 +1,5 @@
 import { select, update, insert, rawQuery } from "../db/repository.js";
 
-/**
- * Check if adding a dependency (taskId → dependsOn) would create a cycle.
- * Uses DFS from dependsOn to see if taskId is reachable.
- */
-export function wouldCreateCycle(taskId: number, dependsOn: number): boolean {
-  if (taskId === dependsOn) return true;
-
-  const visited = new Set<number>();
-  const stack = [dependsOn];
-
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current === taskId) return true;
-    if (visited.has(current)) continue;
-    visited.add(current);
-
-    const deps = rawQuery(
-      "SELECT depends_on FROM task_dependencies WHERE task_id = ?",
-      [current],
-    ) as Array<{ depends_on: number }>;
-
-    for (const dep of deps) {
-      stack.push(dep.depends_on);
-    }
-  }
-
-  return false;
-}
-
 export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: string): boolean {
   // Already blocked — don't overwrite pre_suspend_status (would create infinite loop)
   if (currentStatus === "blocked") return true;
@@ -81,6 +52,18 @@ export function checkAndUnblockDependencies(): void {
         related_task_id: task.id,
         status: "unread",
       });
+      // Also notify the assigned role directly so DEV/QA can resume without waiting for PM
+      const assignedRole = task.assigned_to as string | null;
+      if (assignedRole && assignedRole !== "PM") {
+        insert("messages", {
+          from_role: "system",
+          to_role: assignedRole,
+          type: "notification",
+          content: `任务 #${task.id}「${task.title}」的依赖已全部完成，可以继续开发了。`,
+          related_task_id: task.id,
+          status: "unread",
+        });
+      }
     }
   }
 }

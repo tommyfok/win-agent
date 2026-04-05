@@ -24,10 +24,20 @@ export function checkAutoTriggers(): void {
 }
 
 /**
- * Reset trigger state (called on engine restart).
+ * Reset trigger state and restore persisted rejection_rate triggers from logs.
+ * Called on engine restart to prevent duplicate notifications for active iterations.
  */
 export function resetTriggers(): void {
   firedTriggers.clear();
+  // Restore previously fired rejection_rate triggers so we don't re-notify PM
+  // for the same iteration after an engine restart (iteration stays 'active').
+  const rows = rawQuery(
+    "SELECT content FROM logs WHERE action = 'trigger_fired' AND content LIKE 'rejection_rate:%'",
+    [],
+  ) as Array<{ content: string }>;
+  for (const row of rows) {
+    firedTriggers.add(row.content);
+  }
 }
 
 /**
@@ -36,9 +46,11 @@ export function resetTriggers(): void {
  * an active iteration and assign them.
  */
 function checkIterationAutoCreate(): void {
-  // Find tasks with no iteration assigned
+  // Find tasks with no iteration assigned and no workflow (pure iteration tasks).
+  // Tasks created by new-feature/bug-fix workflows have a workflow_id and should
+  // not be auto-merged into the current iteration.
   const unassigned = rawQuery(
-    "SELECT id FROM tasks WHERE iteration = 0 AND status != 'cancelled'",
+    "SELECT id FROM tasks WHERE iteration = 0 AND status != 'cancelled' AND workflow_id IS NULL",
     [],
   ) as Array<{ id: number }>;
 
@@ -101,7 +113,8 @@ function checkAllTasksDone(): void {
 
     if (tasks.length === 0) continue;
 
-    const allDone = tasks.every((t) => t.status === "done");
+    const active = tasks.filter((t) => t.status !== "cancelled");
+    const allDone = active.length > 0 && active.every((t) => t.status === "done");
     if (!allDone) continue;
 
     firedTriggers.add(key);
@@ -177,6 +190,8 @@ function checkRejectionRate(): void {
     if (rate <= 0.3) continue;
 
     firedTriggers.add(key);
+    // Persist so we don't re-trigger after engine restart (iteration stays 'active')
+    insert("logs", { role: "system", action: "trigger_fired", content: key });
 
     // Check if there's already an active iteration-review for this iteration
     const existingReview = select("workflow_instances", {

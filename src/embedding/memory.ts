@@ -62,9 +62,10 @@ export interface MemoryEntry {
 /**
  * Build a recall prompt from recent memories for a role, using vector similarity.
  *
- * - Last 7 days: ranked by vector similarity to currentContext
- * - 7-30 days: only included if highly similar (distance < similarityThreshold)
- * - 30+ days: excluded
+ * - Last 7 days: always included
+ * - 7-30 days: only if similar (distance < similarityThreshold)
+ * - 30-90 days: only if highly similar (distance < similarityThreshold * 0.6)
+ * - 90+ days: excluded (cleaned by cleanExpiredMemories)
  *
  * @param role - The role to recall memories for
  * @param currentContext - Current context text for semantic matching (optional)
@@ -136,8 +137,10 @@ export async function buildRecallPrompt(
 
     // Last 7 days: include all
     if (age <= SEVEN_DAYS) return true;
-    // 7-90 days: only high similarity (low distance)
-    return distance < similarityThreshold;
+    // 7-30 days: only high similarity (low distance)
+    if (age <= THIRTY_DAYS) return distance < similarityThreshold;
+    // 30-90 days: only very high similarity (stricter threshold)
+    return distance < similarityThreshold * 0.6;
   });
 
   // Sort by vector distance (most relevant first)
@@ -154,8 +157,8 @@ export async function buildRecallPrompt(
  *
  * Memory lifecycle:
  * - 0-7 days: always recalled
- * - 7-30 days: recalled only if semantically relevant (distance < threshold)
- * - 30-90 days: recalled only if highly relevant (distance < threshold)
+ * - 7-30 days: recalled only if semantically relevant (distance < similarityThreshold)
+ * - 30-90 days: recalled only if highly relevant (distance < similarityThreshold * 0.6)
  * - 90+ days: deleted by this function
  */
 export function cleanExpiredMemories(): number {

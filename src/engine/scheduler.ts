@@ -17,6 +17,8 @@ let running = false;
 
 /** Track whether onboarding agent re-sync has been done */
 let onboardingSynced = false;
+/** Timestamp when onboarding_completed was first detected (for file-settle delay) */
+let onboardingCompletedAt = 0;
 
 /**
  * PM cooldown: after PM finishes a dispatch, wait this many ms before
@@ -50,6 +52,7 @@ export async function startSchedulerLoop(
 ): Promise<void> {
   running = true;
   onboardingSynced = false;
+  onboardingCompletedAt = 0;
   pmConsecutiveCount = 0;
   resetTriggers();
   const roleManager = new RoleManager();
@@ -122,14 +125,16 @@ async function schedulerTick(
           client, sessionManager, "PM", userMessages, workspace,
         );
         const taskId = userMessages.find((m) => m.related_task_id)?.related_task_id;
-        await checkAndRotate(sessionManager, "PM", sessionId, inputTokens, outputTokens, taskId ?? undefined);
+        if (sessionId) {
+          await checkAndRotate(sessionManager, "PM", sessionId, inputTokens, outputTokens, taskId ?? undefined);
+        }
         console.log(`   ✓ PM 调度完成 (用户优先)`);
       } finally {
         roleManager.setBusy("PM", false);
-        pmLastDispatchEnd = Date.now();
+        // Don't set pmLastDispatchEnd here: user-priority messages should not trigger cooldown
       }
-      // User messages always bypass starvation — but still count
-      pmConsecutiveCount++;
+      // User-priority dispatch resets consecutive count (not a "normal" PM dispatch)
+      pmConsecutiveCount = 0;
       // After user message dispatch, check triggers and return
       checkAutoTriggers();
       checkWorkflowCompletion(sessionManager);
@@ -186,16 +191,19 @@ async function schedulerTick(
         workspace,
       );
 
-      // Check if session needs rotation
-      const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
-      await checkAndRotate(
-        sessionManager,
-        role,
-        sessionId,
-        inputTokens,
-        outputTokens,
-        taskId ?? undefined,
-      );
+      // For PM: check session rotation. DEV/QA rotation is handled per-group
+      // inside dispatchToRoleGrouped to avoid cross-task token accumulation.
+      if (role === "PM" && sessionId) {
+        const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
+        await checkAndRotate(
+          sessionManager,
+          role,
+          sessionId,
+          inputTokens,
+          outputTokens,
+          taskId ?? undefined,
+        );
+      }
       console.log(`   ✓ ${role} 调度完成`);
     } finally {
       roleManager.setBusy(role, false);
@@ -217,18 +225,22 @@ async function schedulerTick(
   checkWorkflowCompletion(sessionManager);
 
   // Check if onboarding just completed — re-sync agents so updated role prompts take effect.
-  // Wait until PM is not busy to avoid syncing mid-modification.
+  // Wait until PM is not busy AND a 2s settle delay has passed (to let file writes complete).
   if (!onboardingSynced && !roleManager.isBusy("PM")) {
     const rows = select("project_config", { key: "onboarding_completed" });
     if (rows.length > 0) {
-      onboardingSynced = true;
-      syncAgents(workspace);
-      insert("logs", {
-        role: "system",
-        action: "onboarding_sync",
-        content: "Onboarding 完成，已重新同步 Agent 配置",
-      });
-      console.log("   ✓ Onboarding 完成，已重新同步 Agent 配置");
+      if (onboardingCompletedAt === 0) {
+        onboardingCompletedAt = Date.now();
+      } else if (Date.now() - onboardingCompletedAt >= 2000) {
+        onboardingSynced = true;
+        syncAgents(workspace);
+        insert("logs", {
+          role: "system",
+          action: "onboarding_sync",
+          content: "Onboarding 完成，已重新同步 Agent 配置",
+        });
+        console.log("   ✓ Onboarding 完成，已重新同步 Agent 配置");
+      }
     }
   }
 }

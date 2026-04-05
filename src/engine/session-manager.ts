@@ -55,8 +55,6 @@ export class SessionManager {
   private activeSessions: Map<string, string> = new Map();
   /** "taskId-role" → sessionId for task-scoped roles (DEV, QA) */
   private taskSessions: Map<string, string> = new Map();
-  /** sessionId set: tracks sessions that have already received their bind prompt with context */
-  private boundSessions: Set<string> = new Set();
   /** Unique prefix for this workspace's sessions */
   private sessionPrefix: string;
 
@@ -123,11 +121,15 @@ export class SessionManager {
   /**
    * Write active session IDs to .win-agent/sessions.json so other
    * processes (e.g. `win-agent talk`) can read them.
+   * Includes both PM (activeSessions) and DEV/QA task sessions (taskSessions).
    */
   private persistSessionIds(): void {
     const data: Record<string, string> = {};
     for (const [role, id] of this.activeSessions) {
       data[role] = id;
+    }
+    for (const [key, id] of this.taskSessions) {
+      data[`task:${key}`] = id;
     }
     const file = path.join(this.workspace, ".win-agent", "sessions.json");
     fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf-8");
@@ -195,6 +197,7 @@ export class SessionManager {
 
     const sessionId = await this.createRoleSession(role);
     this.taskSessions.set(key, sessionId);
+    this.persistSessionIds();
     return sessionId;
   }
 
@@ -208,7 +211,7 @@ export class SessionManager {
 
   /**
    * Rotate a session: write memory → create new session → recall memories.
-   * Used when context usage exceeds threshold (60%).
+   * Used when context usage exceeds threshold (80%).
    *
    * @returns The new session ID
    */
@@ -278,10 +281,20 @@ export class SessionManager {
   }
 
   /**
-   * Trigger all persistent roles to write memory (used on engine stop).
+   * Trigger all roles (PM + DEV/QA task sessions) to write memory (used on engine stop).
    */
   async writeAllMemories(trigger: string): Promise<void> {
-    for (const [role, sessionId] of this.activeSessions) {
+    // Build a combined list of [role, sessionId] for all active sessions
+    const sessions: Array<[string, string]> = [
+      ...this.activeSessions.entries(),
+      // DEV/QA task sessions: key format is "taskId-role"
+      ...Array.from(this.taskSessions.entries()).map(([key, id]) => {
+        const role = key.split("-")[1]; // e.g. "42-DEV" → "DEV"
+        return [role, id] as [string, string];
+      }),
+    ];
+
+    for (const [role, sessionId] of sessions) {
       try {
         const result = await withTimeout(
           this.client.session.prompt({
@@ -381,8 +394,6 @@ export class SessionManager {
         }),
       { maxAttempts: 2, label: `${role} agent bind` },
     );
-
-    this.boundSessions.add(sessionId);
 
     return sessionId;
   }

@@ -10,7 +10,7 @@ import {
 } from "../config/index.js";
 import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
-import { openDb, closeDb } from "../db/connection.js";
+import { openDb, closeDb, getDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert } from "../db/repository.js";
 import { syncAgents, deployTools } from "../workspace/sync-agents.js";
 import { insertKnowledge } from "../embedding/knowledge.js";
@@ -72,7 +72,7 @@ async function _startCommand() {
   // Ensure DB is open (initWorkspace already opens it, but be safe)
   const dbPath = getDbPath(workspace);
   try {
-    // getDb() would throw if not open; initWorkspace already called openDb
+    getDb();
   } catch {
     openDb(dbPath);
   }

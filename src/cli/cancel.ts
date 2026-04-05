@@ -10,6 +10,7 @@ import {
   insert as dbInsert,
   rawQuery,
 } from "../db/repository.js";
+import { checkAndUnblockDependencies } from "../engine/dependency-checker.js";
 
 export async function cancelCommand(workflowId: string) {
   // 1. Check engine is running
@@ -88,6 +89,9 @@ export async function cancelCommand(workflowId: string) {
     dbUpdate("tasks", { id: task.id }, { status: "cancelled" });
     cancelledCount++;
   }
+
+  // Unblock downstream tasks whose only blocker was one of the cancelled tasks
+  checkAndUnblockDependencies();
 
   // 7. Notify PM via system message
   dbInsert("messages", {
