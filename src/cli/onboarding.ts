@@ -143,6 +143,9 @@ async function _onboardingCommand() {
   console.log("   ✓ 完成");
 
   // ── 完成 ──
+  // Snapshot role file mtimes so `start` can detect user edits
+  snapshotRoleMtimes(workspace);
+
   if (alreadyDone.length === 0) {
     dbInsert("project_config", { key: "onboarding_completed", value: "true" });
   }
@@ -264,6 +267,24 @@ async function importReferenceDir(refDir: string, workspace: string): Promise<nu
     count++;
   }
   return count;
+}
+
+// ─── Mtime 快照 ───────────────────────────────────────────────────────────────
+
+export function snapshotRoleMtimes(workspace: string): void {
+  const rolesDir = path.join(workspace, ".win-agent", "roles");
+  if (!fs.existsSync(rolesDir)) return;
+  const snapshot: Record<string, number> = {};
+  for (const file of fs.readdirSync(rolesDir)) {
+    if (!file.endsWith(".md")) continue;
+    snapshot[file] = fs.statSync(path.join(rolesDir, file)).mtimeMs;
+  }
+  const existing = dbSelect("project_config", { key: "role_mtimes_snapshot" });
+  if (existing.length > 0) {
+    dbUpdate("project_config", { key: "role_mtimes_snapshot" }, { value: JSON.stringify(snapshot) });
+  } else {
+    dbInsert("project_config", { key: "role_mtimes_snapshot", value: JSON.stringify(snapshot) });
+  }
 }
 
 // ─── 角色文件上下文注入 ────────────────────────────────────────────────────────

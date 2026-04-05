@@ -10,7 +10,7 @@ import {
 import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
 import { openDb, closeDb, getDb } from "../db/connection.js";
-import { select as dbSelect } from "../db/repository.js";
+import { select as dbSelect, insert as dbInsert } from "../db/repository.js";
 import { syncAgents, deployTools } from "../workspace/sync-agents.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
@@ -82,10 +82,26 @@ async function _startCommand() {
   deployTools(workspace);
   console.log("   ✓ 数据库工具已部署到 .opencode/tools/");
 
-  // ── 4️⃣ 启动后台引擎 ──
-  console.log("\n4️⃣  启动后台引擎");
+  // ── 4️⃣ 前置检查 ──
+  const onboardDone = dbSelect("project_config", { key: "onboarding_completed" });
+  if (onboardDone.length === 0) {
+    console.log("\n❌ 请先执行 onboard 命令完成项目初始化：");
+    console.log("   npx win-agent onboard");
+    removePidFile();
+    process.exit(1);
+  }
+  await checkRoleFilesReviewed(workspace);
+
+  // ── 5️⃣ 启动后台引擎 ──
+  console.log("\n5️⃣  启动后台引擎");
 
   const projectName = dbSelect("project_config", { key: "projectName" })[0]?.value ?? "未命名";
+
+  // Mark first start as done (must be before closeDb)
+  const alreadyInvoked = dbSelect("project_config", { key: "start_invoked" });
+  if (alreadyInvoked.length === 0) {
+    dbInsert("project_config", { key: "start_invoked", value: "true" });
+  }
 
   // Close DB before spawning daemon (daemon will open its own connection)
   closeDb();
@@ -121,5 +137,40 @@ async function _startCommand() {
   console.log(`   日志: .win-agent/engine.log`);
   console.log("   输入 npx win-agent talk  打开与产品经理的对话页面");
   console.log("   输入 npx win-agent stop  停止引擎");
+}
+
+/**
+ * On first start, compare current role file mtimes against the snapshot saved by
+ * `onboard`. Files that haven't changed since onboard = not yet reviewed by user.
+ * Warns and requires confirmation before proceeding.
+ */
+async function checkRoleFilesReviewed(workspace: string): Promise<void> {
+  // Only run on first invocation
+  const invoked = dbSelect("project_config", { key: "start_invoked" });
+  if (invoked.length > 0) return;
+
+  const snapshotRow = dbSelect("project_config", { key: "role_mtimes_snapshot" });
+  if (snapshotRow.length === 0) return; // no snapshot (onboard not run), skip
+
+  const snapshot: Record<string, number> = JSON.parse(snapshotRow[0].value);
+  const rolesDir = path.join(workspace, ".win-agent", "roles");
+  const unmodified: string[] = [];
+
+  for (const [file, snapshotMtime] of Object.entries(snapshot)) {
+    const filePath = path.join(rolesDir, file);
+    if (!fs.existsSync(filePath)) continue;
+    const currentMtime = fs.statSync(filePath).mtimeMs;
+    if (currentMtime === snapshotMtime) unmodified.push(file);
+  }
+
+  if (unmodified.length === 0) return;
+
+  console.log("\n❌ 以下角色文件自 onboard 后未经修改，请审核后再启动：");
+  for (const file of unmodified) {
+    console.log(`   • .win-agent/roles/${file}`);
+  }
+  console.log("\n   根据项目实际情况调整角色定义，完成后重新执行 npx win-agent start");
+  removePidFile();
+  process.exit(1);
 }
 
