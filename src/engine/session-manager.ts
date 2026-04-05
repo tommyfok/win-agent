@@ -9,8 +9,8 @@ import { withRetry, withTimeout } from "./retry.js";
 import { insert as dbInsert } from "../db/repository.js";
 import { ensureWorkspaceId } from "../config/index.js";
 
-type Role = "PM" | "SA" | "DEV" | "QA" | "OPS";
-const PERSISTENT_ROLES: Role[] = ["PM", "SA", "OPS"];
+type Role = "PM" | "DEV" | "QA";
+const PERSISTENT_ROLES: Role[] = ["PM"];
 
 /** Prompt template for writing memory before session rotation. */
 const WRITE_MEMORY_PROMPT = `你即将被轮转到一个新的 session。请总结你当前的工作状态，包括：
@@ -46,17 +46,17 @@ function loadRolePrompt(workspace: string, role: string): string {
 /**
  * SessionManager manages opencode sessions for all roles.
  *
- * - PM/SA/OPS: persistent sessions created at engine startup
+ * - PM: persistent sessions created at engine startup
  * - DEV/QA: per-task sessions created on demand
  * - All sessions support context-based rotation (write memory → new session → recall)
  */
 export class SessionManager {
-  /** role → sessionId for persistent roles (PM, SA, OPS) */
+  /** role → sessionId for persistent roles (PM) */
   private activeSessions: Map<string, string> = new Map();
   /** "taskId-role" → sessionId for task-scoped roles (DEV, QA) */
   private taskSessions: Map<string, string> = new Map();
-  /** sessionId → pending context (role identity + memories) to prepend on first dispatch */
-  private pendingContext: Map<string, string> = new Map();
+  /** sessionId set: tracks sessions that have already received their bind prompt with context */
+  private boundSessions: Set<string> = new Set();
   /** Unique prefix for this workspace's sessions */
   private sessionPrefix: string;
 
@@ -69,7 +69,7 @@ export class SessionManager {
   }
 
   /**
-   * Initialize sessions for persistent roles (PM, SA, OPS).
+   * Initialize sessions for persistent roles (PM).
    * Cleans up old win-agent sessions first, then creates fresh ones.
    */
   async initPersistentSessions(): Promise<void> {
@@ -166,9 +166,9 @@ export class SessionManager {
   }
 
   /**
-   * Get the session ID for a persistent role (PM, SA, OPS).
+   * Get the session ID for a persistent role (PM).
    */
-  getSession(role: "PM" | "SA" | "OPS"): string {
+  getSession(role: "PM"): string {
     const id = this.activeSessions.get(role);
     if (!id) {
       throw new Error(`No active session for role ${role}`);
@@ -223,6 +223,7 @@ export class SessionManager {
         this.client.session.prompt({
           path: { id: sessionId },
           body: {
+            agent: role,
             parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
           },
         }),
@@ -286,6 +287,7 @@ export class SessionManager {
           this.client.session.prompt({
             path: { id: sessionId },
             body: {
+              agent: role,
               parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
             },
           }),
@@ -325,12 +327,9 @@ export class SessionManager {
   /**
    * Create a new session for a role.
    *
-   * Only creates the session — does NOT call session.prompt.
-   * Role identity (from .opencode/agents/{role}.md) is loaded by opencode
-   * automatically when dispatcher passes `agent: role` in session.prompt.
-   *
-   * Pending context (role prompt + memories) is stored in pendingContext map
-   * and prepended to the first real dispatch prompt by the dispatcher.
+   * Creates the session and sends the bind prompt with full role identity
+   * and recalled memories included. This ensures context survives engine
+   * crashes (no in-memory pendingContext that could be lost).
    */
   private async createRoleSession(role: string): Promise<string> {
     // Create session (with retry for transient server issues)
@@ -342,35 +341,10 @@ export class SessionManager {
     );
     const sessionId = sessionResult.data!.id;
 
-    // Associate agent with session via promptAsync.
-    // This binds the agent config (.opencode/agents/{role}.md) to the session
-    // and triggers LLM inference asynchronously. Using promptAsync (instead of
-    // prompt with noReply) ensures:
-    // 1. Returns immediately (HTTP 204) — doesn't block session creation
-    // 2. LLM generates a proper assistant response in the background
-    // 3. The web UI sees a normal user→assistant message pair (no "stuck thinking")
-    await withRetry(
-      () =>
-        this.client.session.promptAsync({
-          path: { id: sessionId },
-          body: {
-            agent: role,
-            parts: [
-              {
-                type: "text",
-                text: `你是 ${role} 角色，已准备就绪。等待引擎调度器为你分配任务。`,
-              },
-            ],
-          },
-        }),
-      { maxAttempts: 2, label: `${role} agent bind` },
-    );
-
-    // Build pending context: role identity + memories
-    // This will be prepended to the first dispatch prompt
+    // Build bind prompt: role identity + memories + ready message
     const parts: string[] = [];
 
-    // Role prompt (so agent knows its full responsibilities on first dispatch)
+    // Role prompt (so agent knows its full responsibilities from the start)
     try {
       const rolePrompt = loadRolePrompt(this.workspace, role);
       parts.push(`# 你的身份：${role}\n\n以下是你的角色定义、工作职责和行为准则：\n\n${rolePrompt}`);
@@ -386,23 +360,39 @@ export class SessionManager {
       // Memory recall failed — non-fatal
     }
 
-    if (parts.length > 0) {
-      this.pendingContext.set(sessionId, parts.join("\n\n---\n\n"));
-    }
+    parts.push(`你是 ${role} 角色，已准备就绪。等待引擎调度器为你分配任务。`);
+
+    // Associate agent with session via promptAsync.
+    // Includes full role context so it's persisted in the session's
+    // conversation history and survives engine restarts.
+    await withRetry(
+      () =>
+        this.client.session.promptAsync({
+          path: { id: sessionId },
+          body: {
+            agent: role,
+            parts: [
+              {
+                type: "text",
+                text: parts.join("\n\n---\n\n"),
+              },
+            ],
+          },
+        }),
+      { maxAttempts: 2, label: `${role} agent bind` },
+    );
+
+    this.boundSessions.add(sessionId);
 
     return sessionId;
   }
 
   /**
-   * Consume and return any pending context for a session (first dispatch only).
-   * Returns empty string if no pending context.
+   * Consume and return any pending context for a session.
+   * Since context is now included in the bind prompt, this always returns empty.
+   * Kept for API compatibility with dispatcher.
    */
-  consumePendingContext(sessionId: string): string {
-    const ctx = this.pendingContext.get(sessionId);
-    if (ctx) {
-      this.pendingContext.delete(sessionId);
-      return ctx;
-    }
+  consumePendingContext(_sessionId: string): string {
     return "";
   }
 

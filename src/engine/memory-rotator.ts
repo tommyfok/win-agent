@@ -4,20 +4,115 @@ import { insert } from "../db/repository.js";
 
 /**
  * Default context window size (tokens) for rotation calculation.
- * Unified to 200k to match typical large model context windows.
+ * Used as fallback when dynamic detection fails.
  */
 const DEFAULT_MAX_CONTEXT = 200_000;
 
 /**
  * Rotation threshold — rotate when input tokens exceed this fraction of max context.
+ * Raised from 0.6 to 0.8 based on Anthropic's finding that Opus can run
+ * extended sessions without degradation up to ~80% context usage.
  */
-const ROTATION_THRESHOLD = 0.6;
+const ROTATION_THRESHOLD = 0.8;
 
 /**
- * Check whether a session needs rotation based on token usage,
- * and rotate if needed.
+ * Context anxiety: if a role's output token count drops below this fraction
+ * of its recent average (last 3 dispatches), and the task is not yet done,
+ * trigger an early rotation. This detects the model "going quiet" due to
+ * context pressure before it actually hits the hard threshold.
+ */
+const ANXIETY_DROP_RATIO = 0.3;
+const ANXIETY_HISTORY_SIZE = 3;
+
+/** Dynamically detected model context limit (set once at engine startup). */
+let dynamicMaxContext: number | null = null;
+
+/** Per-role output token history for context anxiety detection. */
+const outputHistory: Map<string, number[]> = new Map();
+
+/**
+ * Fetch the model's context limit from the opencode provider API.
+ * Call once at engine startup. Falls back to DEFAULT_MAX_CONTEXT on failure.
+ */
+export async function detectModelContextLimit(
+  client: OpencodeClient,
+): Promise<number> {
+  try {
+    const result = await client.provider.list();
+    const providers = (result.data as any)?.all;
+    if (Array.isArray(providers)) {
+      // Find the largest context limit across all available models
+      let maxCtx = 0;
+      for (const provider of providers) {
+        const models = provider.models;
+        if (models && typeof models === "object") {
+          for (const model of Object.values(models) as any[]) {
+            const ctx = model?.limit?.context;
+            if (typeof ctx === "number" && ctx > maxCtx) {
+              maxCtx = ctx;
+            }
+          }
+        }
+      }
+      if (maxCtx > 0) {
+        dynamicMaxContext = maxCtx;
+        return maxCtx;
+      }
+    }
+  } catch {
+    // Non-fatal — fall back to default
+  }
+  dynamicMaxContext = DEFAULT_MAX_CONTEXT;
+  return DEFAULT_MAX_CONTEXT;
+}
+
+/**
+ * Get the effective max context limit (dynamic or default).
+ */
+function getMaxContext(): number {
+  return dynamicMaxContext ?? DEFAULT_MAX_CONTEXT;
+}
+
+/**
+ * Record output tokens for a role (for context anxiety detection).
+ */
+export function recordOutputTokens(role: string, outputTokens: number): void {
+  let history = outputHistory.get(role);
+  if (!history) {
+    history = [];
+    outputHistory.set(role, history);
+  }
+  history.push(outputTokens);
+  // Keep only recent entries
+  if (history.length > ANXIETY_HISTORY_SIZE + 1) {
+    history.shift();
+  }
+}
+
+/**
+ * Check whether a role shows "context anxiety" — sudden output drop
+ * suggesting the model is struggling with context pressure.
+ */
+function detectContextAnxiety(role: string, outputTokens: number): boolean {
+  const history = outputHistory.get(role);
+  if (!history || history.length < ANXIETY_HISTORY_SIZE) return false;
+
+  // Calculate average of last N entries (excluding current)
+  const recent = history.slice(-(ANXIETY_HISTORY_SIZE + 1), -1);
+  if (recent.length < ANXIETY_HISTORY_SIZE) return false;
+
+  const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  if (avg === 0) return false;
+
+  return outputTokens < avg * ANXIETY_DROP_RATIO;
+}
+
+/**
+ * Check whether a session needs rotation based on token usage
+ * and context anxiety, and rotate if needed.
  *
  * @param inputTokens - The input token count from the last prompt response
+ * @param outputTokens - The output token count from the last prompt response
  * @param role - The role whose session to rotate
  * @param sessionId - The current session ID
  * @param taskId - Optional task ID (for DEV/QA sessions)
@@ -28,25 +123,39 @@ export async function checkAndRotate(
   role: string,
   sessionId: string,
   inputTokens: number,
+  outputTokens: number,
   taskId?: number,
 ): Promise<string> {
-  const usage = inputTokens / DEFAULT_MAX_CONTEXT;
+  const maxContext = getMaxContext();
+  const usage = inputTokens / maxContext;
 
+  // Record output for anxiety detection
+  recordOutputTokens(role, outputTokens);
+
+  // Check hard threshold
   if (usage > ROTATION_THRESHOLD) {
     console.log(
-      `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%，执行 session 轮转`,
+      `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%（阈值 ${Math.round(ROTATION_THRESHOLD * 100)}%），执行 session 轮转`,
     );
     insert("logs", {
       role: "system",
       action: "session_rotation",
-      content: `${role} 上下文使用率 ${Math.round(usage * 100)}%，执行 session 轮转`,
+      content: `${role} 上下文使用率 ${Math.round(usage * 100)}%（限制 ${maxContext} tokens），执行 session 轮转`,
     });
-    const newSessionId = await sessionManager.rotateSession(
-      role,
-      sessionId,
-      taskId,
+    return sessionManager.rotateSession(role, sessionId, taskId);
+  }
+
+  // Check context anxiety (only if we're past 50% usage — don't trigger too early)
+  if (usage > 0.5 && detectContextAnxiety(role, outputTokens)) {
+    console.log(
+      `   🔄 ${role} 检测到 context anxiety（输出突然变短），提前执行 session 轮转`,
     );
-    return newSessionId;
+    insert("logs", {
+      role: "system",
+      action: "session_rotation",
+      content: `${role} context anxiety 检测触发（使用率 ${Math.round(usage * 100)}%，输出 ${outputTokens} tokens 远低于近期平均）`,
+    });
+    return sessionManager.rotateSession(role, sessionId, taskId);
   }
 
   return sessionId;

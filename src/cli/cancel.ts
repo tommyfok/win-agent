@@ -51,7 +51,7 @@ export async function cancelCommand(workflowId: string) {
 
   // 3. Show task overview
   const tasks = dbSelect("tasks", { workflow_id: id });
-  const inProgressStatuses = ["pending_dev", "in_dev", "pending_qa", "in_qa"];
+  const inProgressStatuses = ["pending_dev", "planning", "in_dev", "pending_qa", "in_qa", "paused", "blocked"];
   const inProgressTasks = tasks.filter((t: any) => inProgressStatuses.includes(t.status));
   const doneTasks = tasks.filter((t: any) => t.status === "done");
 

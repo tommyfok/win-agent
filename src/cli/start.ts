@@ -61,7 +61,6 @@ async function _startCommand() {
     console.log("     .win-agent/");
     console.log("     ├── win-agent.db");
     console.log("     ├── roles/");
-    console.log("     ├── workflows/");
     console.log("     ├── attachments/");
     console.log("     └── backups/");
   } else if (initResult.patched.length > 0) {
@@ -172,7 +171,7 @@ async function importProjectContext(workspace: string) {
       default: true,
     });
     if (doScan) {
-      // TODO: 阶段 3 — 调用 SA session 扫描代码生成技术概览
+      // TODO: 阶段 3 — 调用 PM session 扫描代码生成技术概览
       console.log("   ⏳ 代码扫描将在 opencode SDK 集成后启用");
     }
   } else {

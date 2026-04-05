@@ -21,6 +21,7 @@ export interface WinAgentConfig {
   workspaceId?: string;
   provider?: ProviderConfig;
   embedding?: EmbeddingConfig;
+  serverPassword?: string;
 }
 
 /** A named provider+embedding preset stored globally. */

@@ -7,6 +7,7 @@ import { statusCommand } from "./cli/status.js";
 import { cancelCommand } from "./cli/cancel.js";
 import { stopCommand } from "./cli/stop.js";
 import { cleanCommand } from "./cli/clean.js";
+import { registerTaskCommands } from "./cli/task.js";
 
 const program = new Command();
 
@@ -45,6 +46,8 @@ program
   .command("clean")
   .description("Clean .win-agent and .opencode from current directory")
   .action(cleanCommand);
+
+registerTaskCommands(program);
 
 // Internal command — spawned by `start` as a background daemon
 program

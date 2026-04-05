@@ -25,7 +25,6 @@ function getTemplatesDir(): string {
 const WIN_AGENT_DIRS = [
   "",              // .win-agent/
   "roles",         // .win-agent/roles/
-  "workflows",     // .win-agent/workflows/
   "attachments",   // .win-agent/attachments/
   "backups",       // .win-agent/backups/
 ];
@@ -48,10 +47,9 @@ export function initWorkspace(workspace: string): InitResult {
     }
   }
 
-  // 2. Copy role prompts and workflow templates
+  // 2. Copy role prompt templates
   const templatesDir = getTemplatesDir();
   copyTemplates(path.join(templatesDir, "roles"), path.join(winAgentDir, "roles"), ".md");
-  copyTemplates(path.join(templatesDir, "workflows"), path.join(winAgentDir, "workflows"), ".json");
 
   // 3. Initialize database
   const db = openDb(dbPath);

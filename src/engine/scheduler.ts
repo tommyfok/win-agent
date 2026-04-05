@@ -1,11 +1,12 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
 import { RoleManager, ALL_ROLES } from "./role-manager.js";
-import { dispatchToRole, type MessageRow } from "./dispatcher.js";
-import { checkAndRotate } from "./memory-rotator.js";
+import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from "./dispatcher.js";
+import { checkAndRotate, detectModelContextLimit } from "./memory-rotator.js";
 import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
 import { select, insert } from "../db/repository.js";
+import { checkAndUnblockDependencies } from "./dependency-checker.js";
 import { syncAgents } from "../workspace/sync-agents.js";
 
 /** Sleep helper */
@@ -26,6 +27,13 @@ const PM_COOLDOWN_MS = 3000;
 let pmLastDispatchEnd = 0;
 
 /**
+ * PM starvation protection: after N consecutive PM-only dispatches,
+ * skip PM for one tick to let DEV/QA get scheduled.
+ */
+const PM_MAX_CONSECUTIVE = 3;
+let pmConsecutiveCount = 0;
+
+/**
  * Start the scheduler main loop.
  *
  * V1 serial strategy:
@@ -42,6 +50,7 @@ export async function startSchedulerLoop(
 ): Promise<void> {
   running = true;
   onboardingSynced = false;
+  pmConsecutiveCount = 0;
   resetTriggers();
   const roleManager = new RoleManager();
 
@@ -81,11 +90,12 @@ export function stopSchedulerLoop(): void {
 /**
  * Single tick of the scheduler.
  *
- * 1. Iterate roles (PM first), find one with unread messages
- * 2. Dispatch messages to that role
- * 3. Check session rotation
- * 4. Check auto-triggers
- * 5. Check workflow completion
+ * 1. Check blocked tasks for dependency resolution (auto-unblock)
+ * 2. Priority: user messages → PM first (skip cooldown)
+ * 3. Iterate roles (PM first), find one with unread messages
+ * 4. Dispatch messages to that role
+ * 5. Check session rotation
+ * 6. Check auto-triggers and workflow completion
  */
 async function schedulerTick(
   client: OpencodeClient,
@@ -93,7 +103,41 @@ async function schedulerTick(
   roleManager: RoleManager,
   workspace: string,
 ): Promise<void> {
-  // V1 serial: dispatch to at most one role per tick
+  // 0. Auto-unblock tasks whose dependencies are now satisfied
+  checkAndUnblockDependencies();
+
+  // 1. User message priority: if there are unread user→PM messages,
+  //    dispatch them immediately (bypass PM cooldown)
+  if (!roleManager.isBusy("PM")) {
+    const userMessages = select(
+      "messages",
+      { from_role: "user", to_role: "PM", status: "unread" },
+      { orderBy: "created_at ASC" },
+    ) as MessageRow[];
+    if (userMessages.length > 0) {
+      console.log(`   📨 调度 → PM (${userMessages.length} 条用户消息, 优先)`);
+      roleManager.setBusy("PM", true);
+      try {
+        const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
+          client, sessionManager, "PM", userMessages, workspace,
+        );
+        const taskId = userMessages.find((m) => m.related_task_id)?.related_task_id;
+        await checkAndRotate(sessionManager, "PM", sessionId, inputTokens, outputTokens, taskId ?? undefined);
+        console.log(`   ✓ PM 调度完成 (用户优先)`);
+      } finally {
+        roleManager.setBusy("PM", false);
+        pmLastDispatchEnd = Date.now();
+      }
+      // User messages always bypass starvation — but still count
+      pmConsecutiveCount++;
+      // After user message dispatch, check triggers and return
+      checkAutoTriggers();
+      checkWorkflowCompletion(sessionManager);
+      return;
+    }
+  }
+
+  // 2. Normal role dispatch: V1 serial, at most one role per tick
   let dispatched = false;
 
   for (const role of ALL_ROLES) {
@@ -104,6 +148,19 @@ async function schedulerTick(
     // priority over queued role messages.
     if (role === "PM" && Date.now() - pmLastDispatchEnd < PM_COOLDOWN_MS) {
       continue;
+    }
+
+    // PM starvation protection: if PM has been dispatched too many times
+    // consecutively, skip PM for this tick to let DEV/QA get scheduled.
+    if (role === "PM" && pmConsecutiveCount >= PM_MAX_CONSECUTIVE) {
+      // Check if other roles have pending messages
+      const othersPending = ALL_ROLES.some(
+        (r) => r !== "PM" && !roleManager.isBusy(r) &&
+          (select("messages", { to_role: r, status: "unread" }) as MessageRow[]).length > 0,
+      );
+      if (othersPending) {
+        continue;
+      }
     }
 
     // Query unread messages for this role
@@ -119,7 +176,9 @@ async function schedulerTick(
     console.log(`   📨 调度 → ${role} (${messages.length} 条消息)`);
     roleManager.setBusy(role, true);
     try {
-      const { sessionId, inputTokens } = await dispatchToRole(
+      // DEV/QA: group messages by task to ensure correct session & context per task
+      const dispatch = (role === "DEV" || role === "QA") ? dispatchToRoleGrouped : dispatchToRole;
+      const { sessionId, inputTokens, outputTokens } = await dispatch(
         client,
         sessionManager,
         role,
@@ -134,6 +193,7 @@ async function schedulerTick(
         role,
         sessionId,
         inputTokens,
+        outputTokens,
         taskId ?? undefined,
       );
       console.log(`   ✓ ${role} 调度完成`);
@@ -141,6 +201,9 @@ async function schedulerTick(
       roleManager.setBusy(role, false);
       if (role === "PM") {
         pmLastDispatchEnd = Date.now();
+        pmConsecutiveCount++;
+      } else {
+        pmConsecutiveCount = 0;
       }
     }
 
@@ -151,10 +214,11 @@ async function schedulerTick(
   // Always check triggers and completion, even if nothing was dispatched
   // (tasks may have been updated by a previous dispatch's tool calls)
   checkAutoTriggers();
-  checkWorkflowCompletion(workspace, sessionManager);
+  checkWorkflowCompletion(sessionManager);
 
-  // Check if onboarding just completed — re-sync agents so updated role prompts take effect
-  if (!onboardingSynced) {
+  // Check if onboarding just completed — re-sync agents so updated role prompts take effect.
+  // Wait until PM is not busy to avoid syncing mid-modification.
+  if (!onboardingSynced && !roleManager.isBusy("PM")) {
     const rows = select("project_config", { key: "onboarding_completed" });
     if (rows.length > 0) {
       onboardingSynced = true;

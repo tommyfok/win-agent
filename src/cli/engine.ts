@@ -18,6 +18,7 @@ import { SessionManager } from "../engine/session-manager.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
 import { startSchedulerLoop, stopSchedulerLoop } from "../engine/scheduler.js";
+import { detectModelContextLimit } from "../engine/memory-rotator.js";
 
 let serverHandle: OpencodeServerHandle | null = null;
 let sessionManager: SessionManager | null = null;
@@ -59,13 +60,17 @@ export async function engineCommand(workspace: string) {
   sessionManager = new SessionManager(serverHandle.client, workspace);
   try {
     await sessionManager.initPersistentSessions();
-    console.log("✓ PM/SA/OPS Session 已创建");
+    console.log("✓ PM Session 已创建");
   } catch (err) {
     console.log(`❌ Session 初始化失败: ${err}`);
     serverHandle.close();
     removePidFile(workspace);
     process.exit(1);
   }
+
+  // ── Detect model context limit ──
+  const contextLimit = await detectModelContextLimit(serverHandle.client);
+  console.log(`✓ 模型 context 上限: ${contextLimit.toLocaleString()} tokens`);
 
   // Check memories and active workflows
   const memoryCount = rawQuery("SELECT COUNT(*) as cnt FROM memory")[0].cnt;
@@ -94,7 +99,7 @@ export async function engineCommand(workspace: string) {
       type: "system",
       content: [
         "【Onboarding 模式】这是项目首次启动，请进入 Onboarding 流程：",
-        "1. 向用户介绍团队 5 个角色（PM/SA/DEV/QA/OPS）的定位和协作方式",
+        "1. 向用户介绍团队 3 个角色（PM/DEV/QA）的定位和协作方式",
         "2. 逐个角色与用户讨论期望和偏好设定",
         "3. 讨论工作流偏好（MVP 优先 vs 一步到位、迭代节奏等）",
         "4. 完成后请写入 project_config: key='onboarding_completed', value='true'",

@@ -27,6 +27,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       assigned_to     TEXT,
       implementation_notes TEXT,
       rejection_reason    TEXT,
+      pre_suspend_status  TEXT,
       workflow_id     INTEGER REFERENCES workflow_instances(id),
       iteration       INTEGER NOT NULL DEFAULT 0,
       created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -184,6 +185,7 @@ const INDEX_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, submitted_by)",
   "CREATE INDEX IF NOT EXISTS idx_role_outputs_role ON role_outputs(role, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_role_outputs_workflow ON role_outputs(related_workflow_id)",
   "CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)",
 ];
 

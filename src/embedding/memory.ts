@@ -2,6 +2,21 @@ import { getDb } from "../db/connection.js";
 import { insert } from "../db/repository.js";
 import { generateEmbedding } from "./index.js";
 
+/**
+ * Default similarity threshold (L2 distance).
+ * Memories with distance above this are excluded from 7-90 day recall.
+ * Tuned for local bge-small-zh-v1.5 (512-dim). Adjust via setSimilarityThreshold()
+ * if switching to a different embedding model (e.g. OpenAI text-embedding-3-small).
+ */
+let similarityThreshold = 0.3;
+
+/**
+ * Override the similarity threshold at startup.
+ */
+export function setSimilarityThreshold(threshold: number): void {
+  similarityThreshold = threshold;
+}
+
 export interface MemoryData {
   role: string;
   summary: string;
@@ -48,7 +63,7 @@ export interface MemoryEntry {
  * Build a recall prompt from recent memories for a role, using vector similarity.
  *
  * - Last 7 days: ranked by vector similarity to currentContext
- * - 7-30 days: only included if highly similar (distance < 0.3)
+ * - 7-30 days: only included if highly similar (distance < similarityThreshold)
  * - 30+ days: excluded
  *
  * @param role - The role to recall memories for
@@ -122,7 +137,7 @@ export async function buildRecallPrompt(
     // Last 7 days: include all
     if (age <= SEVEN_DAYS) return true;
     // 7-90 days: only high similarity (low distance)
-    return distance < 0.3;
+    return distance < similarityThreshold;
   });
 
   // Sort by vector distance (most relevant first)
@@ -139,8 +154,8 @@ export async function buildRecallPrompt(
  *
  * Memory lifecycle:
  * - 0-7 days: always recalled
- * - 7-30 days: recalled only if semantically relevant (distance < 0.3)
- * - 30-90 days: recalled only if highly relevant (distance < 0.3)
+ * - 7-30 days: recalled only if semantically relevant (distance < threshold)
+ * - 30-90 days: recalled only if highly relevant (distance < threshold)
  * - 90+ days: deleted by this function
  */
 export function cleanExpiredMemories(): number {

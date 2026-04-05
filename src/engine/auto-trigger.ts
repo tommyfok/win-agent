@@ -1,4 +1,5 @@
 import { select, insert, rawQuery, rawRun } from "../db/repository.js";
+import { formatTokens } from "../utils/format.js";
 
 /**
  * Track which auto-trigger conditions have already fired
@@ -13,8 +14,8 @@ const firedTriggers: Set<string> = new Set();
  *
  * Conditions checked:
  * 0. Tasks with no iteration assigned → auto-create/assign iteration
- * 1. All tasks in an active iteration are done → mark completed + trigger OPS
- * 2. Rejection rate > 30% in current iteration → trigger OPS for early review
+ * 1. All tasks in an active iteration are done → mark completed + generate stats → PM
+ * 2. Rejection rate > 30% in current iteration → generate stats → PM for early review
  */
 export function checkAutoTriggers(): void {
   checkIterationAutoCreate();
@@ -31,7 +32,7 @@ export function resetTriggers(): void {
 
 /**
  * Auto-create an iteration and assign tasks that have no iteration (iteration=0).
- * When tasks exist with iteration=0 (typically just created by SA), find or create
+ * When tasks exist with iteration=0 (typically just created by PM), find or create
  * an active iteration and assign them.
  */
 function checkIterationAutoCreate(): void {
@@ -83,7 +84,7 @@ function checkIterationAutoCreate(): void {
 
 /**
  * Check if all tasks in an active iteration are done.
- * If so, mark iteration as completed, create an iteration-review workflow and notify OPS.
+ * If so, mark iteration as completed, generate stats report, and notify PM.
  */
 function checkAllTasksDone(): void {
   const activeIterations = select("iterations", { status: "active" });
@@ -111,29 +112,38 @@ function checkAllTasksDone(): void {
       [iter.id],
     );
 
-    // Create iteration-review workflow
+    // Generate stats report (engine auto-generates, zero LLM cost)
+    const statsReport = generateIterationStats(iter.id);
+
+    // Create iteration-review workflow (simplified: stats → PM review → done)
     const { lastInsertRowid: workflowId } = insert("workflow_instances", {
       template: "iteration-review",
-      phase: "metrics",
+      phase: "review",
       status: "active",
       context: JSON.stringify({ iteration_id: iter.id }),
     });
 
-    // Notify OPS to start review
+    // Notify PM with engine-generated stats
     insert("messages", {
       from_role: "system",
-      to_role: "OPS",
+      to_role: "PM",
       type: "system",
-      content: `迭代 #${iter.id} 的所有任务已完成，请开始迭代回顾。统计本轮打回率、阻塞率等指标，分析问题并起草优化方案。工作流 #${workflowId}，当前阶段：metrics。`,
+      content: [
+        `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。`,
+        "",
+        statsReport,
+        "",
+        "请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。",
+        `审阅完成后，将回顾摘要写入 memory 表，然后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
+      ].join("\n"),
       status: "unread",
       related_workflow_id: workflowId,
     });
 
-    // Log
     insert("logs", {
       role: "system",
       action: "auto_trigger",
-      content: `迭代 #${iter.id} 全部任务完成（已标记 completed），自动触发 iteration-review workflow #${workflowId}`,
+      content: `迭代 #${iter.id} 全部任务完成，已生成统计报告并通知 PM (workflow #${workflowId})`,
     });
 
     console.log(
@@ -144,7 +154,7 @@ function checkAllTasksDone(): void {
 
 /**
  * Check if the rejection rate in any active iteration exceeds 30%.
- * If so, trigger an early OPS review.
+ * If so, generate stats and notify PM for early review.
  */
 function checkRejectionRate(): void {
   const activeIterations = select("iterations", { status: "active" });
@@ -182,10 +192,11 @@ function checkRejectionRate(): void {
 
     if (existingReview.length > 0) continue;
 
-    // Create iteration-review workflow
+    const statsReport = generateIterationStats(iter.id);
+
     const { lastInsertRowid: workflowId } = insert("workflow_instances", {
       template: "iteration-review",
-      phase: "metrics",
+      phase: "review",
       status: "active",
       context: JSON.stringify({
         iteration_id: iter.id,
@@ -196,9 +207,16 @@ function checkRejectionRate(): void {
 
     insert("messages", {
       from_role: "system",
-      to_role: "OPS",
+      to_role: "PM",
       type: "system",
-      content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 30%，请立即进行分析和优化。`,
+      content: [
+        `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 30%，需要关注。`,
+        "",
+        statsReport,
+        "",
+        "请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。",
+        `完成后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
+      ].join("\n"),
       status: "unread",
       related_workflow_id: workflowId,
     });
@@ -206,7 +224,7 @@ function checkRejectionRate(): void {
     insert("logs", {
       role: "system",
       action: "auto_trigger",
-      content: `迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超阈值，自动触发 iteration-review workflow #${workflowId}`,
+      content: `迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超阈值，已通知 PM (workflow #${workflowId})`,
     });
 
     console.log(
@@ -214,3 +232,92 @@ function checkRejectionRate(): void {
     );
   }
 }
+
+/**
+ * Generate iteration statistics report using SQL aggregation.
+ * Replaces OPS role's metrics collection — zero LLM cost.
+ */
+function generateIterationStats(iterationId: number): string {
+  const lines: string[] = [`## 迭代 #${iterationId} 统计报告`];
+
+  // Task summary
+  const taskStats = rawQuery(
+    `SELECT status, COUNT(*) as cnt FROM tasks WHERE iteration = ? GROUP BY status ORDER BY status`,
+    [iterationId],
+  );
+  const totalTasks = taskStats.reduce((s: number, r: any) => s + r.cnt, 0);
+  lines.push(`\n### 任务概况 (共 ${totalTasks} 个)`);
+  for (const row of taskStats) {
+    lines.push(`- ${row.status}: ${row.cnt}`);
+  }
+
+  // Rejection stats from task_events (more accurate than current status)
+  const rejections = rawQuery(
+    `SELECT COUNT(*) as cnt FROM task_events te
+     JOIN tasks t ON te.task_id = t.id
+     WHERE t.iteration = ? AND te.to_status = 'rejected'`,
+    [iterationId],
+  );
+  const rejectionCount = rejections[0]?.cnt ?? 0;
+  const rejectionRate = totalTasks > 0 ? Math.round((rejectionCount / totalTasks) * 100) : 0;
+  lines.push(`\n### 质量指标`);
+  lines.push(`- 累计打回次数: ${rejectionCount}`);
+  lines.push(`- 打回率: ${rejectionRate}%`);
+
+  // Blocked stats
+  const blockedEvents = rawQuery(
+    `SELECT COUNT(DISTINCT te.task_id) as cnt FROM task_events te
+     JOIN tasks t ON te.task_id = t.id
+     WHERE t.iteration = ? AND te.to_status = 'blocked'`,
+    [iterationId],
+  );
+  lines.push(`- 曾被阻塞的任务数: ${blockedEvents[0]?.cnt ?? 0}`);
+
+  // Token consumption
+  const tokenStats = rawQuery(
+    `SELECT role,
+            COUNT(*) as dispatches,
+            SUM(input_tokens) as input_total,
+            SUM(output_tokens) as output_total,
+            SUM(input_tokens + output_tokens) as total
+     FROM role_outputs
+     WHERE related_workflow_id IN (
+       SELECT id FROM workflow_instances
+       WHERE context LIKE '%"iteration_id":${iterationId}%'
+          OR id IN (SELECT DISTINCT workflow_id FROM tasks WHERE iteration = ?)
+     )
+     GROUP BY role ORDER BY total DESC`,
+    [iterationId],
+  );
+  if (tokenStats.length > 0) {
+    lines.push(`\n### Token 消耗`);
+    let grandTotal = 0;
+    for (const row of tokenStats) {
+      const total = row.total ?? 0;
+      grandTotal += total;
+      lines.push(`- ${row.role}: ${formatTokens(total)} tokens (${row.dispatches} 次调度)`);
+    }
+    lines.push(`- 合计: ${formatTokens(grandTotal)} tokens`);
+  }
+
+  // Top rejected tasks (most rejected)
+  const topRejected = rawQuery(
+    `SELECT t.id, t.title, COUNT(*) as reject_count
+     FROM task_events te
+     JOIN tasks t ON te.task_id = t.id
+     WHERE t.iteration = ? AND te.to_status = 'rejected'
+     GROUP BY te.task_id
+     ORDER BY reject_count DESC LIMIT 5`,
+    [iterationId],
+  );
+  if (topRejected.length > 0) {
+    lines.push(`\n### 打回次数最多的任务`);
+    for (const row of topRejected) {
+      lines.push(`- task#${row.id}「${row.title}」: 打回 ${row.reject_count} 次`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+// formatTokens imported from ../utils/format.js

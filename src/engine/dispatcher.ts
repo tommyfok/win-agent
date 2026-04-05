@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
 import { select, update } from "../db/repository.js";
@@ -8,7 +6,47 @@ import {
   type KnowledgeEntry,
 } from "../embedding/knowledge.js";
 import { insert as dbInsert } from "../db/repository.js";
+import { checkAndBlockUnmetDependencies } from "./dependency-checker.js";
 import { withRetry, withTimeout } from "./retry.js";
+
+/**
+ * Dispatch messages to a role, grouped by related_task_id.
+ * Each task group is dispatched separately to ensure correct session & context.
+ * Non-task messages (related_task_id = null) are dispatched together.
+ */
+export async function dispatchToRoleGrouped(
+  client: OpencodeClient,
+  sessionManager: SessionManager,
+  role: string,
+  messages: MessageRow[],
+  workspace: string,
+): Promise<{ sessionId: string; inputTokens: number; outputTokens: number }> {
+  // Group messages by related_task_id
+  const groups = new Map<number | null, MessageRow[]>();
+  for (const msg of messages) {
+    const key = msg.related_task_id;
+    let group = groups.get(key);
+    if (!group) {
+      group = [];
+      groups.set(key, group);
+    }
+    group.push(msg);
+  }
+
+  // Dispatch each group separately, accumulate tokens
+  let lastSessionId = "";
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  for (const [, group] of groups) {
+    const result = await dispatchToRole(client, sessionManager, role, group, workspace);
+    lastSessionId = result.sessionId || lastSessionId;
+    totalInput += result.inputTokens;
+    totalOutput += result.outputTokens;
+  }
+
+  return { sessionId: lastSessionId, inputTokens: totalInput, outputTokens: totalOutput };
+}
 
 /** Message row from the messages table */
 export interface MessageRow {
@@ -22,13 +60,6 @@ export interface MessageRow {
   related_workflow_id: number | null;
   attachments: string | null;
   created_at: string;
-}
-
-/** Workflow context injected into dispatch prompt */
-interface WorkflowContext {
-  template: string;
-  phase: string;
-  roleGuide: string;
 }
 
 /** Task context injected for DEV/QA roles */
@@ -47,10 +78,9 @@ interface TaskContext {
  *
  * 1. Get or create session
  * 2. Query relevant knowledge
- * 3. Get workflow context
- * 4. Build & send prompt
- * 5. Mark messages as read
- * 6. Return token usage for rotation check
+ * 3. Build & send prompt
+ * 4. Mark messages as read
+ * 5. Return token usage for rotation check
  */
 export async function dispatchToRole(
   client: OpencodeClient,
@@ -58,7 +88,35 @@ export async function dispatchToRole(
   role: string,
   messages: MessageRow[],
   workspace: string,
-): Promise<{ sessionId: string; inputTokens: number }> {
+): Promise<{ sessionId: string; inputTokens: number; outputTokens: number }> {
+  // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
+  if (role === "DEV" || role === "QA") {
+    const SKIP_STATUSES = ["paused", "cancelled", "blocked"];
+    const filtered: MessageRow[] = [];
+    for (const msg of messages) {
+      if (msg.related_task_id) {
+        const tasks = select("tasks", { id: msg.related_task_id });
+        if (tasks.length > 0 && SKIP_STATUSES.includes(tasks[0].status)) {
+          update("messages", { id: msg.id }, { status: "read" });
+          continue;
+        }
+        // Check unmet dependencies before dispatching to DEV
+        if (role === "DEV" && tasks.length > 0) {
+          const blocked = checkAndBlockUnmetDependencies(msg.related_task_id, tasks[0].status);
+          if (blocked) {
+            update("messages", { id: msg.id }, { status: "read" });
+            continue;
+          }
+        }
+      }
+      filtered.push(msg);
+    }
+    messages = filtered;
+    if (messages.length === 0) {
+      return { sessionId: "", inputTokens: 0, outputTokens: 0 };
+    }
+  }
+
   // 1. Get or create session
   const sessionId = await getSessionForRole(sessionManager, role, messages);
 
@@ -71,10 +129,7 @@ export async function dispatchToRole(
     // Non-fatal — proceed without knowledge context
   }
 
-  // 3. Get workflow context (from first message with workflow_id)
-  const workflowContext = getWorkflowContext(messages, workspace);
-
-  // 3b. Get task context for DEV/QA (task details + dependencies)
+  // 3. Get task context for DEV/QA (task details + dependencies)
   const taskContext = (role === "DEV" || role === "QA")
     ? getTaskContext(messages)
     : null;
@@ -82,7 +137,7 @@ export async function dispatchToRole(
   // 4. Build and send prompt
   const pendingContext = sessionManager.consumePendingContext(sessionId);
   const prompt = (pendingContext ? pendingContext + "\n\n---\n\n" : "")
-    + buildDispatchPrompt(role, messages, knowledge, workflowContext, taskContext);
+    + buildDispatchPrompt(role, messages, knowledge, taskContext);
 
   // session.prompt with retry + timeout (5 min per attempt, 3 attempts)
   const result = await withRetry(
@@ -150,12 +205,12 @@ export async function dispatchToRole(
     related_task_id: messages[0]?.related_task_id ?? null,
   });
 
-  return { sessionId, inputTokens };
+  return { sessionId, inputTokens, outputTokens };
 }
 
 /**
  * Get the appropriate session for a role.
- * DEV/QA: task-scoped session. PM/SA/OPS: persistent session.
+ * DEV/QA: task-scoped session. PM: persistent session.
  */
 async function getSessionForRole(
   sessionManager: SessionManager,
@@ -175,49 +230,7 @@ async function getSessionForRole(
     return sessionManager.getTaskSession(0, role as "DEV" | "QA");
   }
 
-  return sessionManager.getSession(role as "PM" | "SA" | "OPS");
-}
-
-/**
- * Extract workflow context from messages.
- * Looks up the workflow instance and loads the template to find the role's guide.
- */
-function getWorkflowContext(
-  messages: MessageRow[],
-  workspace: string,
-): WorkflowContext | null {
-  // Find the first message with a workflow reference
-  const workflowId =
-    messages.find((m) => m.related_workflow_id)?.related_workflow_id;
-  if (!workflowId) return null;
-
-  const workflows = select("workflow_instances", { id: workflowId });
-  if (workflows.length === 0) return null;
-
-  const wf = workflows[0];
-  const role = messages[0].to_role;
-
-  // Load the template JSON
-  const templatePath = path.join(
-    workspace,
-    ".win-agent",
-    "workflows",
-    `${wf.template}.json`,
-  );
-  if (!fs.existsSync(templatePath)) return null;
-
-  try {
-    const template = JSON.parse(fs.readFileSync(templatePath, "utf-8"));
-    const roleGuide = template.roles_guide?.[role]?.[wf.phase] ?? "";
-
-    return {
-      template: wf.template,
-      phase: wf.phase,
-      roleGuide,
-    };
-  } catch {
-    return null;
-  }
+  return sessionManager.getSession(role as "PM");
 }
 
 /**
@@ -282,7 +295,6 @@ export function buildDispatchPrompt(
   role: string,
   messages: MessageRow[],
   knowledge: KnowledgeEntry[],
-  workflowContext: WorkflowContext | null,
   taskContext?: TaskContext | null,
 ): string {
   const parts: string[] = [];
@@ -296,14 +308,7 @@ export function buildDispatchPrompt(
     parts.push(`**来自 ${msg.from_role}**${taskRef}：\n${msg.content}`);
   }
 
-  // 2. Workflow context
-  if (workflowContext) {
-    parts.push(
-      `## 当前工作流\n- 流程: ${workflowContext.template}\n- 阶段: ${workflowContext.phase}\n- 你在当前阶段的职责: ${workflowContext.roleGuide}`,
-    );
-  }
-
-  // 3. Task context (for DEV/QA)
+  // 2. Task context (for DEV/QA)
   if (taskContext) {
     const depLines = taskContext.dependencies.length > 0
       ? taskContext.dependencies
@@ -321,7 +326,7 @@ export function buildDispatchPrompt(
     );
   }
 
-  // 4. Relevant knowledge
+  // 3. Relevant knowledge
   if (knowledge.length > 0) {
     parts.push("## 相关知识库");
     for (const k of knowledge) {
@@ -329,7 +334,7 @@ export function buildDispatchPrompt(
     }
   }
 
-  // 5. Action hints
+  // 4. Action hints
   parts.push(
     "## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。",
   );

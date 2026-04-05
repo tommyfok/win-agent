@@ -4,6 +4,7 @@ import {
 } from "../config/index.js";
 import { openDb, getDb } from "../db/connection.js";
 import { select as dbSelect, rawQuery } from "../db/repository.js";
+import { formatTokens } from "../utils/format.js";
 
 export async function statusCommand() {
   // 1. Check engine status
@@ -64,11 +65,14 @@ export async function statusCommand() {
     const parts: string[] = [];
     const statusLabels: Record<string, string> = {
       pending_dev: "待开发",
+      planning: "计划协商中",
       in_dev: "开发中",
       pending_qa: "待验收",
       in_qa: "验收中",
       done: "已完成",
       rejected: "已打回",
+      paused: "已暂停",
+      blocked: "已阻塞",
       cancelled: "已取消",
     };
     for (const [status, label] of Object.entries(statusLabels)) {
@@ -80,7 +84,49 @@ export async function statusCommand() {
     console.log(`   总进度: ${doneCount}/${totalTasks} (${Math.round((doneCount / totalTasks) * 100)}%)`);
   }
 
-  // 4. Recent messages
+  // 4. Cost overview (token consumption per role)
+  const costStats = rawQuery(`
+    SELECT role,
+           COUNT(*) as dispatch_count,
+           SUM(input_tokens) as total_input,
+           SUM(output_tokens) as total_output,
+           SUM(input_tokens + output_tokens) as total_tokens
+    FROM role_outputs
+    GROUP BY role
+    ORDER BY total_tokens DESC
+  `);
+  if (costStats.length > 0) {
+    console.log("\n💰 Token 消耗:");
+    let grandTotal = 0;
+    for (const row of costStats) {
+      const total = row.total_tokens ?? 0;
+      grandTotal += total;
+      console.log(
+        `   ${row.role}: ${formatTokens(total)} tokens (输入 ${formatTokens(row.total_input ?? 0)} / 输出 ${formatTokens(row.total_output ?? 0)}) | ${row.dispatch_count} 次调度`,
+      );
+    }
+    console.log(`   合计: ${formatTokens(grandTotal)} tokens`);
+
+    // Per-workflow cost (active workflows only)
+    const wfCosts = rawQuery(`
+      SELECT w.id, w.template, w.phase,
+             SUM(r.input_tokens + r.output_tokens) as total_tokens,
+             COUNT(r.id) as dispatch_count
+      FROM workflow_instances w
+      JOIN role_outputs r ON r.related_workflow_id = w.id
+      WHERE w.status = 'active'
+      GROUP BY w.id
+      ORDER BY total_tokens DESC
+    `);
+    if (wfCosts.length > 0) {
+      console.log("   按工作流:");
+      for (const wc of wfCosts) {
+        console.log(`     #${wc.id} [${wc.template}]: ${formatTokens(wc.total_tokens ?? 0)} tokens (${wc.dispatch_count} 次调度)`);
+      }
+    }
+  }
+
+  // 5. Recent messages
   const recentMessages = dbSelect("messages", undefined, {
     orderBy: "created_at DESC",
     limit: 5,
@@ -98,6 +144,8 @@ export async function statusCommand() {
 
   console.log("");
 }
+
+// formatTokens imported from ../utils/format.js
 
 function formatElapsed(createdAt: string): string {
   const created = new Date(createdAt);

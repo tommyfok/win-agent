@@ -3,7 +3,7 @@
  * V1: serial execution, only one role active at a time.
  */
 
-const ALL_ROLES = ["PM", "SA", "DEV", "QA", "OPS"] as const;
+const ALL_ROLES = ["PM", "DEV", "QA"] as const;
 export type Role = (typeof ALL_ROLES)[number];
 export { ALL_ROLES };
 

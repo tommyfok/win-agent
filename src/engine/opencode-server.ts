@@ -5,7 +5,15 @@ import {
   createOpencodeClient,
   type OpencodeClient,
 } from "@opencode-ai/sdk";
-import { loadConfig, type ProviderConfig } from "../config/index.js";
+import { loadConfig, type ProviderConfig, type WinAgentConfig } from "../config/index.js";
+
+/** Build Basic Auth headers if serverPassword is configured */
+function buildAuthHeaders(config: WinAgentConfig): Record<string, string> {
+  if (!config.serverPassword) return {};
+  const user = "opencode";
+  const credentials = Buffer.from(`${user}:${config.serverPassword}`).toString("base64");
+  return { Authorization: `Basic ${credentials}` };
+}
 
 export interface OpencodeServerHandle {
   client: OpencodeClient;
@@ -101,7 +109,8 @@ function buildOpencodeConfig(provider: ProviderConfig) {
  */
 async function tryConnect(url: string, workspace: string): Promise<OpencodeClient | null> {
   try {
-    const client = createOpencodeClient({ baseUrl: url });
+    const config = loadConfig(workspace);
+    const client = createOpencodeClient({ baseUrl: url, headers: buildAuthHeaders(config) });
     // Load our persisted session IDs
     const { SessionManager } = await import("./session-manager.js");
     const savedSessions = SessionManager.loadPersistedSessions(workspace);
@@ -206,10 +215,11 @@ export async function startOpencodeServer(
 
   // Spawn opencode server manually so we can see its stderr/stdout
   const opcodeConfigWithLog = { ...opcodeConfig, logLevel: "DEBUG" };
-  const proc = spawn("opencode", ["serve", `--hostname=127.0.0.1`, `--port=0`, `--log-level=DEBUG`], {
+  const proc = spawn("opencode", ["serve", `--hostname=0.0.0.0`, `--port=0`, `--log-level=DEBUG`], {
     env: {
       ...process.env,
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opcodeConfigWithLog),
+      ...(config.serverPassword ? { OPENCODE_SERVER_PASSWORD: config.serverPassword } : {}),
     },
     // Detach so the child doesn't receive SIGINT from the terminal's process group.
     // This lets us write memories before shutting down the server.
@@ -260,7 +270,8 @@ export async function startOpencodeServer(
     });
   });
 
-  const client = createOpencodeClient({ baseUrl: serverUrl });
+  const clientUrl = serverUrl.replace("://0.0.0.0", "://127.0.0.1");
+  const client = createOpencodeClient({ baseUrl: clientUrl, headers: buildAuthHeaders(config) });
   const server = {
     url: serverUrl,
     close: () => {
@@ -282,9 +293,11 @@ export async function startOpencodeServer(
   }
 
   // Persist server info for reuse
-  const parsedUrl = new URL(server.url);
+  // Replace 0.0.0.0 with 127.0.0.1 — browsers can't access 0.0.0.0
+  const accessibleUrl = server.url.replace("://0.0.0.0", "://127.0.0.1");
+  const parsedUrl = new URL(accessibleUrl);
   saveServerInfo(workspace, {
-    url: server.url,
+    url: accessibleUrl,
     port: parseInt(parsedUrl.port, 10),
     startedAt: new Date().toISOString(),
   });

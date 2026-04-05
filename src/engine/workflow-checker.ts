@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import { select, update, insert, rawQuery } from "../db/repository.js";
 import type { SessionManager } from "./session-manager.js";
 import { cleanExpiredMemories } from "../embedding/memory.js";
@@ -13,7 +11,6 @@ import { cleanExpiredOutputs } from "./output-cleaner.js";
  * 3. Send a system message to PM to trigger final reporting
  */
 export function checkWorkflowCompletion(
-  workspace: string,
   sessionManager?: SessionManager | null,
 ): void {
   const activeWorkflows = select("workflow_instances", { status: "active" });
@@ -22,7 +19,7 @@ export function checkWorkflowCompletion(
     // Check phase advancement for multi-phase workflows before completion
     checkPhaseAdvancement(wf);
 
-    const completed = checkCompletion(wf, workspace);
+    const completed = checkCompletion(wf);
     if (completed) {
       // Update workflow status
       update(
@@ -88,7 +85,7 @@ export function checkWorkflowCompletion(
 /**
  * Check if a workflow's completion condition is met.
  */
-function checkCompletion(wf: any, workspace: string): boolean {
+function checkCompletion(wf: any): boolean {
   const template = wf.template as string;
 
   switch (template) {
@@ -99,10 +96,9 @@ function checkCompletion(wf: any, workspace: string): boolean {
     case "iteration-review":
       return checkIterationReviewDone(wf);
 
-    default: {
-      // Try to load template and check generic condition
-      return checkTemplateCompletion(wf, workspace);
-    }
+    default:
+      // Unknown template — fall back to all-tasks-done check
+      return checkAllTasksDone(wf.id);
   }
 }
 
@@ -137,110 +133,41 @@ function checkIterationReviewDone(wf: any): boolean {
 
 /**
  * Check if a multi-phase workflow should advance to the next phase.
- * Phase transitions are detected by messages between roles after the last phase change.
+ * For iteration-review: PM sends a message with the workflow_id to signal review done → advance to done.
  */
 function checkPhaseAdvancement(wf: any): void {
   if (wf.template !== "iteration-review") return;
 
   const phase = wf.phase as string;
 
-  // Define phase transition rules: current phase → {from, to, next}
-  // When a message from `from` to `to` is found after the last phase update, advance to `next`
-  const transitions: Record<string, { from: string; to: string; next: string }> = {
-    metrics: { from: "OPS", to: "PM", next: "review" },
-    review:  { from: "PM",  to: "OPS", next: "apply" },
-    apply:   { from: "OPS", to: "PM", next: "done" },
-  };
+  // Simplified flow (OPS removed): review → done
+  // PM sends any message with this workflow_id after reviewing stats → advance to done
+  if (phase !== "review") return;
 
-  const rule = transitions[phase];
-  if (!rule) return;
-
-  // Look for messages after the workflow's last update that match the transition pattern
   const triggerMessages = rawQuery(
     `SELECT id FROM messages
      WHERE related_workflow_id = ?
-       AND from_role = ? AND to_role = ?
+       AND from_role = 'PM'
        AND created_at > ?
      LIMIT 1`,
-    [wf.id, rule.from, rule.to, wf.updated_at],
+    [wf.id, wf.updated_at],
   );
 
   if (triggerMessages.length === 0) return;
 
-  // Advance phase
-  update("workflow_instances", { id: wf.id }, { phase: rule.next });
-
-  // Update the in-memory wf object so completion check sees the new phase
-  wf.phase = rule.next;
+  // Advance to done
+  update("workflow_instances", { id: wf.id }, { phase: "done" });
+  wf.phase = "done";
 
   insert("logs", {
     role: "system",
     action: "phase_advanced",
-    content: `工作流 #${wf.id} (${wf.template}) 阶段推进: ${phase} → ${rule.next}`,
+    content: `工作流 #${wf.id} (${wf.template}) 阶段推进: review → done`,
   });
 
   console.log(
-    `   ➡️  工作流 #${wf.id} (${wf.template}) 阶段: ${phase} → ${rule.next}`,
+    `   ➡️  工作流 #${wf.id} (${wf.template}) 阶段: review → done`,
   );
-
-  // Notify the role responsible for the next phase
-  const phaseNotify: Record<string, { role: string; guidance: string }> = {
-    review: {
-      role: "PM",
-      guidance: "OPS 已提交迭代回顾报告和优化方案，请审核并逐条批准或驳回，然后发消息给 OPS。",
-    },
-    apply: {
-      role: "OPS",
-      guidance: "PM 已完成审核，请执行已批准的优化（更新角色 prompt、知识库、流程模板），完成后发消息给 PM 确认。注意：修改文件前先备份到 .win-agent/backups/。",
-    },
-    done: {
-      role: "PM",
-      guidance: "OPS 已完成优化执行，请归档本轮迭代并通知用户回顾完成。",
-    },
-  };
-
-  const notify = phaseNotify[rule.next];
-  if (notify) {
-    insert("messages", {
-      from_role: "system",
-      to_role: notify.role,
-      type: "system",
-      content: `工作流 #${wf.id} (iteration-review) 进入「${rule.next}」阶段。${notify.guidance}`,
-      status: "unread",
-      related_workflow_id: wf.id,
-    });
-  }
-}
-
-/**
- * Generic template-based completion check.
- * Loads the template JSON and evaluates its completion condition.
- */
-function checkTemplateCompletion(wf: any, workspace: string): boolean {
-  const templatePath = path.join(
-    workspace,
-    ".win-agent",
-    "workflows",
-    `${wf.template}.json`,
-  );
-  if (!fs.existsSync(templatePath)) return false;
-
-  try {
-    const template = JSON.parse(fs.readFileSync(templatePath, "utf-8"));
-    const condition = template.completion?.condition as string | undefined;
-
-    if (!condition) return false;
-
-    // If the condition mentions "tasks 状态均为 done" or similar,
-    // check all associated tasks
-    if (condition.includes("done") && condition.includes("task")) {
-      return checkAllTasksDone(wf.id);
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -276,7 +203,7 @@ function sendReflectionTriggers(wf: any): void {
     insert("messages", {
       from_role: "system",
       to_role: role,
-      type: "system",
+      type: "reflection",
       content: buildReflectionPrompt(role, wf),
       status: "unread",
       related_workflow_id: wf.id,
@@ -297,11 +224,9 @@ function buildReflectionPrompt(role: string, wf: any): string {
   const base = `【自我反思】工作流 #${wf.id}（${wf.template}）已完成，请进行自我反思。`;
 
   const roleGuidance: Record<string, string> = {
-    PM: "请回顾：需求理解是否准确？沟通效率如何？信息流转是否及时？有无可改进的协作方式？",
-    SA: "请回顾：技术方案可行性如何？任务拆分粒度是否合理？验收标准是否清晰足够？",
+    PM: "请回顾：需求理解是否准确？技术方案可行性如何？任务拆分粒度是否合理？验收标准是否清晰？沟通效率如何？",
     DEV: "请回顾：代码质量如何？自测是否充分？有无被打回？被打回的根因是什么？",
     QA: "请回顾：验收标准是否适用？缺陷描述质量如何？是否有遗漏的测试场景？",
-    OPS: "请回顾：上轮优化建议是否生效？指标变化趋势如何？有无新的系统性问题？",
   };
 
   const guidance = roleGuidance[role] ?? "请回顾本次工作中的经验教训。";
