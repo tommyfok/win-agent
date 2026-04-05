@@ -123,7 +123,7 @@ async function _onboardingCommand() {
     const overviewPath = path.join(workspace, ".win-agent", "overview.md");
     fs.writeFileSync(
       overviewPath,
-      `# 项目概览\n\n_由 \`win-agent onboarding\` 自动生成_\n\n${overview}`,
+      `# 项目概览\n\n_由 \`win-agent onboard\` 自动生成_\n\n${overview}`,
       "utf-8",
     );
     console.log("   ✓ 已写入 .win-agent/overview.md");
@@ -153,7 +153,7 @@ async function _onboardingCommand() {
   if (overview) console.log("   概览: .win-agent/overview.md");
   console.log("   角色: .win-agent/roles/  （可直接编辑，重启后对 PM 生效）");
   console.log("\n提示：需要 MCP 工具请在下次启动前配置好，Agent 运行时无法自行安装");
-  console.log("启动引擎：npx win-agent start");
+  console.log("就绪后执行：npx win-agent start");
 }
 
 // ─── 项目上下文导入 ───────────────────────────────────────────────────────────

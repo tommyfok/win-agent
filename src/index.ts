@@ -21,7 +21,7 @@ program
   .action(checkCommand);
 
 program
-  .command("onboarding")
+  .command("onboard")
   .description("One-time project setup: configure, scan workspace, inject context into role files")
   .action(onboardingCommand);
 
