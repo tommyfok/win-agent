@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { checkCommand } from "./cli/check.js";
+import { onboardingCommand } from "./cli/onboarding.js";
 import { startCommand } from "./cli/start.js";
 import { engineCommand } from "./cli/engine.js";
 import { talkCommand } from "./cli/talk.js";
@@ -18,6 +19,11 @@ program
   .description("Multi-agent workflow engine")
   .version("0.1.0")
   .action(checkCommand);
+
+program
+  .command("onboarding")
+  .description("One-time project setup: configure, scan workspace, inject context into role files")
+  .action(onboardingCommand);
 
 program
   .command("start")

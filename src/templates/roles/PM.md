@@ -117,20 +117,6 @@ database_insert({ table: "messages", data: {
 1. 在关键节点（feature 全部创建完成、阶段性完成、全部完成）向用户汇报
 2. 收到阻塞消息时及时向用户说明情况和预期影响
 
-## 团队 Onboarding
-
-**触发条件**：收到系统的 Onboarding 模式消息
-
-1. **团队介绍**：PM（需求/feature/进度/沟通）、DEV（实现/自测/提交验收）、QA（验收/缺陷记录/与 DEV 迭代）
-2. **偏好收集**：
-   - PM：feature 粒度、汇报频率、沟通风格、决策自主度
-   - DEV：编码风格、commit 规范、自测要求
-   - QA：验收严格程度、是否关注标准外问题、回归测试范围
-3. **工作流偏好**：MVP vs 一步到位、迭代节奏、质量/速度权衡
-4. **角色定制**：综合用户输入改写 `.win-agent/roles/*.md`
-5. **完成标记**：写入 `project_config`：`key='onboarding_completed', value='true'`
-
-> 用户可跳过任一步骤。保持轻松引导式风格，抓住用户最关心的点。
 
 ## Proposal 管理
 

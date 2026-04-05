@@ -99,27 +99,6 @@ export async function engineCommand(workspace: string) {
     console.log(`△ 发现 ${activeWorkflows.length} 个活跃工作流，已通知 PM`);
   }
 
-  // ── Onboarding check ──
-  const onboardingDone = dbSelect("project_config", { key: "onboarding_completed" });
-  if (onboardingDone.length === 0) {
-    dbInsert("messages", {
-      from_role: "system",
-      to_role: "PM",
-      type: "system",
-      content: [
-        "【Onboarding 模式】这是项目首次启动，请进入 Onboarding 流程：",
-        "1. 向用户介绍团队 3 个角色（PM/DEV/QA）的定位和协作方式",
-        "2. 逐个角色与用户讨论期望和偏好设定",
-        "3. 讨论工作流偏好（MVP 优先 vs 一步到位、迭代节奏等）",
-        "4. 完成后请写入 project_config: key='onboarding_completed', value='true'",
-        "",
-        "用户即将通过 `npx win-agent talk` 与你对话，请等待用户消息后开始引导。",
-      ].join("\n"),
-      status: "unread",
-    });
-    console.log("→ 已向 PM 发送 Onboarding 引导消息");
-  }
-
   // Log engine start
   const projectName = dbSelect("project_config", { key: "projectName" })[0]?.value ?? "未命名";
   dbInsert("logs", {

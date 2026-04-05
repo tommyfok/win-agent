@@ -7,18 +7,11 @@ import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
 import { select, insert } from "../db/repository.js";
 import { checkAndUnblockDependencies } from "./dependency-checker.js";
-import { syncAgents } from "../workspace/sync-agents.js";
-
 /** Sleep helper */
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Engine running flag — set to false to stop the main loop */
 let running = false;
-
-/** Track whether onboarding agent re-sync has been done */
-let onboardingSynced = false;
-/** Timestamp when onboarding_completed was first detected (for file-settle delay) */
-let onboardingCompletedAt = 0;
 
 /**
  * PM cooldown: after PM finishes a dispatch, wait this many ms before
@@ -51,8 +44,6 @@ export async function startSchedulerLoop(
   workspace: string,
 ): Promise<void> {
   running = true;
-  onboardingSynced = false;
-  onboardingCompletedAt = 0;
   pmConsecutiveCount = 0;
   resetTriggers();
   const roleManager = new RoleManager();
@@ -224,23 +215,4 @@ async function schedulerTick(
   checkAutoTriggers();
   checkWorkflowCompletion(sessionManager);
 
-  // Check if onboarding just completed — re-sync agents so updated role prompts take effect.
-  // Wait until PM is not busy AND a 2s settle delay has passed (to let file writes complete).
-  if (!onboardingSynced && !roleManager.isBusy("PM")) {
-    const rows = select("project_config", { key: "onboarding_completed" });
-    if (rows.length > 0) {
-      if (onboardingCompletedAt === 0) {
-        onboardingCompletedAt = Date.now();
-      } else if (Date.now() - onboardingCompletedAt >= 2000) {
-        onboardingSynced = true;
-        syncAgents(workspace);
-        insert("logs", {
-          role: "system",
-          action: "onboarding_sync",
-          content: "Onboarding 完成，已重新同步 Agent 配置",
-        });
-        console.log("   ✓ Onboarding 完成，已重新同步 Agent 配置");
-      }
-    }
-  }
 }
