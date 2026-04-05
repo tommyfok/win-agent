@@ -463,16 +463,6 @@ export const update = tool({
     if (args.table === "tasks" && data.status && where?.id) {
       const prev = db.prepare("SELECT status FROM tasks WHERE id = ?").get(where.id) as { status: string } | null;
 
-      // Sprint Contract guard: planning → in_dev requires QA plan_confirmed
-      if (prev && prev.status === "planning" && data.status === "in_dev") {
-        const confirmed = db.prepare(
-          "SELECT id FROM messages WHERE related_task_id = ? AND from_role = 'QA' AND type = 'plan_confirmed' LIMIT 1"
-        ).get(where.id);
-        if (!confirmed) {
-          return JSON.stringify({ error: "无法将任务从 planning 推进到 in_dev：尚未收到 QA 的 plan_confirmed 确认。请先等待 QA 审核开发计划。" });
-        }
-      }
-
       try {
         if (prev) {
           db.prepare(

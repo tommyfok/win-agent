@@ -62,7 +62,7 @@ const DEFAULT_PERMISSIONS: PermissionRow[] = [
   { role: "QA", table_name: "messages", operation: "select", conditions: null },
   { role: "QA", table_name: "messages", operation: "insert", conditions: JSON.stringify({ from_role: "QA" }) },
   { role: "QA", table_name: "tasks", operation: "select", conditions: null },
-  { role: "QA", table_name: "tasks", operation: "update", conditions: JSON.stringify({ status_in: ["in_qa", "pending_qa", "pending_dev", "planning", "done", "rejected"] }) },
+  { role: "QA", table_name: "tasks", operation: "update", conditions: JSON.stringify({ status_in: ["in_qa", "pending_qa", "pending_dev", "done", "rejected"] }) },
   { role: "QA", table_name: "knowledge", operation: "select", conditions: null },
   { role: "QA", table_name: "logs", operation: "select", conditions: null },
   { role: "QA", table_name: "logs", operation: "insert", conditions: null },
