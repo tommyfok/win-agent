@@ -9,6 +9,7 @@ import { insert as dbInsert } from "../db/repository.js";
 import { checkAndBlockUnmetDependencies } from "./dependency-checker.js";
 import { withRetry, withTimeout } from "./retry.js";
 import { checkAndRotate } from "./memory-rotator.js";
+import { Role } from "./role-manager.js";
 
 /**
  * Dispatch messages to a role, grouped by related_task_id.
@@ -18,7 +19,7 @@ import { checkAndRotate } from "./memory-rotator.js";
 export async function dispatchToRoleGrouped(
   client: OpencodeClient,
   sessionManager: SessionManager,
-  role: string,
+  role: Role,
   messages: MessageRow[],
   workspace: string,
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
@@ -97,16 +98,17 @@ interface TaskContext {
 export async function dispatchToRole(
   client: OpencodeClient,
   sessionManager: SessionManager,
-  role: string,
+  role: Role,
   messages: MessageRow[],
   workspace: string,
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
+  // cancel_task messages are always delivered so DEV/QA can execute rollback/cleanup.
   if (role === "DEV" || role === "QA") {
     const SKIP_STATUSES = ["paused", "cancelled", "blocked"];
     const filtered: MessageRow[] = [];
     for (const msg of messages) {
-      if (msg.related_task_id) {
+      if (msg.related_task_id && msg.type !== "cancel_task") {
         const tasks = select("tasks", { id: msg.related_task_id });
         if (tasks.length > 0 && SKIP_STATUSES.includes(tasks[0].status)) {
           update("messages", { id: msg.id }, { status: "read" });
@@ -226,7 +228,7 @@ export async function dispatchToRole(
  */
 async function getSessionForRole(
   sessionManager: SessionManager,
-  role: string,
+  role: Role,
   messages: MessageRow[],
 ): Promise<string> {
   if (role === "DEV" || role === "QA") {
@@ -235,14 +237,17 @@ async function getSessionForRole(
     if (taskId) {
       return sessionManager.getTaskSession(
         taskId,
-        role as "DEV" | "QA",
+        role,
       );
     }
-    // Fallback: create task session with ID 0 (shouldn't happen in practice)
-    return sessionManager.getTaskSession(0, role as "DEV" | "QA");
+    // No task ID found — this shouldn't happen since DEV/QA messages should always
+    // carry a related_task_id. Log a warning and use a sentinel session to avoid
+    // silently colliding with a real task session.
+    console.warn(`   ⚠️  ${role} 收到无 related_task_id 的消息，使用 fallback session`);
+    return sessionManager.getTaskSession(-1, role);
   }
 
-  return sessionManager.getSession(role as "PM");
+  return sessionManager.getSession(role);
 }
 
 /**
@@ -299,7 +304,7 @@ function getTaskContext(messages: MessageRow[]): TaskContext | null {
  *
  * Sections:
  * 1. 待处理消息 (pending messages)
- * 2. 当前工作流 (workflow context, if any)
+ * 2. 当前任务 (task context, DEV/QA only)
  * 3. 相关知识库 (relevant knowledge, if any)
  * 4. 操作提示 (action hints)
  */
