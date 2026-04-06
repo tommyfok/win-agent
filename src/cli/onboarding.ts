@@ -127,7 +127,10 @@ async function _onboardingCommand() {
       "utf-8",
     );
     console.log("   ✓ 已写入 .win-agent/overview.md");
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.code === "INSTALL_FAILED") {
+      throw err;
+    }
     console.log(`   ⚠️  工作空间分析失败，跳过: ${err}`);
   } finally {
     if (serverHandle?.owned) {

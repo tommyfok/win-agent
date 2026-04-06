@@ -139,6 +139,13 @@ async function tryConnect(url: string, workspace: string): Promise<OpencodeClien
 function ensureOpencodePackages(workspace: string, provider: ProviderConfig): void {
   const opencodeDir = path.join(workspace, ".opencode");
 
+  // Ensure .opencode/ dir and package.json exist so npm install works
+  if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
+  const pkgJsonPath = path.join(opencodeDir, "package.json");
+  if (!fs.existsSync(pkgJsonPath)) {
+    fs.writeFileSync(pkgJsonPath, JSON.stringify({ name: "opencode-workspace", private: true }, null, 2), "utf-8");
+  }
+
   // Collect all packages that need to be installed
   const needed: string[] = [];
 
@@ -164,14 +171,16 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
 
   console.log(`   → 安装 opencode 依赖: ${needed.join(", ")}...`);
   try {
-    execSync(`npm install --save ${needed.join(" ")}`, {
+    execSync(`npm install --save --registry=https://registry.npmmirror.com ${needed.join(" ")}`, {
       cwd: opencodeDir,
       stdio: "pipe",
       timeout: 120000,
     });
     console.log(`   ✓ 依赖已安装`);
   } catch (err) {
-    throw new Error(`Failed to install opencode packages: ${err}`);
+    const error = new Error(`Failed to install opencode packages: ${err}`);
+    (error as any).code = "INSTALL_FAILED";
+    throw error;
   }
 }
 
