@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { confirm } from "@inquirer/prompts";
 import { loadConfig } from "../config/index.js";
+import { DEFAULT_SKILLS, getSkillDirName } from "../workspace/sync-agents.js";
 import { startOpencodeServer } from "../engine/opencode-server.js";
 
 export async function cleanCommand() {
@@ -32,10 +33,12 @@ async function _cleanCommand() {
 
   const opencodeDir = path.join(cwd, ".opencode");
 
+  const skillNames = DEFAULT_SKILLS.map((s) => getSkillDirName(s.pkg)).join(", ");
   console.log("\n将清理以下内容：");
   console.log(`  - ${winAgentDir}/`);
   console.log(`  - .opencode/agents/{PM,DEV,QA}.md`);
   console.log(`  - .opencode/tools/database_{PM,DEV,QA}.ts`);
+  console.log(`  - .opencode/skills/{${skillNames}}`);
   console.log(`  - .opencode/opencode.json 中的 permission 字段`);
   if (sessionPrefix) {
     console.log(`  - opencode 中 ${sessionPrefix}-* 相关 session`);
@@ -89,7 +92,17 @@ function cleanOpencodeFiles(opencodeDir: string): void {
   if (fs.existsSync(legacy)) fs.unlinkSync(legacy);
   removeIfEmpty(toolsDir);
 
-  // 3. Remove permission key from opencode.json
+  // 3. Remove win-agent-managed skill directories
+  const skillsDir = path.join(opencodeDir, "skills");
+  if (fs.existsSync(skillsDir)) {
+    for (const skill of DEFAULT_SKILLS) {
+      const skillDir = path.join(skillsDir, getSkillDirName(skill.pkg));
+      if (fs.existsSync(skillDir)) fs.rmSync(skillDir, { recursive: true, force: true });
+    }
+    removeIfEmpty(skillsDir);
+  }
+
+  // 4. Remove permission key from opencode.json
   const configFile = path.join(opencodeDir, "opencode.json");
   if (fs.existsSync(configFile)) {
     try {

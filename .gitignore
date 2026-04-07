@@ -7,6 +7,7 @@ dist/
 # Dev/debug scripts
 loop-run-opencode.js
 feature_list.json
+.dev-ref
 
 # Runtime data
 .win-agent/

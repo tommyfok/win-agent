@@ -5,7 +5,7 @@ import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
 import { openDb, closeDb, getDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert, update as dbUpdate } from "../db/repository.js";
-import { syncAgents, deployTools } from "../workspace/sync-agents.js";
+import { syncAgents, deployTools, installDefaultSkills, DEFAULT_SKILLS, getSkillDirName } from "../workspace/sync-agents.js";
 import { insertKnowledge } from "../embedding/knowledge.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
@@ -94,6 +94,19 @@ async function _onboardingCommand() {
   syncAgents(workspace);
   deployTools(workspace);
   console.log("   ✓ 完成");
+
+  // ── 6.5 安装默认 Skill ──
+  console.log("\n   安装默认 Skill");
+  for (const s of DEFAULT_SKILLS) {
+    const roles = s.roles.join(", ");
+    console.log(`   · ${getSkillDirName(s.pkg)}  (${roles})`);
+  }
+  const installSkills = await confirm({ message: "   安装以上 skill？", default: true });
+  if (installSkills) {
+    installDefaultSkills(workspace);
+  } else {
+    console.log("   已跳过");
+  }
 
   // ── 7️⃣ 工作空间分析 ──
   console.log("\n7️⃣  工作空间分析（AI 扫描项目结构）");
