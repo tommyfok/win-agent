@@ -25,8 +25,9 @@ export async function stopCommand() {
     return;
   }
 
-  // Wait for the daemon to exit (up to 120s for memory writes across multiple roles)
-  const deadline = Date.now() + 120000;
+  // Wait for the daemon to exit (up to 30s — dispatch is aborted on SIGTERM,
+  // so we only need to wait for memory writes and cleanup)
+  const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
     if (!isProcessRunning(pid)) {
@@ -39,7 +40,7 @@ export async function stopCommand() {
   }
 
   // Force kill if still running
-  console.log("   ⚠️  引擎未在 120s 内退出，强制终止...");
+  console.log("   ⚠️  引擎未在 30s 内退出，强制终止...");
   try {
     process.kill(pid, "SIGKILL");
   } catch {

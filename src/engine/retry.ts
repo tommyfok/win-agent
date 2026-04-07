@@ -2,6 +2,14 @@
  * Retry and timeout utilities for resilient async operations.
  */
 
+/** Error thrown when an operation is aborted via AbortSignal. */
+export class AbortError extends Error {
+  constructor(label = "operation") {
+    super(`${label} 已中断`);
+    this.name = "AbortError";
+  }
+}
+
 /** Options for withRetry */
 export interface RetryOptions {
   /** Max number of attempts (default: 3) */
@@ -12,6 +20,8 @@ export interface RetryOptions {
   backoffFactor?: number;
   /** Label for logging (default: "operation") */
   label?: string;
+  /** AbortSignal — if aborted, throws AbortError immediately */
+  signal?: AbortSignal;
 }
 
 /**
@@ -19,14 +29,17 @@ export interface RetryOptions {
  * Throws the last error if all attempts fail.
  */
 export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
-  const { maxAttempts = 3, baseDelay = 1000, backoffFactor = 2, label = "operation" } = opts;
+  const { maxAttempts = 3, baseDelay = 1000, backoffFactor = 2, label = "operation", signal } = opts;
 
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (signal?.aborted) throw new AbortError(label);
     try {
       return await fn();
     } catch (err) {
+      // If aborted, surface immediately without retry
+      if (signal?.aborted) throw new AbortError(label);
       lastError = err;
       if (attempt === maxAttempts) break;
 

@@ -2,6 +2,7 @@ import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
 import { RoleManager, ALL_ROLES } from "./role-manager.js";
 import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from "./dispatcher.js";
+import { AbortError } from "./retry.js";
 import { checkAndRotate } from "./memory-rotator.js";
 import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
@@ -13,6 +14,51 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Engine running flag — set to false to stop the main loop */
 let running = false;
+
+// ── Dispatch interrupt support ──
+
+/** Context of a currently active dispatch (for interrupt & resume) */
+export interface DispatchContext {
+  role: string;
+  taskId: number | null;
+  sessionId: string | null;
+  startedAt: string;
+}
+
+/** Current in-flight dispatch state */
+let currentDispatch: DispatchContext | null = null;
+let currentAbortController: AbortController | null = null;
+/** Stored opencode client ref for session.abort */
+let storedClient: OpencodeClient | null = null;
+
+/**
+ * Get the context of the currently in-flight dispatch, if any.
+ */
+export function getCurrentDispatchContext(): DispatchContext | null {
+  return currentDispatch;
+}
+
+/**
+ * Abort the currently in-flight dispatch and return its context.
+ * Also calls session.abort on the opencode server to stop LLM processing.
+ * Returns the dispatch context (for persisting interrupted state), or null if idle.
+ */
+export async function abortCurrentDispatch(): Promise<DispatchContext | null> {
+  const ctx = currentDispatch;
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+  }
+  // Tell opencode server to stop the in-flight LLM call
+  if (ctx?.sessionId && storedClient) {
+    try {
+      await storedClient.session.abort({ path: { id: ctx.sessionId } });
+    } catch {
+      // Session may already be idle — non-fatal
+    }
+  }
+  return ctx;
+}
 
 /**
  * PM cooldown: after PM finishes a dispatch, wait this many ms before
@@ -44,6 +90,7 @@ export async function startSchedulerLoop(
   sessionManager: SessionManager
 ): Promise<void> {
   running = true;
+  storedClient = client;
   pmConsecutiveCount = 0;
   resetTriggers();
   const roleManager = new RoleManager();
@@ -54,6 +101,11 @@ export async function startSchedulerLoop(
     try {
       await schedulerTick(client, sessionManager, roleManager);
     } catch (err) {
+      // AbortError means graceful shutdown — exit loop silently
+      if (err instanceof AbortError) {
+        console.log(`   ⏹ 调度被中断: ${err.message}`);
+        break;
+      }
       console.error(`   ❌ 调度器异常: ${err}`);
       // Log to database for diagnostics
       try {
@@ -68,6 +120,7 @@ export async function startSchedulerLoop(
       // Continue running — one bad tick shouldn't kill the engine
     }
 
+    if (!running) break;
     await sleep(1000);
   }
 
@@ -121,14 +174,26 @@ async function schedulerTick(
     if (userMessages.length > 0) {
       console.log(`   📨 调度 → PM (${userMessages.length} 条用户消息, 优先)`);
       roleManager.setBusy("PM", true);
+      const abortController = new AbortController();
+      currentAbortController = abortController;
+      const taskId = userMessages.find((m) => m.related_task_id)?.related_task_id ?? null;
+      currentDispatch = {
+        role: "PM",
+        taskId,
+        sessionId: null, // will be filled by dispatch
+        startedAt: new Date().toISOString(),
+      };
       try {
         const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
           client,
           sessionManager,
           "PM",
-          userMessages
+          userMessages,
+          {
+            signal: abortController.signal,
+            onSessionResolved: (sid) => { if (currentDispatch) currentDispatch.sessionId = sid; },
+          }
         );
-        const taskId = userMessages.find((m) => m.related_task_id)?.related_task_id;
         if (sessionId) {
           await checkAndRotate(
             sessionManager,
@@ -141,6 +206,8 @@ async function schedulerTick(
         }
         console.log(`   ✓ PM 调度完成 (用户优先)`);
       } finally {
+        currentDispatch = null;
+        currentAbortController = null;
         roleManager.setBusy("PM", false);
         // Don't set pmLastDispatchEnd here: user-priority messages should not trigger cooldown
       }
@@ -191,6 +258,15 @@ async function schedulerTick(
     // V1 serial: dispatch to this role and break
     console.log(`   📨 调度 → ${role} (${messages.length} 条消息)`);
     roleManager.setBusy(role, true);
+    const abortController = new AbortController();
+    currentAbortController = abortController;
+    const dispatchTaskId = messages.find((m) => m.related_task_id)?.related_task_id ?? null;
+    currentDispatch = {
+      role,
+      taskId: dispatchTaskId,
+      sessionId: null,
+      startedAt: new Date().toISOString(),
+    };
     try {
       // DEV/QA: group messages by task to ensure correct session & context per task
       const dispatch = role === "DEV" || role === "QA" ? dispatchToRoleGrouped : dispatchToRole;
@@ -198,24 +274,29 @@ async function schedulerTick(
         client,
         sessionManager,
         role,
-        messages
+        messages,
+        {
+          signal: abortController.signal,
+          onSessionResolved: (sid) => { if (currentDispatch) currentDispatch.sessionId = sid; },
+        }
       );
 
       // For PM: check session rotation. DEV/QA rotation is handled per-group
       // inside dispatchToRoleGrouped to avoid cross-task token accumulation.
       if (role === "PM" && sessionId) {
-        const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
         await checkAndRotate(
           sessionManager,
           role,
           sessionId,
           inputTokens,
           outputTokens,
-          taskId ?? undefined
+          dispatchTaskId ?? undefined
         );
       }
       console.log(`   ✓ ${role} 调度完成`);
     } finally {
+      currentDispatch = null;
+      currentAbortController = null;
       roleManager.setBusy(role, false);
       if (role === "PM") {
         pmLastDispatchEnd = Date.now();

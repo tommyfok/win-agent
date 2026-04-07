@@ -9,6 +9,14 @@ import { ensureWorkspaceId } from "../config/index.js";
 type Role = "PM" | "DEV" | "QA";
 const PERSISTENT_ROLES: Role[] = ["PM"];
 
+/** Persisted state of an interrupted dispatch (written by engine on shutdown). */
+export interface InterruptedState {
+  role: string;
+  taskId: number | null;
+  sessionId: string | null;
+  timestamp: string;
+}
+
 /** Prompt template for writing memory before session rotation. */
 const WRITE_MEMORY_PROMPT = `你即将被轮转到一个新的 session。请总结你当前的工作状态，包括：
 
@@ -65,11 +73,29 @@ export class SessionManager {
 
   /**
    * Initialize sessions for persistent roles (PM).
-   * Cleans up old win-agent sessions first, then creates fresh ones.
+   * If an interrupted session exists and was resumed, skip creating a new session for that role.
+   * Otherwise, cleans up old win-agent sessions and creates fresh ones.
    */
   async initPersistentSessions(): Promise<void> {
-    await this.cleanupOldSessions();
+    // Check for interrupted dispatch — resume if possible
+    const resumed = await this.checkAndResumeInterrupted();
+    const resumedRoles = new Set<string>();
+    if (resumed) {
+      // Collect which roles already have sessions from the resume
+      for (const role of PERSISTENT_ROLES) {
+        if (this.activeSessions.has(role)) resumedRoles.add(role);
+      }
+    }
+
+    // Clean up old sessions (but NOT the ones we just resumed)
+    await this.cleanupOldSessions(resumedRoles);
+
+    // Create fresh sessions for roles that were NOT resumed
     for (const role of PERSISTENT_ROLES) {
+      if (resumedRoles.has(role)) {
+        console.log(`   ↻ ${role} session 已从中断状态恢复，跳过创建`);
+        continue;
+      }
       const sessionId = await this.createRoleSession(role);
       this.activeSessions.set(role, sessionId);
     }
@@ -147,13 +173,27 @@ export class SessionManager {
 
   /**
    * Delete leftover sessions from previous runs of THIS workspace only.
+   * @param preserveRoles - roles whose current sessions should NOT be deleted (e.g. resumed sessions)
    */
-  private async cleanupOldSessions(): Promise<void> {
+  private async cleanupOldSessions(preserveRoles?: Set<string>): Promise<void> {
+    // Collect session IDs to preserve
+    const preserveIds = new Set<string>();
+    if (preserveRoles) {
+      for (const role of preserveRoles) {
+        const id = this.activeSessions.get(role);
+        if (id) preserveIds.add(id);
+      }
+      // Also preserve any task sessions that were resumed
+      for (const [, id] of this.taskSessions) {
+        preserveIds.add(id);
+      }
+    }
+
     try {
       const listResult = await this.client.session.list();
       const sessions = (listResult.data ?? []) as Array<{ id: string; title: string }>;
       for (const s of sessions) {
-        if (s.title?.startsWith(this.sessionPrefix)) {
+        if (s.title?.startsWith(this.sessionPrefix) && !preserveIds.has(s.id)) {
           try {
             await this.client.session.delete({ path: { id: s.id } });
           } catch {
@@ -414,6 +454,81 @@ export class SessionManager {
    */
   getAllSessionIds(): string[] {
     return [...this.activeSessions.values(), ...this.taskSessions.values()];
+  }
+
+  /**
+   * Check for interrupted dispatch state and resume if found.
+   *
+   * On engine startup, reads .win-agent/interrupted.json. If present:
+   * 1. Validates that the session still exists on the opencode server
+   * 2. Re-registers the session in our maps (so scheduler uses it)
+   * 3. Sends a "continue" prompt to the interrupted session
+   * 4. Deletes the interrupted.json file
+   *
+   * @returns true if a session was resumed
+   */
+  async checkAndResumeInterrupted(): Promise<boolean> {
+    const interruptedFile = path.join(this.workspace, ".win-agent", "interrupted.json");
+    if (!fs.existsSync(interruptedFile)) return false;
+
+    let state: InterruptedState;
+    try {
+      state = JSON.parse(fs.readFileSync(interruptedFile, "utf-8"));
+    } catch {
+      // Corrupt file — clean up and move on
+      try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+      return false;
+    }
+
+    const { role, taskId, sessionId } = state;
+    if (!sessionId) {
+      // No session to resume (dispatch was interrupted before session was resolved)
+      try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+      return false;
+    }
+
+    // Validate session still exists on server
+    try {
+      await this.client.session.get({ path: { id: sessionId } });
+    } catch {
+      console.log(`   ⚠️  中断的 session ${sessionId} 已不存在，跳过恢复`);
+      try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+      return false;
+    }
+
+    // Re-register session in our maps
+    if (role === "PM") {
+      this.activeSessions.set(role, sessionId);
+    } else if (taskId && (role === "DEV" || role === "QA")) {
+      this.taskSessions.set(`${taskId}-${role}`, sessionId);
+    }
+    this.persistSessionIds();
+
+    // Send "continue" prompt to the interrupted session
+    const resumePrompt =
+      `你的上一次操作因引擎重启被中断。请检查当前工作目录和任务状态，然后继续完成未完成的工作。` +
+      (taskId ? `\n\n被中断的任务 ID: task#${taskId}` : "");
+
+    try {
+      await withRetry(
+        () =>
+          this.client.session.promptAsync({
+            path: { id: sessionId },
+            body: {
+              agent: role,
+              parts: [{ type: "text", text: resumePrompt }],
+            },
+          }),
+        { maxAttempts: 2, label: `${role} resume` }
+      );
+      console.log(`   ✓ 已恢复 ${role} session (${sessionId})，发送继续指令`);
+    } catch (err) {
+      console.log(`   ⚠️  恢复 ${role} session 失败: ${err}`);
+    }
+
+    // Clean up interrupted file
+    try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+    return true;
   }
 }
 

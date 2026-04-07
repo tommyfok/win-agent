@@ -9,6 +9,15 @@ import { withRetry, withTimeout } from "./retry.js";
 import { checkAndRotate } from "./memory-rotator.js";
 import type { Role } from "./role-manager.js";
 
+/** Options for dispatch functions */
+export interface DispatchOptions {
+  /** AbortSignal — if aborted, dispatch throws AbortError immediately */
+  signal?: AbortSignal;
+  /** Callback invoked with sessionId once the session is resolved, before prompt is sent.
+   *  Used by scheduler to track the in-flight session for abort/resume. */
+  onSessionResolved?: (sessionId: string) => void;
+}
+
 /**
  * Dispatch messages to a role, grouped by related_task_id.
  * Each task group is dispatched separately to ensure correct session & context.
@@ -18,7 +27,8 @@ export async function dispatchToRoleGrouped(
   client: OpencodeClient,
   sessionManager: SessionManager,
   role: Role,
-  messages: MessageRow[]
+  messages: MessageRow[],
+  options?: DispatchOptions
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // Group messages by related_task_id
   const groups = new Map<number | null, MessageRow[]>();
@@ -38,7 +48,7 @@ export async function dispatchToRoleGrouped(
   let totalOutput = 0;
 
   for (const [taskKey, group] of groups) {
-    const result = await dispatchToRole(client, sessionManager, role, group);
+    const result = await dispatchToRole(client, sessionManager, role, group, options);
     if (result.sessionId) {
       // Rotation check uses this group's own sessionId and taskId (not accumulated totals)
       await checkAndRotate(
@@ -96,7 +106,8 @@ export async function dispatchToRole(
   client: OpencodeClient,
   sessionManager: SessionManager,
   role: Role,
-  messages: MessageRow[]
+  messages: MessageRow[],
+  options?: DispatchOptions
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
   // cancel_task messages are always delivered so DEV/QA can execute rollback/cleanup.
@@ -130,6 +141,7 @@ export async function dispatchToRole(
 
   // 1. Get or create session
   const sessionId = await getSessionForRole(sessionManager, role, messages);
+  options?.onSessionResolved?.(sessionId);
 
   // 2. Query relevant knowledge
   const messageContent = messages.map((m) => m.content).join("\n");
@@ -163,7 +175,7 @@ export async function dispatchToRole(
         5 * 60 * 1000,
         `${role} session.prompt`
       ),
-    { maxAttempts: 3, label: `${role} dispatch` }
+    { maxAttempts: 3, label: `${role} dispatch`, signal: options?.signal }
   );
 
   // 5. Mark messages as read

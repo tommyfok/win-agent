@@ -4,6 +4,8 @@
  *
  * Usage: win-agent _engine <workspace>
  */
+import fs from "node:fs";
+import path from "node:path";
 import { writePidFile, removePidFile, getDbPath } from "../config/index.js";
 import { openDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert, rawQuery } from "../db/repository.js";
@@ -17,7 +19,7 @@ import { syncAgents, deployTools } from "../workspace/sync-agents.js";
 import { SessionManager } from "../engine/session-manager.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
-import { startSchedulerLoop, stopSchedulerLoop } from "../engine/scheduler.js";
+import { startSchedulerLoop, stopSchedulerLoop, abortCurrentDispatch } from "../engine/scheduler.js";
 import { detectModelContextLimit } from "../engine/memory-rotator.js";
 import { setSimilarityThreshold } from "../embedding/memory.js";
 
@@ -69,7 +71,7 @@ export async function engineCommand(workspace: string) {
   sessionManager = new SessionManager(serverHandle.client, workspace);
   try {
     await sessionManager.initPersistentSessions();
-    console.log("✓ PM Session 已创建");
+    console.log("✓ PM Session 已就绪");
   } catch (err) {
     console.log(`❌ Session 初始化失败: ${err}`);
     serverHandle.close();
@@ -115,7 +117,36 @@ export async function engineCommand(workspace: string) {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log("🛑 收到终止信号，正在停止...");
+
+    // 1. Abort current dispatch and persist interrupted context for resume
+    const interruptedCtx = await abortCurrentDispatch();
     stopSchedulerLoop();
+
+    if (interruptedCtx) {
+      console.log(`→ 中断 ${interruptedCtx.role} 调度 (session: ${interruptedCtx.sessionId ?? "unknown"})`);
+      const interruptedFile = path.join(workspace, ".win-agent", "interrupted.json");
+      try {
+        fs.writeFileSync(
+          interruptedFile,
+          JSON.stringify(
+            {
+              role: interruptedCtx.role,
+              taskId: interruptedCtx.taskId,
+              sessionId: interruptedCtx.sessionId,
+              timestamp: new Date().toISOString(),
+            },
+            null,
+            2
+          ),
+          "utf-8"
+        );
+        console.log(`→ 已保存中断状态到 interrupted.json`);
+      } catch (err) {
+        console.error(`⚠️  中断状态保存失败: ${err}`);
+      }
+    }
+
+    // 2. Save memories for idle roles (skip the interrupted one — it was aborted mid-call)
     try {
       if (sessionManager) {
         console.log("→ 保存角色记忆...");
@@ -128,7 +159,7 @@ export async function engineCommand(workspace: string) {
       dbInsert("logs", {
         role: "system",
         action: "engine_stop",
-        content: `引擎停止 (PID: ${process.pid})`,
+        content: `引擎停止 (PID: ${process.pid})${interruptedCtx ? `, 中断角色: ${interruptedCtx.role}` : ""}`,
       });
     } catch { /* empty */ }
     if (serverHandle?.owned) {
