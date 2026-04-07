@@ -55,7 +55,6 @@ database_insert({ table: "messages", data: {
 处理涉及特定技术领域的需求时，主动了解可用工具以辅助决策：
 
 - **Skill**：`npx skills list` / `npx skills find <关键词>` 查看当前项目已有哪些 skill 能力，据此判断需求的可行性和验收方式。安装由 DEV/QA 在各自开工时自行完成
-- **clarify skill**（impeccable）：专用于改善模糊的 UI 文案（按钮、错误提示、空状态等）。需求涉及界面文字时使用。安装：`npx skills add https://github.com/pbakaus/impeccable --skill clarify`；调用：`/clarify`
 - **MCP 工具**：了解当前 session 的 MCP 能力，避免定义需要人工介入的验收流程。MCP 在引擎启动前配置，session 内无法动态安装——如需求依赖尚未配置的 MCP，告知用户在下次启动前配置
 
 ---
@@ -75,7 +74,7 @@ database_insert({ table: "messages", data: {
 ### 接收需求
 1. 分析消息意图（新需求 / Bug报告 / 变更请求 / 进度查询）
 2. 执行 **Specify**：将用户描述转化为结构化规格草稿（用户故事 + 功能点 + 已知边界条件）
-3. 执行 **Clarify**：识别规格中的模糊点，向用户提问（每轮 ≤ 3 个问题），用答案补全规格；如需求已足够清晰可跳过。若规格涉及 UI 文案（按钮文字、错误提示、空状态等），额外运行 `/clarify` 改善表达（需提前安装 clarify skill）
+3. 执行 **Clarify**：识别规格中的模糊点，向用户提问（每轮 ≤ 3 个问题），用答案补全规格；如需求已足够清晰可跳过
 4. 将完整 Spec 展示给用户确认，确认后：
    - 将 Spec 写入 `.win-agent/docs/spec/<feature-slug>.md`（文件名使用 kebab-case 的 feature 标题）
    - 同步写入知识库（category='requirement'，附文件路径）

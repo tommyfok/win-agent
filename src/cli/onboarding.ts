@@ -112,7 +112,9 @@ async function _onboardingCommand() {
   console.log("\n7️⃣  工作空间分析（AI 扫描项目结构）");
   let overview = "";
   let serverHandle: Awaited<ReturnType<typeof startOpencodeServer>> | null = null;
-  try {
+  if (!detectExistingCode(workspace)) {
+    console.log("   空目录，跳过");
+  } else try {
     serverHandle = await startOpencodeServer(workspace);
     const { client } = serverHandle;
 
