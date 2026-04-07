@@ -81,7 +81,7 @@ async function _startCommand() {
   console.log("   ✓ 数据库工具已部署到 .opencode/tools/");
 
   // ── 4️⃣ 前置检查 ──
-  const onboardDone = dbSelect("project_config", { key: "onboarding_completed" });
+  const onboardDone = dbSelect<{ key: string; value: string }>("project_config", { key: "onboarding_completed" });
   if (onboardDone.length === 0) {
     console.log("\n❌ 请先执行 onboard 命令完成项目初始化：");
     console.log("   npx win-agent onboard");
@@ -93,10 +93,10 @@ async function _startCommand() {
   // ── 5️⃣ 启动后台引擎 ──
   console.log("\n5️⃣  启动后台引擎");
 
-  const projectName = dbSelect("project_config", { key: "projectName" })[0]?.value ?? "未命名";
+  const projectName = dbSelect<{ key: string; value: string }>("project_config", { key: "projectName" })[0]?.value ?? "未命名";
 
   // Mark first start as done (must be before closeDb)
-  const alreadyInvoked = dbSelect("project_config", { key: "start_invoked" });
+  const alreadyInvoked = dbSelect<{ key: string; value: string }>("project_config", { key: "start_invoked" });
   if (alreadyInvoked.length === 0) {
     dbInsert("project_config", { key: "start_invoked", value: "true" });
   }
@@ -144,10 +144,10 @@ async function _startCommand() {
  */
 async function checkRoleFilesReviewed(workspace: string): Promise<void> {
   // Only run on first invocation
-  const invoked = dbSelect("project_config", { key: "start_invoked" });
+  const invoked = dbSelect<{ key: string; value: string }>("project_config", { key: "start_invoked" });
   if (invoked.length > 0) return;
 
-  const snapshotRow = dbSelect("project_config", { key: "role_mtimes_snapshot" });
+  const snapshotRow = dbSelect<{ key: string; value: string }>("project_config", { key: "role_mtimes_snapshot" });
   if (snapshotRow.length === 0) return; // no snapshot (onboard not run), skip
 
   const snapshot: Record<string, number> = JSON.parse(snapshotRow[0].value);

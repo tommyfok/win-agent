@@ -29,7 +29,7 @@ export interface MemoryData {
  * Writes to both `memory` and `memory_vec` tables.
  */
 export async function insertMemory(data: MemoryData): Promise<number> {
-  const { lastInsertRowid } = insert("memory", data);
+  const { lastInsertRowid } = insert("memory", { ...data });
 
   // Generate embedding from summary (concise, best for semantic search)
   try {

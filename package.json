@@ -10,8 +10,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/index.js",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
+    "lint": "tsc --noEmit && eslint src",
+    "lint:fix": "tsc --noEmit && eslint src --fix",
     "format": "prettier --write src",
     "format:check": "prettier --check src"
   },

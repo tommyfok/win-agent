@@ -101,11 +101,11 @@ async function schedulerTick(
   // 1. User message priority: if there are unread user→PM messages,
   //    dispatch them immediately (bypass PM cooldown)
   if (!roleManager.isBusy("PM")) {
-    const userMessages = select(
+    const userMessages = select<MessageRow>(
       "messages",
       { from_role: "user", to_role: "PM", status: "unread" },
       { orderBy: "created_at ASC" }
-    ) as MessageRow[];
+    );
     if (userMessages.length > 0) {
       console.log(`   📨 调度 → PM (${userMessages.length} 条用户消息, 优先)`);
       roleManager.setBusy("PM", true);
@@ -160,7 +160,7 @@ async function schedulerTick(
         (r) =>
           r !== "PM" &&
           !roleManager.isBusy(r) &&
-          (select("messages", { to_role: r, status: "unread" }) as MessageRow[]).length > 0
+          (select<MessageRow>("messages", { to_role: r, status: "unread" })).length > 0
       );
       if (othersPending) {
         continue;
@@ -168,11 +168,11 @@ async function schedulerTick(
     }
 
     // Query unread messages for this role
-    const messages = select(
+    const messages = select<MessageRow>(
       "messages",
       { to_role: role, status: "unread" },
       { orderBy: "created_at ASC" }
-    ) as MessageRow[];
+    );
 
     if (messages.length === 0) continue;
 

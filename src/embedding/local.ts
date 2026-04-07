@@ -39,17 +39,17 @@ export function createLocalEmbedding(model?: string): EmbeddingProvider {
         console.log(`   ⏳ 加载本地 embedding 模型: ${modelId} ...`);
         pipelineInstance = await pipeline("feature-extraction", modelId, {
           dtype: "fp32",
-        });
+        }) as unknown as TransformerPipeline;
         console.log(`   ✓ 模型加载完成`);
       }
 
-      const output = await pipelineInstance(text, {
+      const output = await pipelineInstance!(text, {
         pooling: "mean",
         normalize: true,
       });
 
       // output is a Tensor; convert to flat number array
-      return Array.from(output.data as Float32Array);
+      return Array.from(output.data);
     },
   };
 }

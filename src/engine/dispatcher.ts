@@ -1,6 +1,7 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
 import { select, update } from "../db/repository.js";
+import { TaskStatus } from "../db/types.js";
 import { queryRelevantKnowledge, type KnowledgeEntry } from "../embedding/knowledge.js";
 import { insert as dbInsert } from "../db/repository.js";
 import { checkAndBlockUnmetDependencies } from "./dependency-checker.js";
@@ -100,18 +101,19 @@ export async function dispatchToRole(
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
   // cancel_task messages are always delivered so DEV/QA can execute rollback/cleanup.
   if (role === "DEV" || role === "QA") {
-    const SKIP_STATUSES = ["paused", "cancelled", "blocked"];
+    const SKIP_STATUSES: TaskStatus[] = [TaskStatus.Paused, TaskStatus.Cancelled, TaskStatus.Blocked];
     const filtered: MessageRow[] = [];
     for (const msg of messages) {
       if (msg.related_task_id && msg.type !== "cancel_task") {
-        const tasks = select("tasks", { id: msg.related_task_id });
-        if (tasks.length > 0 && SKIP_STATUSES.includes(tasks[0].status)) {
+        const tasks = select<{ id: number; status: TaskStatus }>("tasks", { id: msg.related_task_id });
+        const taskStatus = tasks[0]?.status;
+        if (taskStatus && SKIP_STATUSES.includes(taskStatus)) {
           update("messages", { id: msg.id }, { status: "read" });
           continue;
         }
         // Check unmet dependencies before dispatching to DEV
-        if (role === "DEV" && tasks.length > 0) {
-          const blocked = checkAndBlockUnmetDependencies(msg.related_task_id, tasks[0].status);
+        if (role === "DEV" && taskStatus) {
+          const blocked = checkAndBlockUnmetDependencies(msg.related_task_id, taskStatus);
           if (blocked) {
             update("messages", { id: msg.id }, { status: "read" });
             continue;
@@ -249,27 +251,29 @@ function getTaskContext(messages: MessageRow[]): TaskContext | null {
   const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
   if (!taskId) return null;
 
-  const tasks = select("tasks", { id: taskId }) as Array<{
+  interface TaskRow {
     id: number;
     title: string;
     description: string | null;
     acceptance_criteria: string | null;
     acceptance_process: string | null;
     status: string;
-  }>;
+  }
+  interface DepRow {
+    task_id: number;
+    depends_on: number;
+  }
+
+  const tasks = select<TaskRow>("tasks", { id: taskId });
   if (tasks.length === 0) return null;
 
   const task = tasks[0];
 
   // Get dependency tasks
-  const deps = select("task_dependencies", { task_id: taskId }) as Array<{ depends_on: number }>;
+  const deps = select<DepRow>("task_dependencies", { task_id: taskId });
   const dependencies: TaskContext["dependencies"] = [];
   for (const dep of deps) {
-    const depTasks = select("tasks", { id: dep.depends_on }) as Array<{
-      id: number;
-      title: string;
-      status: string;
-    }>;
+    const depTasks = select<TaskRow>("tasks", { id: dep.depends_on });
     if (depTasks.length > 0) {
       dependencies.push({
         id: depTasks[0].id,
@@ -345,16 +349,16 @@ export function buildDispatchPrompt(
   // 4. DEV/QA pending queue (PM only) — dedup guard so PM doesn't resend
   //    directives that are already queued and waiting to be dispatched.
   if (role === "PM") {
-    const pendingDevMsgs = select(
+    const pendingDevMsgs = select<MessageRow>(
       "messages",
       { from_role: "PM", to_role: "DEV", status: "unread" },
       { orderBy: "created_at ASC" }
-    ) as MessageRow[];
-    const pendingQaMsgs = select(
+    );
+    const pendingQaMsgs = select<MessageRow>(
       "messages",
       { from_role: "PM", to_role: "QA", status: "unread" },
       { orderBy: "created_at ASC" }
-    ) as MessageRow[];
+    );
 
     if (pendingDevMsgs.length > 0 || pendingQaMsgs.length > 0) {
       const lines: string[] = [];

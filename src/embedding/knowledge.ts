@@ -15,7 +15,7 @@ export interface KnowledgeData {
  * Writes to both `knowledge` and `knowledge_vec` tables.
  */
 export async function insertKnowledge(data: KnowledgeData): Promise<number> {
-  const { lastInsertRowid } = insert("knowledge", data);
+  const { lastInsertRowid } = insert("knowledge", { ...data });
 
   // Generate embedding from title + content
   try {

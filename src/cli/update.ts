@@ -111,7 +111,7 @@ export async function updateCommand() {
         { name: "逐个确认（每个文件单独决定）", value: "one-by-one" },
         { name: "取消，不做任何修改", value: "cancel" },
       ],
-    })) as "all" | "one-by-one" | "cancel";
+    }));
   } catch {
     console.log("\n已取消");
     return;

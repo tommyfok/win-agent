@@ -7,31 +7,44 @@ import {
   rawQuery,
   rawRun,
 } from "../db/repository.js";
+import { TaskStatus } from "../db/types.js";
 import type { Command } from "commander";
 
 interface TaskRow {
   id: number;
-  status: string;
+  status: TaskStatus;
   title: string;
   priority: string;
   description?: string | null;
   acceptance_criteria?: string | null;
   assigned_to?: string | null;
-  pre_suspend_status?: string | null;
+  pre_suspend_status?: TaskStatus | null;
   created_at: string;
 }
 
-const statusLabels: Record<string, string> = {
-  pending_dev: "待开发",
-  planning: "计划协商中",
-  in_dev: "开发中",
-  pending_qa: "待验收",
-  in_qa: "验收中",
-  done: "已完成",
-  rejected: "已打回",
-  cancelled: "已取消",
-  paused: "已暂停",
-  blocked: "已阻塞",
+interface TaskEventRow {
+  from_status: string;
+  to_status: string;
+  created_at: string;
+  changed_by: string;
+}
+
+/** DB 返回的 status 字符串 → 中文标签，未知值 fallback 到原始字符串 */
+function getStatusLabel(status: string): string {
+  return (statusLabels as Record<string, string>)[status] ?? status;
+}
+
+const statusLabels: Record<TaskStatus, string> = {
+  [TaskStatus.PendingDev]: "待开发",
+  [TaskStatus.Planning]: "计划协商中",
+  [TaskStatus.InDev]: "开发中",
+  [TaskStatus.PendingQA]: "待验收",
+  [TaskStatus.InQA]: "验收中",
+  [TaskStatus.Done]: "已完成",
+  [TaskStatus.Rejected]: "已打回",
+  [TaskStatus.Cancelled]: "已取消",
+  [TaskStatus.Paused]: "已暂停",
+  [TaskStatus.Blocked]: "已阻塞",
 };
 
 function ensureDb() {
@@ -70,7 +83,7 @@ function taskList() {
   });
 
   for (const task of tasks) {
-    const label = statusLabels[task.status] ?? task.status;
+    const label = getStatusLabel(task.status);
     console.log(`  #${task.id} [${label}] (${task.priority}) ${task.title}`);
   }
 }
@@ -91,7 +104,7 @@ function taskShow(taskId: string) {
   }
 
   const task = tasks[0];
-  const label = statusLabels[task.status] ?? task.status;
+  const label = getStatusLabel(task.status);
 
   console.log(`\n📋 任务 #${task.id}`);
   console.log(`   标题: ${task.title}`);
@@ -101,13 +114,16 @@ function taskShow(taskId: string) {
   console.log(`   描述: ${task.description ?? "无"}`);
   console.log(`   验收标准: ${task.acceptance_criteria ?? "无"}`);
 
-  const events = rawQuery("SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at", [id]);
+  const events = rawQuery<TaskEventRow>(
+    "SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at",
+    [id]
+  );
 
   if (events.length > 0) {
     console.log(`\n   📅 事件历史:`);
     for (const evt of events) {
-      const fromLabel = statusLabels[evt.from_status] ?? evt.from_status;
-      const toLabel = statusLabels[evt.to_status] ?? evt.to_status;
+      const fromLabel = getStatusLabel(evt.from_status);
+      const toLabel = getStatusLabel(evt.to_status);
       console.log(`     ${evt.created_at}  ${fromLabel} → ${toLabel}  (by ${evt.changed_by})`);
     }
   } else {
@@ -131,10 +147,13 @@ function taskPause(taskId: string) {
   }
 
   const task = tasks[0];
-  const validFrom = ["pending_dev", "planning", "in_dev", "pending_qa", "in_qa", "rejected"];
+  const validFrom: TaskStatus[] = [
+    TaskStatus.PendingDev, TaskStatus.Planning, TaskStatus.InDev,
+    TaskStatus.PendingQA, TaskStatus.InQA, TaskStatus.Rejected,
+  ];
 
   if (!validFrom.includes(task.status)) {
-    const label = statusLabels[task.status] ?? task.status;
+    const label = getStatusLabel(task.status);
     console.log(`⚠️  任务 #${id} 当前状态为「${label}」，无法暂停`);
     process.exit(1);
   }
@@ -142,11 +161,11 @@ function taskPause(taskId: string) {
   dbInsert("task_events", {
     task_id: id,
     from_status: task.status,
-    to_status: "paused",
+    to_status: TaskStatus.Paused,
     changed_by: "user",
   });
 
-  dbUpdate("tasks", { id }, { status: "paused", pre_suspend_status: task.status });
+  dbUpdate("tasks", { id }, { status: TaskStatus.Paused, pre_suspend_status: task.status });
 
   rawRun("UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'", [
     id,
@@ -180,24 +199,24 @@ function taskResume(taskId: string) {
 
   const task = tasks[0];
 
-  if (task.status !== "paused") {
-    const label = statusLabels[task.status] ?? task.status;
+  if (task.status !== TaskStatus.Paused) {
+    const label = getStatusLabel(task.status);
     console.log(`⚠️  任务 #${id} 当前状态为「${label}」，不是暂停状态，无法恢复`);
     process.exit(1);
   }
 
-  const restoreStatus = task.pre_suspend_status || "pending_dev";
+  const restoreStatus: TaskStatus = task.pre_suspend_status ?? TaskStatus.PendingDev;
 
   dbInsert("task_events", {
     task_id: id,
-    from_status: "paused",
+    from_status: TaskStatus.Paused,
     to_status: restoreStatus,
     changed_by: "user",
   });
 
   dbUpdate("tasks", { id }, { status: restoreStatus, pre_suspend_status: null });
 
-  const restoreLabel = statusLabels[restoreStatus] ?? restoreStatus;
+  const restoreLabel = getStatusLabel(restoreStatus);
 
   dbInsert("messages", {
     from_role: "system",
@@ -227,8 +246,8 @@ function taskCancel(taskId: string) {
 
   const task = tasks[0];
 
-  if (task.status === "done" || task.status === "cancelled") {
-    const label = statusLabels[task.status] ?? task.status;
+  if (task.status === TaskStatus.Done || task.status === TaskStatus.Cancelled) {
+    const label = getStatusLabel(task.status);
     console.log(`⚠️  任务 #${id} 当前状态为「${label}」，无法取消`);
     process.exit(1);
   }
@@ -236,11 +255,11 @@ function taskCancel(taskId: string) {
   dbInsert("task_events", {
     task_id: id,
     from_status: task.status,
-    to_status: "cancelled",
+    to_status: TaskStatus.Cancelled,
     changed_by: "user",
   });
 
-  dbUpdate("tasks", { id }, { status: "cancelled" });
+  dbUpdate("tasks", { id }, { status: TaskStatus.Cancelled });
 
   rawRun("UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'", [
     id,

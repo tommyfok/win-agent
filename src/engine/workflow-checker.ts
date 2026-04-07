@@ -93,7 +93,7 @@ export function checkWorkflowCompletion(sessionManager?: SessionManager | null):
  * Check if a workflow's completion condition is met.
  */
 function checkCompletion(wf: WorkflowRow): boolean {
-  const template = wf.template as string;
+  const template = wf.template;
 
   switch (template) {
     case "new-feature":

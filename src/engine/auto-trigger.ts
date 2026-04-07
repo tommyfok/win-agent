@@ -149,7 +149,7 @@ function checkAllTasksDone(): void {
  * 若超过，生成统计报告并通知 PM 提前介入复盘。
  */
 function checkRejectionRate(): void {
-  const activeIterations = select("iterations", { status: "active" });
+  const activeIterations = select<{ id: number }>("iterations", { status: "active" });
 
   for (const iter of activeIterations) {
     const key = `rejection_rate:${iter.id}`;

@@ -27,7 +27,7 @@ export async function statusCommand() {
   console.log(`   工作空间: ${workspace}`);
 
   // 2. Active workflow instances
-  const workflows = dbSelect(
+  const workflows = dbSelect<{ id: number; template: string; phase: string; status: string; created_at: string }>(
     "workflow_instances",
     { status: "active" },
     { orderBy: "created_at DESC" }
@@ -44,7 +44,7 @@ export async function statusCommand() {
   }
 
   // 3. Task statistics
-  const taskStats = rawQuery(`
+  const taskStats = rawQuery<{ status: string; cnt: number }>(`
     SELECT status, COUNT(*) as cnt
     FROM tasks
     GROUP BY status
@@ -88,7 +88,7 @@ export async function statusCommand() {
   }
 
   // 4. Cost overview (token consumption per role)
-  const costStats = rawQuery(`
+  const costStats = rawQuery<{ role: string; dispatch_count: number; total_input: number; total_output: number; total_tokens: number }>(`
     SELECT role,
            COUNT(*) as dispatch_count,
            SUM(input_tokens) as total_input,
@@ -111,7 +111,7 @@ export async function statusCommand() {
     console.log(`   合计: ${formatTokens(grandTotal)} tokens`);
 
     // Per-workflow cost (active workflows only)
-    const wfCosts = rawQuery(`
+    const wfCosts = rawQuery<{ id: number; template: string; phase: string; total_tokens: number; dispatch_count: number }>(`
       SELECT w.id, w.template, w.phase,
              SUM(r.input_tokens + r.output_tokens) as total_tokens,
              COUNT(r.id) as dispatch_count
@@ -132,7 +132,7 @@ export async function statusCommand() {
   }
 
   // 5. Recent messages
-  const recentMessages = dbSelect("messages", undefined, {
+  const recentMessages = dbSelect<{ id: number; from_role: string; to_role: string; content: string; created_at: string }>("messages", undefined, {
     orderBy: "created_at DESC",
     limit: 5,
   });

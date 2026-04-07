@@ -82,7 +82,7 @@ export async function engineCommand(workspace: string) {
 
   // Check memories and active workflows
   const memoryCount = rawQuery("SELECT COUNT(*) as cnt FROM memory")[0].cnt;
-  if (memoryCount > 0) {
+  if (memoryCount ?? 0 > 0) {
     console.log(`✓ 已回忆 ${memoryCount} 条近期记忆`);
   }
 

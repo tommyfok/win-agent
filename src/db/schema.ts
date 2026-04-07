@@ -223,7 +223,7 @@ export function getMissingTables(db: Database.Database): string[] {
     db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
       .all()
-      .map((row: { name: string }) => row.name)
+      .map((row) => (row as { name: string }).name)
   );
 
   const missing: string[] = [];

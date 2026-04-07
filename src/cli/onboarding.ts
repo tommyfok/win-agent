@@ -72,7 +72,7 @@ async function _onboardingCommand() {
   }
 
   // ── 3️⃣ 幂等检查 ──
-  const alreadyDone = dbSelect("project_config", { key: "onboarding_completed" });
+  const alreadyDone = dbSelect<{ key: string; value: string }>("project_config", { key: "onboarding_completed" });
   if (alreadyDone.length > 0) {
     const rerun = await confirm({ message: "Onboarding 已完成过，是否重新运行？", default: false });
     if (!rerun) {
@@ -84,8 +84,8 @@ async function _onboardingCommand() {
 
   // ── 4️⃣ 项目信息 ──
   console.log("\n4️⃣  项目信息");
-  const existingName = dbSelect("project_config", { key: "projectName" })[0]?.value ?? "";
-  const existingDesc = dbSelect("project_config", { key: "projectDescription" })[0]?.value ?? "";
+  const existingName = dbSelect<{ key: string; value: string }>("project_config", { key: "projectName" })[0]?.value ?? "";
+  const existingDesc = dbSelect<{ key: string; value: string }>("project_config", { key: "projectDescription" })[0]?.value ?? "";
 
   const projectName = await input({ message: "项目名称", default: existingName });
   const projectDescription = await input({ message: "项目描述", default: existingDesc });
@@ -324,7 +324,7 @@ export function snapshotRoleMtimes(workspace: string): void {
     if (!file.endsWith(".md")) continue;
     snapshot[file] = fs.statSync(path.join(rolesDir, file)).mtimeMs;
   }
-  const existing = dbSelect("project_config", { key: "role_mtimes_snapshot" });
+  const existing = dbSelect<{ key: string; value: string }>("project_config", { key: "role_mtimes_snapshot" });
   if (existing.length > 0) {
     dbUpdate(
       "project_config",

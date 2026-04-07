@@ -1,0 +1,18 @@
+/**
+ * 任务状态枚举，与数据库 tasks.status 字段值保持一致。
+ * 所有代码中对任务状态的比较应使用此枚举，避免魔法字符串。
+ */
+export const TaskStatus = {
+  PendingDev: "pending_dev",
+  Planning: "planning",
+  InDev: "in_dev",
+  PendingQA: "pending_qa",
+  InQA: "in_qa",
+  Done: "done",
+  Rejected: "rejected",
+  Cancelled: "cancelled",
+  Paused: "paused",
+  Blocked: "blocked",
+} as const;
+
+export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
