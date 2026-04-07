@@ -360,15 +360,16 @@ export function buildDispatchPrompt(
 
   // 4. DEV/QA pending queue (PM only) — dedup guard so PM doesn't resend
   //    directives that are already queued and waiting to be dispatched.
+  //    Includes both PM and system messages so PM is aware of system notifications.
   if (role === "PM") {
     const pendingDevMsgs = select<MessageRow>(
       "messages",
-      { from_role: "PM", to_role: "DEV", status: MessageStatus.Unread },
+      { to_role: "DEV", status: MessageStatus.Unread },
       { orderBy: "created_at ASC" }
     );
     const pendingQaMsgs = select<MessageRow>(
       "messages",
-      { from_role: "PM", to_role: "QA", status: MessageStatus.Unread },
+      { to_role: "QA", status: MessageStatus.Unread },
       { orderBy: "created_at ASC" }
     );
 
@@ -378,14 +379,14 @@ export function buildDispatchPrompt(
         lines.push(`DEV 待处理队列（${pendingDevMsgs.length} 条未读，无需重发）：`);
         for (const m of pendingDevMsgs) {
           const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
-          lines.push(`  - [msg#${m.id}]${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
+          lines.push(`  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
         }
       }
       if (pendingQaMsgs.length > 0) {
         lines.push(`QA 待处理队列（${pendingQaMsgs.length} 条未读，无需重发）：`);
         for (const m of pendingQaMsgs) {
           const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
-          lines.push(`  - [msg#${m.id}]${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
+          lines.push(`  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
         }
       }
       parts.push(`## 已排队消息（勿重复发送）\n${lines.join("\n")}`);
