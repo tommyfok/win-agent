@@ -1,4 +1,5 @@
 import { select, update, insert, rawQuery } from "../db/repository.js";
+import { MessageStatus } from "../db/types.js";
 import type { SessionManager } from "./session-manager.js";
 import { cleanExpiredMemories } from "../embedding/memory.js";
 import { cleanExpiredOutputs } from "./output-cleaner.js";
@@ -48,7 +49,7 @@ export function checkWorkflowCompletion(sessionManager?: SessionManager | null):
           to_role: "PM",
           type: "system",
           content: buildCompletionMessage(wf),
-          status: "unread",
+          status: MessageStatus.Unread,
           related_workflow_id: wf.id,
         });
       }
@@ -207,7 +208,7 @@ function sendReflectionTriggers(wf: WorkflowRow): void {
       to_role: role,
       type: "reflection",
       content: buildReflectionPrompt(role, wf),
-      status: "unread",
+      status: MessageStatus.Unread,
       related_workflow_id: wf.id,
     });
   }

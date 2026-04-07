@@ -7,6 +7,7 @@
 import { writePidFile, removePidFile, getDbPath } from "../config/index.js";
 import { openDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert, rawQuery } from "../db/repository.js";
+import { MessageStatus } from "../db/types.js";
 import {
   startOpencodeServer,
   removeServerInfo,
@@ -93,7 +94,7 @@ export async function engineCommand(workspace: string) {
       to_role: "PM",
       type: "system",
       content: `引擎已重启恢复，有 ${activeWorkflows.length} 个工作流继续执行。`,
-      status: "unread",
+      status: MessageStatus.Unread,
     });
     console.log(`△ 发现 ${activeWorkflows.length} 个活跃工作流，已通知 PM`);
   }

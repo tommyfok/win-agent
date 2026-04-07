@@ -1,4 +1,5 @@
 import { select, insert, rawQuery, rawRun } from "../db/repository.js";
+import { MessageStatus } from "../db/types.js";
 import { formatTokens } from "../utils/format.js";
 
 /**
@@ -130,7 +131,7 @@ function checkAllTasksDone(): void {
       to_role: "PM",
       type: "system",
       content: `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。\n\n${statsReport}\n\n请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。\n审阅完成后，将回顾摘要写入 memory 表，然后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
-      status: "unread",
+      status: MessageStatus.Deferred,
       related_workflow_id: workflowId,
     });
 
@@ -204,7 +205,7 @@ function checkRejectionRate(): void {
       to_role: "PM",
       type: "system",
       content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 30%，需要关注。\n\n${statsReport}\n\n请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。\n完成后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
-      status: "unread",
+      status: MessageStatus.Deferred,
       related_workflow_id: workflowId,
     });
 

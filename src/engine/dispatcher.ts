@@ -1,7 +1,7 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
 import { select, update } from "../db/repository.js";
-import { TaskStatus } from "../db/types.js";
+import { TaskStatus, MessageStatus } from "../db/types.js";
 import { queryRelevantKnowledge, type KnowledgeEntry } from "../embedding/knowledge.js";
 import { insert as dbInsert } from "../db/repository.js";
 import { checkAndBlockUnmetDependencies } from "./dependency-checker.js";
@@ -108,14 +108,14 @@ export async function dispatchToRole(
         const tasks = select<{ id: number; status: TaskStatus }>("tasks", { id: msg.related_task_id });
         const taskStatus = tasks[0]?.status;
         if (taskStatus && SKIP_STATUSES.includes(taskStatus)) {
-          update("messages", { id: msg.id }, { status: "read" });
+          update("messages", { id: msg.id }, { status: MessageStatus.Read });
           continue;
         }
         // Check unmet dependencies before dispatching to DEV
         if (role === "DEV" && taskStatus) {
           const blocked = checkAndBlockUnmetDependencies(msg.related_task_id, taskStatus);
           if (blocked) {
-            update("messages", { id: msg.id }, { status: "read" });
+            update("messages", { id: msg.id }, { status: MessageStatus.Read });
             continue;
           }
         }
@@ -168,7 +168,7 @@ export async function dispatchToRole(
 
   // 5. Mark messages as read
   for (const msg of messages) {
-    update("messages", { id: msg.id }, { status: "read" });
+    update("messages", { id: msg.id }, { status: MessageStatus.Read });
   }
 
   // 6. Extract token usage and LLM output for traceability
@@ -351,12 +351,12 @@ export function buildDispatchPrompt(
   if (role === "PM") {
     const pendingDevMsgs = select<MessageRow>(
       "messages",
-      { from_role: "PM", to_role: "DEV", status: "unread" },
+      { from_role: "PM", to_role: "DEV", status: MessageStatus.Unread },
       { orderBy: "created_at ASC" }
     );
     const pendingQaMsgs = select<MessageRow>(
       "messages",
-      { from_role: "PM", to_role: "QA", status: "unread" },
+      { from_role: "PM", to_role: "QA", status: MessageStatus.Unread },
       { orderBy: "created_at ASC" }
     );
 

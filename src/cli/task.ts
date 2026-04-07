@@ -7,7 +7,7 @@ import {
   rawQuery,
   rawRun,
 } from "../db/repository.js";
-import { TaskStatus } from "../db/types.js";
+import { TaskStatus, MessageStatus } from "../db/types.js";
 import type { Command } from "commander";
 
 interface TaskRow {
@@ -167,7 +167,7 @@ function taskPause(taskId: string) {
 
   dbUpdate("tasks", { id }, { status: TaskStatus.Paused, pre_suspend_status: task.status });
 
-  rawRun("UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'", [
+  rawRun(`UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`, [
     id,
   ]);
 
@@ -261,7 +261,7 @@ function taskCancel(taskId: string) {
 
   dbUpdate("tasks", { id }, { status: TaskStatus.Cancelled });
 
-  rawRun("UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'", [
+  rawRun(`UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`, [
     id,
   ]);
 

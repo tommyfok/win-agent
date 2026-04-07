@@ -1,4 +1,5 @@
 import { select, update, insert, rawQuery } from "../db/repository.js";
+import { MessageStatus } from "../db/types.js";
 
 export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: string): boolean {
   // Already blocked — don't overwrite pre_suspend_status (would create infinite loop)
@@ -55,7 +56,7 @@ export function checkAndUnblockDependencies(): void {
         type: "notification",
         content: `任务 #${task.id}「${task.title}」依赖已满足，已自动从 blocked 恢复为 ${restoreStatus}`,
         related_task_id: task.id,
-        status: "unread",
+        status: MessageStatus.Unread,
       });
       // Also notify the assigned role directly so DEV/QA can resume without waiting for PM
       const assignedRole = task.assigned_to;
@@ -66,7 +67,7 @@ export function checkAndUnblockDependencies(): void {
           type: "notification",
           content: `任务 #${task.id}「${task.title}」的依赖已全部完成，可以继续开发了。`,
           related_task_id: task.id,
-          status: "unread",
+          status: MessageStatus.Unread,
         });
       }
     }

@@ -5,7 +5,8 @@ import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from "./dispat
 import { checkAndRotate } from "./memory-rotator.js";
 import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
-import { select, insert } from "../db/repository.js";
+import { select, insert, rawRun } from "../db/repository.js";
+import { MessageStatus } from "../db/types.js";
 import { checkAndUnblockDependencies } from "./dependency-checker.js";
 /** Sleep helper */
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -98,12 +99,23 @@ async function schedulerTick(
   // 0. Auto-unblock tasks whose dependencies are now satisfied
   checkAndUnblockDependencies();
 
+  // 0.5 Promote deferred trigger messages when PM is idle and has no pending unread messages.
+  // This ensures auto-trigger messages are dispatched in their own batch, not mixed with role messages.
+  if (!roleManager.isBusy("PM")) {
+    const pmUnread = select<MessageRow>("messages", { to_role: "PM", status: MessageStatus.Unread });
+    if (pmUnread.length === 0) {
+      rawRun(
+        `UPDATE messages SET status = '${MessageStatus.Unread}' WHERE status = '${MessageStatus.Deferred}' AND to_role = 'PM'`
+      );
+    }
+  }
+
   // 1. User message priority: if there are unread user→PM messages,
   //    dispatch them immediately (bypass PM cooldown)
   if (!roleManager.isBusy("PM")) {
     const userMessages = select<MessageRow>(
       "messages",
-      { from_role: "user", to_role: "PM", status: "unread" },
+      { from_role: "user", to_role: "PM", status: MessageStatus.Unread },
       { orderBy: "created_at ASC" }
     );
     if (userMessages.length > 0) {
@@ -160,7 +172,7 @@ async function schedulerTick(
         (r) =>
           r !== "PM" &&
           !roleManager.isBusy(r) &&
-          (select<MessageRow>("messages", { to_role: r, status: "unread" })).length > 0
+          (select<MessageRow>("messages", { to_role: r, status: MessageStatus.Unread })).length > 0
       );
       if (othersPending) {
         continue;
@@ -170,7 +182,7 @@ async function schedulerTick(
     // Query unread messages for this role
     const messages = select<MessageRow>(
       "messages",
-      { to_role: role, status: "unread" },
+      { to_role: role, status: MessageStatus.Unread },
       { orderBy: "created_at ASC" }
     );
 

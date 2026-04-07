@@ -16,3 +16,14 @@ export const TaskStatus = {
 } as const;
 
 export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
+
+/**
+ * 消息状态枚举，与数据库 messages.status 字段值保持一致。
+ */
+export const MessageStatus = {
+  Unread: "unread",
+  Read: "read",
+  Deferred: "deferred",
+} as const;
+
+export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus];
