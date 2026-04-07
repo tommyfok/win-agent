@@ -1,12 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import {
-  checkEngineRunning,
-  writePidFile,
-  removePidFile,
-  getDbPath,
-} from "../config/index.js";
+import { checkEngineRunning, writePidFile, removePidFile, getDbPath } from "../config/index.js";
 import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
 import { openDb, closeDb, getDb } from "../db/connection.js";
@@ -21,9 +16,12 @@ export { getServerHandle, getSessionManager } from "./engine.js";
 export async function startCommand() {
   try {
     await _startCommand();
-  } catch (err: any) {
+  } catch (err: unknown) {
     // inquirer throws ExitPromptError on Ctrl+C during prompts
-    if (err?.name === "ExitPromptError" || err?.message?.includes("User force closed")) {
+    if (
+      err instanceof Error &&
+      (err.name === "ExitPromptError" || err.message?.includes("User force closed"))
+    ) {
       console.log("\n👋 已取消");
       removePidFile();
       process.exit(0);
@@ -173,4 +171,3 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
   removePidFile();
   process.exit(1);
 }
-

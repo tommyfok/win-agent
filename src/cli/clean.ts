@@ -3,13 +3,16 @@ import path from "node:path";
 import { confirm } from "@inquirer/prompts";
 import { loadConfig } from "../config/index.js";
 import { DEFAULT_SKILLS, getSkillDirName } from "../workspace/sync-agents.js";
-import { startOpencodeServer } from "../engine/opencode-server.js";
+import { startOpencodeServer, type OpencodeServerHandle } from "../engine/opencode-server.js";
 
 export async function cleanCommand() {
   try {
     await _cleanCommand();
-  } catch (err: any) {
-    if (err?.name === "ExitPromptError" || err?.message?.includes("User force closed")) {
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      (err.name === "ExitPromptError" || err.message?.includes("User force closed"))
+    ) {
       console.log("\n👋 已取消");
       process.exit(0);
     }
@@ -113,7 +116,9 @@ function cleanOpencodeFiles(opencodeDir: string): void {
       } else {
         fs.writeFileSync(configFile, JSON.stringify(cfg, null, 2), "utf-8");
       }
-    } catch { /* leave file untouched if parse fails */ }
+    } catch {
+      /* leave file untouched if parse fails */
+    }
   }
 
   removeIfEmpty(opencodeDir);
@@ -129,7 +134,7 @@ function removeIfEmpty(dir: string): void {
  * Start a temporary opencode server, delete sessions matching prefix, then shut down.
  */
 async function cleanOpencodeSessionsQuietly(workspace: string, prefix: string): Promise<void> {
-  let handle: { client: any; close: () => void } | null = null;
+  let handle: OpencodeServerHandle | null = null;
   try {
     // Use a different port to avoid conflict with a running engine
     handle = await startOpencodeServer(workspace);
@@ -141,7 +146,9 @@ async function cleanOpencodeSessionsQuietly(workspace: string, prefix: string): 
         try {
           await handle.client.session.delete({ path: { id: s.id } });
           deleted++;
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     }
     if (deleted > 0) {
@@ -152,6 +159,10 @@ async function cleanOpencodeSessionsQuietly(workspace: string, prefix: string): 
   } catch {
     console.log("  ⚠️  opencode session 清理跳过（服务启动失败）");
   } finally {
-    try { handle?.close(); } catch {}
+    try {
+      handle?.close();
+    } catch {
+      // ignore close errors during cleanup
+    }
   }
 }

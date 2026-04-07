@@ -4,15 +4,14 @@
  *
  * Usage: win-agent _engine <workspace>
  */
-import fs from "node:fs";
-import {
-  writePidFile,
-  removePidFile,
-  getDbPath,
-} from "../config/index.js";
+import { writePidFile, removePidFile, getDbPath } from "../config/index.js";
 import { openDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert, rawQuery } from "../db/repository.js";
-import { startOpencodeServer, removeServerInfo, type OpencodeServerHandle } from "../engine/opencode-server.js";
+import {
+  startOpencodeServer,
+  removeServerInfo,
+  type OpencodeServerHandle,
+} from "../engine/opencode-server.js";
 import { syncAgents, deployTools } from "../workspace/sync-agents.js";
 import { SessionManager } from "../engine/session-manager.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
@@ -130,9 +129,11 @@ export async function engineCommand(workspace: string) {
         action: "engine_stop",
         content: `引擎停止 (PID: ${process.pid})`,
       });
-    } catch {}
+    } catch { /* empty */ }
     if (serverHandle?.owned) {
-      try { serverHandle.close(); } catch {}
+      try {
+        serverHandle.close();
+      } catch { /* empty */ }
       removeServerInfo(workspace);
     }
     removePidFile(workspace);
@@ -151,5 +152,5 @@ export async function engineCommand(workspace: string) {
   });
 
   // Start scheduler (blocks until stopped)
-  await startSchedulerLoop(serverHandle.client, sessionManager, workspace);
+  await startSchedulerLoop(serverHandle.client, sessionManager);
 }

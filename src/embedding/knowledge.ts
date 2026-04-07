@@ -24,12 +24,11 @@ export async function insertKnowledge(data: KnowledgeData): Promise<number> {
     // sqlite-vec vec0 checks sqlite3_value_type(id) == SQLITE_INTEGER at the C level.
     // JS number binds as SQLITE_FLOAT; only BigInt binds as SQLITE_INTEGER.
     // Embedding must be a Float32Array (bound as BLOB) per sqlite-vec docs.
-    const idInt = typeof lastInsertRowid === "bigint"
-      ? lastInsertRowid
-      : BigInt(lastInsertRowid);
-    db.prepare(
-      "INSERT INTO knowledge_vec(id, embedding) VALUES (?, ?)"
-    ).run(idInt, new Float32Array(embedding));
+    const idInt = typeof lastInsertRowid === "bigint" ? lastInsertRowid : BigInt(lastInsertRowid);
+    db.prepare("INSERT INTO knowledge_vec(id, embedding) VALUES (?, ?)").run(
+      idInt,
+      new Float32Array(embedding)
+    );
   } catch (err) {
     // Embedding failure is non-fatal — knowledge is still searchable by category/text
     console.log(`   ⚠️  知识条目 #${lastInsertRowid} embedding 生成失败: ${err}`);
@@ -63,9 +62,7 @@ export async function queryRelevantKnowledge(
 
   // Use sqlite-vec KNN query to find nearest neighbors
   const vecResults = db
-    .prepare(
-      "SELECT id, distance FROM knowledge_vec WHERE embedding MATCH ? AND k = ?"
-    )
+    .prepare("SELECT id, distance FROM knowledge_vec WHERE embedding MATCH ? AND k = ?")
     .all(new Float32Array(queryEmbedding), limit * 2) as Array<{
     id: number;
     distance: number;
@@ -79,7 +76,7 @@ export async function queryRelevantKnowledge(
 
   let sql = `SELECT id, title, content, category, tags FROM knowledge
     WHERE id IN (${placeholders}) AND status = 'active'`;
-  const params: any[] = [...ids];
+  const params: (string | number)[] = [...ids];
 
   if (category) {
     sql += " AND category = ?";
@@ -98,10 +95,7 @@ export async function queryRelevantKnowledge(
 /**
  * Query knowledge by category only (no vector search, for when embedding is unavailable).
  */
-export function queryKnowledgeByCategory(
-  category: string,
-  limit: number = 10
-): KnowledgeEntry[] {
+export function queryKnowledgeByCategory(category: string, limit: number = 10): KnowledgeEntry[] {
   const db = getDb();
   return db
     .prepare(

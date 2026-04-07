@@ -1,7 +1,4 @@
-import {
-  checkEngineRunning,
-  getDbPath,
-} from "../config/index.js";
+import { checkEngineRunning, getDbPath } from "../config/index.js";
 import { openDb, getDb } from "../db/connection.js";
 import { select as dbSelect, rawQuery } from "../db/repository.js";
 import { formatTokens } from "../utils/format.js";
@@ -30,7 +27,11 @@ export async function statusCommand() {
   console.log(`   工作空间: ${workspace}`);
 
   // 2. Active workflow instances
-  const workflows = dbSelect("workflow_instances", { status: "active" }, { orderBy: "created_at DESC" });
+  const workflows = dbSelect(
+    "workflow_instances",
+    { status: "active" },
+    { orderBy: "created_at DESC" }
+  );
   console.log("\n📋 工作流实例:");
   if (workflows.length === 0) {
     console.log("   无活跃工作流");
@@ -81,7 +82,9 @@ export async function statusCommand() {
       }
     }
     console.log(`   ${parts.join("  ")}`);
-    console.log(`   总进度: ${doneCount}/${totalTasks} (${Math.round((doneCount / totalTasks) * 100)}%)`);
+    console.log(
+      `   总进度: ${doneCount}/${totalTasks} (${Math.round((doneCount / totalTasks) * 100)}%)`
+    );
   }
 
   // 4. Cost overview (token consumption per role)
@@ -102,7 +105,7 @@ export async function statusCommand() {
       const total = row.total_tokens ?? 0;
       grandTotal += total;
       console.log(
-        `   ${row.role}: ${formatTokens(total)} tokens (输入 ${formatTokens(row.total_input ?? 0)} / 输出 ${formatTokens(row.total_output ?? 0)}) | ${row.dispatch_count} 次调度`,
+        `   ${row.role}: ${formatTokens(total)} tokens (输入 ${formatTokens(row.total_input ?? 0)} / 输出 ${formatTokens(row.total_output ?? 0)}) | ${row.dispatch_count} 次调度`
       );
     }
     console.log(`   合计: ${formatTokens(grandTotal)} tokens`);
@@ -121,7 +124,9 @@ export async function statusCommand() {
     if (wfCosts.length > 0) {
       console.log("   按工作流:");
       for (const wc of wfCosts) {
-        console.log(`     #${wc.id} [${wc.template}]: ${formatTokens(wc.total_tokens ?? 0)} tokens (${wc.dispatch_count} 次调度)`);
+        console.log(
+          `     #${wc.id} [${wc.template}]: ${formatTokens(wc.total_tokens ?? 0)} tokens (${wc.dispatch_count} 次调度)`
+        );
       }
     }
   }

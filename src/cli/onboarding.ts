@@ -5,7 +5,13 @@ import { runEnvCheck } from "./check.js";
 import { initWorkspace } from "../workspace/init.js";
 import { openDb, closeDb, getDb } from "../db/connection.js";
 import { select as dbSelect, insert as dbInsert, update as dbUpdate } from "../db/repository.js";
-import { syncAgents, deployTools, installDefaultSkills, DEFAULT_SKILLS, getSkillDirName } from "../workspace/sync-agents.js";
+import {
+  syncAgents,
+  deployTools,
+  installDefaultSkills,
+  DEFAULT_SKILLS,
+  getSkillDirName,
+} from "../workspace/sync-agents.js";
 import { insertKnowledge } from "../embedding/knowledge.js";
 import { getEmbeddingDimension } from "../embedding/index.js";
 import { setEmbeddingDimension } from "../db/schema.js";
@@ -31,8 +37,11 @@ const WORKSPACE_ANALYSIS_PROMPT = `请分析当前工作空间，生成一份项
 export async function onboardingCommand() {
   try {
     await _onboardingCommand();
-  } catch (err: any) {
-    if (err?.name === "ExitPromptError" || err?.message?.includes("User force closed")) {
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      (err.name === "ExitPromptError" || err.message?.includes("User force closed"))
+    ) {
       console.log("\n👋 已取消");
       process.exit(0);
     }
@@ -56,7 +65,11 @@ async function _onboardingCommand() {
   }
 
   const dbPath = getDbPath(workspace);
-  try { getDb(); } catch { openDb(dbPath); }
+  try {
+    getDb();
+  } catch {
+    openDb(dbPath);
+  }
 
   // ── 3️⃣ 幂等检查 ──
   const alreadyDone = dbSelect("project_config", { key: "onboarding_completed" });
@@ -114,45 +127,46 @@ async function _onboardingCommand() {
   let serverHandle: Awaited<ReturnType<typeof startOpencodeServer>> | null = null;
   if (!detectExistingCode(workspace)) {
     console.log("   空目录，跳过");
-  } else try {
-    serverHandle = await startOpencodeServer(workspace);
-    const { client } = serverHandle;
+  } else
+    try {
+      serverHandle = await startOpencodeServer(workspace);
+      const { client } = serverHandle;
 
-    const session = await client.session.create({ body: { title: "wa-onboarding-analyst" } });
-    const sessionId = session.data!.id;
+      const session = await client.session.create({ body: { title: "wa-onboarding-analyst" } });
+      const sessionId = session.data!.id;
 
-    console.log("   → 分析中，请稍候...");
-    const result = await client.session.prompt({
-      path: { id: sessionId },
-      body: {
-        agent: "PM",
-        parts: [{ type: "text", text: WORKSPACE_ANALYSIS_PROMPT }],
-      },
-    });
+      console.log("   → 分析中，请稍候...");
+      const result = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          agent: "PM",
+          parts: [{ type: "text", text: WORKSPACE_ANALYSIS_PROMPT }],
+        },
+      });
 
-    const textParts = result.data?.parts?.filter(
-      (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
-    );
-    overview = textParts?.map((p) => p.text).join("\n") ?? "";
+      const textParts = result.data?.parts?.filter(
+        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
+      );
+      overview = textParts?.map((p) => p.text).join("\n") ?? "";
 
-    const overviewPath = path.join(workspace, ".win-agent", "overview.md");
-    fs.writeFileSync(
-      overviewPath,
-      `# 项目概览\n\n_由 \`win-agent onboard\` 自动生成_\n\n${overview}`,
-      "utf-8",
-    );
-    console.log("   ✓ 已写入 .win-agent/overview.md");
-  } catch (err: any) {
-    if (err?.code === "INSTALL_FAILED") {
-      throw err;
+      const overviewPath = path.join(workspace, ".win-agent", "overview.md");
+      fs.writeFileSync(
+        overviewPath,
+        `# 项目概览\n\n_由 \`win-agent onboard\` 自动生成_\n\n${overview}`,
+        "utf-8"
+      );
+      console.log("   ✓ 已写入 .win-agent/overview.md");
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException)?.code === "INSTALL_FAILED") {
+        throw err;
+      }
+      console.log(`   ⚠️  工作空间分析失败，跳过: ${err}`);
+    } finally {
+      if (serverHandle?.owned) {
+        serverHandle.close();
+        removeServerInfo(workspace);
+      }
     }
-    console.log(`   ⚠️  工作空间分析失败，跳过: ${err}`);
-  } finally {
-    if (serverHandle?.owned) {
-      serverHandle.close();
-      removeServerInfo(workspace);
-    }
-  }
 
   // ── 8️⃣ 注入项目上下文到角色文件 ──
   console.log("\n8️⃣  更新角色文件");
@@ -189,7 +203,10 @@ async function importProjectContext(workspace: string) {
     console.log("   a) 空目录，跳过代码扫描");
   }
 
-  const doImport = await confirm({ message: "导入参考资料（设计稿、PRD、API 文档等）？", default: false });
+  const doImport = await confirm({
+    message: "导入参考资料（设计稿、PRD、API 文档等）？",
+    default: false,
+  });
   if (doImport) {
     const refDir = await input({ message: "资料目录路径" });
     const resolved = path.resolve(refDir.trim());
@@ -242,12 +259,22 @@ async function importProjectContext(workspace: string) {
 function detectExistingCode(workspace: string): boolean {
   const entries = fs.readdirSync(workspace);
   const indicators = [
-    "package.json", "tsconfig.json", "Cargo.toml", "go.mod",
-    "pom.xml", "build.gradle", "requirements.txt", "pyproject.toml",
-    "Makefile", "CMakeLists.txt", "src", "lib", "app",
+    "package.json",
+    "tsconfig.json",
+    "Cargo.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "requirements.txt",
+    "pyproject.toml",
+    "Makefile",
+    "CMakeLists.txt",
+    "src",
+    "lib",
+    "app",
   ];
   return entries.some(
-    (e) => indicators.includes(e) || e.endsWith(".ts") || e.endsWith(".js") || e.endsWith(".py"),
+    (e) => indicators.includes(e) || e.endsWith(".ts") || e.endsWith(".js") || e.endsWith(".py")
   );
 }
 
@@ -299,7 +326,11 @@ export function snapshotRoleMtimes(workspace: string): void {
   }
   const existing = dbSelect("project_config", { key: "role_mtimes_snapshot" });
   if (existing.length > 0) {
-    dbUpdate("project_config", { key: "role_mtimes_snapshot" }, { value: JSON.stringify(snapshot) });
+    dbUpdate(
+      "project_config",
+      { key: "role_mtimes_snapshot" },
+      { value: JSON.stringify(snapshot) }
+    );
   } else {
     dbInsert("project_config", { key: "role_mtimes_snapshot", value: JSON.stringify(snapshot) });
   }
@@ -321,7 +352,8 @@ function injectProjectContext(workspace: string, projectName: string, projectDes
     "",
   ].join("\n");
 
-  const sentinel = /<!-- win-agent:project-context -->[\s\S]*?<!-- \/win-agent:project-context -->\n?/;
+  const sentinel =
+    /<!-- win-agent:project-context -->[\s\S]*?<!-- \/win-agent:project-context -->\n?/;
 
   for (const file of fs.readdirSync(rolesDir)) {
     if (!file.endsWith(".md")) continue;

@@ -5,14 +5,14 @@ import { spawnSync } from "node:child_process";
 // ─── Default Skills ───────────────────────────────────────────────────────────
 
 export interface SkillConfig {
-  pkg: string;     // e.g. "obra/superpowers@using-superpowers"
+  pkg: string; // e.g. "obra/superpowers@using-superpowers"
   roles: string[]; // which roles get this skill; others will have it denied
 }
 
 export const DEFAULT_SKILLS: SkillConfig[] = [
-  { pkg: "obra/superpowers@using-superpowers",              roles: ["PM", "DEV", "QA"] },
-  { pkg: "zixun-github/aisdlc@spec-product-clarify",        roles: ["PM"] },
-  { pkg: "deanpeters/product-manager-skills@user-story",    roles: ["PM"] },
+  { pkg: "obra/superpowers@using-superpowers", roles: ["PM", "DEV", "QA"] },
+  { pkg: "zixun-github/aisdlc@spec-product-clarify", roles: ["PM"] },
+  { pkg: "deanpeters/product-manager-skills@user-story", roles: ["PM"] },
   { pkg: "deanpeters/product-manager-skills@user-story-splitting", roles: ["PM"] },
 ];
 
@@ -41,9 +41,9 @@ interface AgentFrontmatter {
 
 /** Build skill permission for roles that should not see PM-only skills */
 function buildSkillPermission(): Record<string, string> {
-  const pmOnlySkills = DEFAULT_SKILLS
-    .filter((s) => s.roles.length === 1 && s.roles[0] === "PM")
-    .map((s) => getSkillDirName(s.pkg));
+  const pmOnlySkills = DEFAULT_SKILLS.filter(
+    (s) => s.roles.length === 1 && s.roles[0] === "PM"
+  ).map((s) => getSkillDirName(s.pkg));
   const result: Record<string, string> = {};
   for (const name of pmOnlySkills) result[name] = "deny";
   result["*"] = "allow";
@@ -51,7 +51,10 @@ function buildSkillPermission(): Record<string, string> {
 }
 
 /** Build per-role tool config — each role gets its own database_<ROLE> tools */
-function buildToolConfig(role: string, extraTools: Record<string, boolean>): Record<string, boolean> {
+function buildToolConfig(
+  role: string,
+  extraTools: Record<string, boolean>
+): Record<string, boolean> {
   // Disable all other roles' database tools, enable only this role's
   const tools: Record<string, boolean> = {};
   for (const r of ["PM", "DEV", "QA"]) {
@@ -168,9 +171,11 @@ export function syncAgents(workspace: string): string[] {
 
   // Ensure opencode.json has permission: allow (agents run autonomously)
   const configFile = path.join(opencodeDir, "opencode.json");
-  let opencodeConfig: Record<string, any> = {};
+  let opencodeConfig: Record<string, unknown> = {};
   if (fs.existsSync(configFile)) {
-    try { opencodeConfig = JSON.parse(fs.readFileSync(configFile, "utf-8")); } catch {}
+    try {
+      opencodeConfig = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+    } catch { /* empty */ }
   }
   if (opencodeConfig.permission !== "allow") {
     opencodeConfig.permission = "allow";

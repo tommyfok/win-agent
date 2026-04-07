@@ -2,7 +2,7 @@ import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
 import { RoleManager, ALL_ROLES } from "./role-manager.js";
 import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from "./dispatcher.js";
-import { checkAndRotate, detectModelContextLimit } from "./memory-rotator.js";
+import { checkAndRotate } from "./memory-rotator.js";
 import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
 import { select, insert } from "../db/repository.js";
@@ -40,8 +40,7 @@ let pmConsecutiveCount = 0;
  */
 export async function startSchedulerLoop(
   client: OpencodeClient,
-  sessionManager: SessionManager,
-  workspace: string,
+  sessionManager: SessionManager
 ): Promise<void> {
   running = true;
   pmConsecutiveCount = 0;
@@ -52,7 +51,7 @@ export async function startSchedulerLoop(
 
   while (running) {
     try {
-      await schedulerTick(client, sessionManager, roleManager, workspace);
+      await schedulerTick(client, sessionManager, roleManager);
     } catch (err) {
       console.error(`   ❌ 调度器异常: ${err}`);
       // Log to database for diagnostics
@@ -94,8 +93,7 @@ export function stopSchedulerLoop(): void {
 async function schedulerTick(
   client: OpencodeClient,
   sessionManager: SessionManager,
-  roleManager: RoleManager,
-  workspace: string,
+  roleManager: RoleManager
 ): Promise<void> {
   // 0. Auto-unblock tasks whose dependencies are now satisfied
   checkAndUnblockDependencies();
@@ -106,18 +104,28 @@ async function schedulerTick(
     const userMessages = select(
       "messages",
       { from_role: "user", to_role: "PM", status: "unread" },
-      { orderBy: "created_at ASC" },
+      { orderBy: "created_at ASC" }
     ) as MessageRow[];
     if (userMessages.length > 0) {
       console.log(`   📨 调度 → PM (${userMessages.length} 条用户消息, 优先)`);
       roleManager.setBusy("PM", true);
       try {
         const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
-          client, sessionManager, "PM", userMessages, workspace,
+          client,
+          sessionManager,
+          "PM",
+          userMessages
         );
         const taskId = userMessages.find((m) => m.related_task_id)?.related_task_id;
         if (sessionId) {
-          await checkAndRotate(sessionManager, "PM", sessionId, inputTokens, outputTokens, taskId ?? undefined);
+          await checkAndRotate(
+            sessionManager,
+            "PM",
+            sessionId,
+            inputTokens,
+            outputTokens,
+            taskId ?? undefined
+          );
         }
         console.log(`   ✓ PM 调度完成 (用户优先)`);
       } finally {
@@ -134,8 +142,6 @@ async function schedulerTick(
   }
 
   // 2. Normal role dispatch: V1 serial, at most one role per tick
-  let dispatched = false;
-
   for (const role of ALL_ROLES) {
     if (roleManager.isBusy(role)) continue;
 
@@ -151,8 +157,10 @@ async function schedulerTick(
     if (role === "PM" && pmConsecutiveCount >= PM_MAX_CONSECUTIVE) {
       // Check if other roles have pending messages
       const othersPending = ALL_ROLES.some(
-        (r) => r !== "PM" && !roleManager.isBusy(r) &&
-          (select("messages", { to_role: r, status: "unread" }) as MessageRow[]).length > 0,
+        (r) =>
+          r !== "PM" &&
+          !roleManager.isBusy(r) &&
+          (select("messages", { to_role: r, status: "unread" }) as MessageRow[]).length > 0
       );
       if (othersPending) {
         continue;
@@ -163,7 +171,7 @@ async function schedulerTick(
     const messages = select(
       "messages",
       { to_role: role, status: "unread" },
-      { orderBy: "created_at ASC" },
+      { orderBy: "created_at ASC" }
     ) as MessageRow[];
 
     if (messages.length === 0) continue;
@@ -173,13 +181,12 @@ async function schedulerTick(
     roleManager.setBusy(role, true);
     try {
       // DEV/QA: group messages by task to ensure correct session & context per task
-      const dispatch = (role === "DEV" || role === "QA") ? dispatchToRoleGrouped : dispatchToRole;
+      const dispatch = role === "DEV" || role === "QA" ? dispatchToRoleGrouped : dispatchToRole;
       const { sessionId, inputTokens, outputTokens } = await dispatch(
         client,
         sessionManager,
         role,
-        messages,
-        workspace,
+        messages
       );
 
       // For PM: check session rotation. DEV/QA rotation is handled per-group
@@ -192,7 +199,7 @@ async function schedulerTick(
           sessionId,
           inputTokens,
           outputTokens,
-          taskId ?? undefined,
+          taskId ?? undefined
         );
       }
       console.log(`   ✓ ${role} 调度完成`);
@@ -206,7 +213,6 @@ async function schedulerTick(
       }
     }
 
-    dispatched = true;
     break; // V1: only one role per tick
   }
 
@@ -214,5 +220,4 @@ async function schedulerTick(
   // (tasks may have been updated by a previous dispatch's tool calls)
   checkAutoTriggers();
   checkWorkflowCompletion(sessionManager);
-
 }

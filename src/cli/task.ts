@@ -1,7 +1,4 @@
-import {
-  checkEngineRunning,
-  getDbPath,
-} from "../config/index.js";
+import { checkEngineRunning, getDbPath } from "../config/index.js";
 import { openDb, getDb } from "../db/connection.js";
 import {
   select as dbSelect,
@@ -10,7 +7,19 @@ import {
   rawQuery,
   rawRun,
 } from "../db/repository.js";
-import { Command } from "commander";
+import type { Command } from "commander";
+
+interface TaskRow {
+  id: number;
+  status: string;
+  title: string;
+  priority: string;
+  description?: string | null;
+  acceptance_criteria?: string | null;
+  assigned_to?: string | null;
+  pre_suspend_status?: string | null;
+  created_at: string;
+}
 
 const statusLabels: Record<string, string> = {
   pending_dev: "待开发",
@@ -41,7 +50,7 @@ function ensureDb() {
 function taskList() {
   ensureDb();
 
-  const tasks = rawQuery(
+  const tasks = rawQuery<TaskRow>(
     "SELECT * FROM tasks WHERE status NOT IN ('done','cancelled') ORDER BY priority DESC, created_at ASC"
   );
 
@@ -53,7 +62,7 @@ function taskList() {
   // priority sort: high > medium > low (DESC in SQL works alphabetically: low < medium < high? No.)
   // Re-sort in JS to guarantee correct priority ordering
   const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
-  tasks.sort((a: any, b: any) => {
+  tasks.sort((a, b) => {
     const pa = priorityOrder[a.priority] ?? 0;
     const pb = priorityOrder[b.priority] ?? 0;
     if (pa !== pb) return pb - pa;
@@ -75,13 +84,13 @@ function taskShow(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect("tasks", { id });
+  const tasks = dbSelect<TaskRow>("tasks", { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
   }
 
-  const task = tasks[0] as any;
+  const task = tasks[0];
   const label = statusLabels[task.status] ?? task.status;
 
   console.log(`\n📋 任务 #${task.id}`);
@@ -92,19 +101,14 @@ function taskShow(taskId: string) {
   console.log(`   描述: ${task.description ?? "无"}`);
   console.log(`   验收标准: ${task.acceptance_criteria ?? "无"}`);
 
-  const events = rawQuery(
-    "SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at",
-    [id]
-  );
+  const events = rawQuery("SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at", [id]);
 
   if (events.length > 0) {
     console.log(`\n   📅 事件历史:`);
     for (const evt of events) {
       const fromLabel = statusLabels[evt.from_status] ?? evt.from_status;
       const toLabel = statusLabels[evt.to_status] ?? evt.to_status;
-      console.log(
-        `     ${evt.created_at}  ${fromLabel} → ${toLabel}  (by ${evt.changed_by})`
-      );
+      console.log(`     ${evt.created_at}  ${fromLabel} → ${toLabel}  (by ${evt.changed_by})`);
     }
   } else {
     console.log(`\n   📅 暂无事件历史`);
@@ -120,13 +124,13 @@ function taskPause(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect("tasks", { id });
+  const tasks = dbSelect<TaskRow>("tasks", { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
   }
 
-  const task = tasks[0] as any;
+  const task = tasks[0];
   const validFrom = ["pending_dev", "planning", "in_dev", "pending_qa", "in_qa", "rejected"];
 
   if (!validFrom.includes(task.status)) {
@@ -144,10 +148,9 @@ function taskPause(taskId: string) {
 
   dbUpdate("tasks", { id }, { status: "paused", pre_suspend_status: task.status });
 
-  rawRun(
-    "UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'",
-    [id]
-  );
+  rawRun("UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'", [
+    id,
+  ]);
 
   dbInsert("messages", {
     from_role: "system",
@@ -169,13 +172,13 @@ function taskResume(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect("tasks", { id });
+  const tasks = dbSelect<TaskRow>("tasks", { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
   }
 
-  const task = tasks[0] as any;
+  const task = tasks[0];
 
   if (task.status !== "paused") {
     const label = statusLabels[task.status] ?? task.status;
@@ -216,13 +219,13 @@ function taskCancel(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect("tasks", { id });
+  const tasks = dbSelect<TaskRow>("tasks", { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
   }
 
-  const task = tasks[0] as any;
+  const task = tasks[0];
 
   if (task.status === "done" || task.status === "cancelled") {
     const label = statusLabels[task.status] ?? task.status;
@@ -239,10 +242,9 @@ function taskCancel(taskId: string) {
 
   dbUpdate("tasks", { id }, { status: "cancelled" });
 
-  rawRun(
-    "UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'",
-    [id]
-  );
+  rawRun("UPDATE messages SET status = 'read' WHERE related_task_id = ? AND status = 'unread'", [
+    id,
+  ]);
 
   dbInsert("messages", {
     from_role: "system",
@@ -270,13 +272,13 @@ function taskReprioritize(taskId: string, priority: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect("tasks", { id });
+  const tasks = dbSelect<TaskRow>("tasks", { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
   }
 
-  const task = tasks[0] as any;
+  const task = tasks[0];
   const oldPriority = task.priority;
 
   dbUpdate("tasks", { id }, { priority });
@@ -293,9 +295,7 @@ function taskReprioritize(taskId: string, priority: string) {
 }
 
 export function registerTaskCommands(program: Command) {
-  const task = program
-    .command("task")
-    .description("任务管理");
+  const task = program.command("task").description("任务管理");
 
   task
     .command("list")

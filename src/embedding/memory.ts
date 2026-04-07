@@ -38,12 +38,11 @@ export async function insertMemory(data: MemoryData): Promise<number> {
     // sqlite-vec vec0 checks sqlite3_value_type(id) == SQLITE_INTEGER at the C level.
     // JS number binds as SQLITE_FLOAT; only BigInt binds as SQLITE_INTEGER.
     // Embedding must be a Float32Array (bound as BLOB) per sqlite-vec docs.
-    const idInt = typeof lastInsertRowid === "bigint"
-      ? lastInsertRowid
-      : BigInt(lastInsertRowid);
-    db.prepare(
-      "INSERT INTO memory_vec(id, embedding) VALUES (?, ?)"
-    ).run(idInt, new Float32Array(embedding));
+    const idInt = typeof lastInsertRowid === "bigint" ? lastInsertRowid : BigInt(lastInsertRowid);
+    db.prepare("INSERT INTO memory_vec(id, embedding) VALUES (?, ?)").run(
+      idInt,
+      new Float32Array(embedding)
+    );
   } catch (err) {
     console.log(`   ⚠️  记忆 #${lastInsertRowid} embedding 生成失败: ${err}`);
   }
@@ -97,9 +96,7 @@ export async function buildRecallPrompt(
 
   // Get candidate memory IDs from vector search (fetch more than needed for filtering)
   const vecResults = db
-    .prepare(
-      "SELECT id, distance FROM memory_vec WHERE embedding MATCH ? AND k = ?"
-    )
+    .prepare("SELECT id, distance FROM memory_vec WHERE embedding MATCH ? AND k = ?")
     .all(new Float32Array(queryEmbedding), limit * 3) as Array<{
     id: number;
     distance: number;
@@ -144,9 +141,7 @@ export async function buildRecallPrompt(
   });
 
   // Sort by vector distance (most relevant first)
-  filtered.sort(
-    (a, b) => (distMap.get(a.id) ?? 1) - (distMap.get(b.id) ?? 1)
-  );
+  filtered.sort((a, b) => (distMap.get(a.id) ?? 1) - (distMap.get(b.id) ?? 1));
 
   return formatRecallPrompt(filtered.slice(0, limit));
 }
@@ -166,9 +161,7 @@ export function cleanExpiredMemories(): number {
 
   // Get IDs of expired memories (90+ days)
   const expired = db
-    .prepare(
-      "SELECT id FROM memory WHERE created_at < datetime('now', '-90 days')"
-    )
+    .prepare("SELECT id FROM memory WHERE created_at < datetime('now', '-90 days')")
     .all() as Array<{ id: number }>;
 
   if (expired.length === 0) return 0;
@@ -177,24 +170,16 @@ export function cleanExpiredMemories(): number {
   const placeholders = ids.map(() => "?").join(", ");
 
   // Delete from both tables
-  db.prepare(`DELETE FROM memory_vec WHERE id IN (${placeholders})`).run(
-    ...ids
-  );
-  const result = db
-    .prepare(`DELETE FROM memory WHERE id IN (${placeholders})`)
-    .run(...ids);
+  db.prepare(`DELETE FROM memory_vec WHERE id IN (${placeholders})`).run(...ids);
+  const result = db.prepare(`DELETE FROM memory WHERE id IN (${placeholders})`).run(...ids);
 
   return result.changes;
 }
 
-function formatRecallPrompt(
-  memories: Array<{ id: number; summary: string }>
-): string {
+function formatRecallPrompt(memories: Array<{ id: number; summary: string }>): string {
   if (memories.length === 0) return "";
 
-  const summaries = memories
-    .map((m) => `- [#${m.id}] ${m.summary}`)
-    .join("\n");
+  const summaries = memories.map((m) => `- [#${m.id}] ${m.summary}`).join("\n");
 
   return `## 近期工作回忆
 以下是你最近的工作记忆摘要，请在接下来的工作中参考这些上下文：

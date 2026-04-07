@@ -25,7 +25,9 @@ export async function talkCommand() {
       const info = JSON.parse(fs.readFileSync(infoFile, "utf-8"));
       if (info.url) serverUrl = info.url;
     }
-  } catch { /* use default */ }
+  } catch {
+    /* use default */
+  }
 
   // 3. Let user pick a role
   const sessions = SessionManager.loadPersistedSessions(workspace);

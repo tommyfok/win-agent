@@ -2,20 +2,19 @@ import { select, insert, rawQuery, rawRun } from "../db/repository.js";
 import { formatTokens } from "../utils/format.js";
 
 /**
- * Track which auto-trigger conditions have already fired
- * to prevent duplicate triggers within the same engine lifecycle.
+ * 记录本次引擎生命周期内已触发过的自动触发条件，防止重复触发。
  *
- * Key format: "{type}:{id}" e.g. "all_done:3", "rejection_rate:2"
+ * Key 格式："{type}:{id}"，例如 "all_done:3"、"rejection_rate:2"
  */
 const firedTriggers: Set<string> = new Set();
 
 /**
- * Check auto-trigger conditions and generate system messages if needed.
+ * 检查自动触发条件，按需生成系统消息。
  *
- * Conditions checked:
- * 0. Tasks with no iteration assigned → auto-create/assign iteration
- * 1. All tasks in an active iteration are done → mark completed + generate stats → PM
- * 2. Rejection rate > 30% in current iteration → generate stats → PM for early review
+ * 检查顺序：
+ * 0. 存在未分配迭代的任务 → 自动创建/分配迭代
+ * 1. 活跃迭代的所有任务已完成 → 标记完成 + 生成统计报告 → 通知 PM
+ * 2. 当前迭代打回率 > 30% → 生成统计报告 → 通知 PM 提前复盘
  */
 export function checkAutoTriggers(): void {
   checkIterationAutoCreate();
@@ -24,44 +23,41 @@ export function checkAutoTriggers(): void {
 }
 
 /**
- * Reset trigger state and restore persisted rejection_rate triggers from logs.
- * Called on engine restart to prevent duplicate notifications for active iterations.
+ * 重置触发状态，并从日志中恢复已持久化的 rejection_rate 触发记录。
+ * 在引擎重启时调用，防止对仍处于 active 状态的迭代重复通知 PM。
  */
 export function resetTriggers(): void {
   firedTriggers.clear();
-  // Restore previously fired rejection_rate triggers so we don't re-notify PM
-  // for the same iteration after an engine restart (iteration stays 'active').
-  const rows = rawQuery(
+  // 恢复已触发的 rejection_rate 记录，避免引擎重启后对同一迭代再次通知
+  const rows = rawQuery<{ content: string }>(
     "SELECT content FROM logs WHERE action = 'trigger_fired' AND content LIKE 'rejection_rate:%'",
-    [],
-  ) as Array<{ content: string }>;
+    []
+  );
   for (const row of rows) {
     firedTriggers.add(row.content);
   }
 }
 
 /**
- * Auto-create an iteration and assign tasks that have no iteration (iteration=0).
- * When tasks exist with iteration=0 (typically just created by PM), find or create
- * an active iteration and assign them.
+ * 对尚未分配迭代的任务（iteration=0）自动创建迭代并完成分配。
+ * 通常发生在 PM 刚创建任务后，引擎自动将其纳入当前活跃迭代。
  */
 function checkIterationAutoCreate(): void {
-  // Find tasks with no iteration assigned and no workflow (pure iteration tasks).
-  // Tasks created by new-feature/bug-fix workflows have a workflow_id and should
-  // not be auto-merged into the current iteration.
-  const unassigned = rawQuery(
+  // 只处理没有关联工作流的纯迭代任务；
+  // 由 new-feature/bug-fix 工作流创建的任务有 workflow_id，不应被自动合并进当前迭代。
+  const unassigned = rawQuery<{ id: number }>(
     "SELECT id FROM tasks WHERE iteration = 0 AND status != 'cancelled' AND workflow_id IS NULL",
-    [],
-  ) as Array<{ id: number }>;
+    []
+  );
 
   if (unassigned.length === 0) return;
 
   // Find or create active iteration
-  const activeIterations = select("iterations", { status: "active" });
+  const activeIterations = select<{ id: number }>("iterations", { status: "active" });
   let iterationId: number;
 
   if (activeIterations.length > 0) {
-    iterationId = (activeIterations[0] as any).id;
+    iterationId = activeIterations[0].id;
   } else {
     const { lastInsertRowid } = insert("iterations", { status: "active" });
     iterationId = Number(lastInsertRowid);
@@ -77,10 +73,7 @@ function checkIterationAutoCreate(): void {
 
   // Assign unassigned tasks to the iteration
   for (const task of unassigned) {
-    rawRun("UPDATE tasks SET iteration = ? WHERE id = ?", [
-      iterationId,
-      task.id,
-    ]);
+    rawRun("UPDATE tasks SET iteration = ? WHERE id = ?", [iterationId, task.id]);
   }
 
   insert("logs", {
@@ -89,27 +82,22 @@ function checkIterationAutoCreate(): void {
     content: `已将 ${unassigned.length} 个任务分配到迭代 #${iterationId}`,
   });
 
-  console.log(
-    `   📋 已将 ${unassigned.length} 个任务分配到迭代 #${iterationId}`,
-  );
+  console.log(`   📋 已将 ${unassigned.length} 个任务分配到迭代 #${iterationId}`);
 }
 
 /**
- * Check if all tasks in an active iteration are done.
- * If so, mark iteration as completed, generate stats report, and notify PM.
+ * 检查活跃迭代中所有任务是否已完成。
+ * 若是，则将迭代标记为 completed，生成统计报告，并通知 PM 进行复盘。
  */
 function checkAllTasksDone(): void {
-  const activeIterations = select("iterations", { status: "active" });
+  const activeIterations = select<{ id: number }>("iterations", { status: "active" });
 
   for (const iter of activeIterations) {
     const key = `all_done:${iter.id}`;
     if (firedTriggers.has(key)) continue;
 
     // Get all tasks assigned to this iteration
-    const tasks = select("tasks", { iteration: iter.id }) as Array<{
-      id: number;
-      status: string;
-    }>;
+    const tasks = select<{ id: number; status: string }>("tasks", { iteration: iter.id });
 
     if (tasks.length === 0) continue;
 
@@ -122,13 +110,13 @@ function checkAllTasksDone(): void {
     // Mark iteration as completed
     rawRun(
       "UPDATE iterations SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [iter.id],
+      [iter.id]
     );
 
-    // Generate stats report (engine auto-generates, zero LLM cost)
+    // 引擎直接生成统计报告，无需调用 LLM
     const statsReport = generateIterationStats(iter.id);
 
-    // Create iteration-review workflow (simplified: stats → PM review → done)
+    // 创建 iteration-review 工作流（stats → PM 复盘 → 完成）
     const { lastInsertRowid: workflowId } = insert("workflow_instances", {
       template: "iteration-review",
       phase: "review",
@@ -136,19 +124,12 @@ function checkAllTasksDone(): void {
       context: JSON.stringify({ iteration_id: iter.id }),
     });
 
-    // Notify PM with engine-generated stats
+    // 将引擎生成的统计报告通知 PM
     insert("messages", {
       from_role: "system",
       to_role: "PM",
       type: "system",
-      content: [
-        `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。`,
-        "",
-        statsReport,
-        "",
-        "请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。",
-        `审阅完成后，将回顾摘要写入 memory 表，然后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
-      ].join("\n"),
+      content: `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。\n\n${statsReport}\n\n请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。\n审阅完成后，将回顾摘要写入 memory 表，然后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
       status: "unread",
       related_workflow_id: workflowId,
     });
@@ -159,15 +140,13 @@ function checkAllTasksDone(): void {
       content: `迭代 #${iter.id} 全部任务完成，已生成统计报告并通知 PM (workflow #${workflowId})`,
     });
 
-    console.log(
-      `   🔄 自动触发: 迭代 #${iter.id} 回顾 (workflow #${workflowId})`,
-    );
+    console.log(`   🔄 自动触发: 迭代 #${iter.id} 回顾 (workflow #${workflowId})`);
   }
 }
 
 /**
- * Check if the rejection rate in any active iteration exceeds 30%.
- * If so, generate stats and notify PM for early review.
+ * 检查活跃迭代的打回率是否超过 30%。
+ * 若超过，生成统计报告并通知 PM 提前介入复盘。
  */
 function checkRejectionRate(): void {
   const activeIterations = select("iterations", { status: "active" });
@@ -176,30 +155,30 @@ function checkRejectionRate(): void {
     const key = `rejection_rate:${iter.id}`;
     if (firedTriggers.has(key)) continue;
 
-    // Count tasks and rejections in this iteration
-    const stats = rawQuery(
+    // 统计当前迭代的任务数与打回数
+    const stats = rawQuery<{ total: number; rejected: number }>(
       `SELECT
         COUNT(*) as total,
         SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
       FROM tasks WHERE iteration = ?`,
-      [iter.id],
-    )[0] as { total: number; rejected: number };
+      [iter.id]
+    )[0];
 
-    if (stats.total < 3) continue; // Need minimum tasks for meaningful rate
+    if (stats.total < 3) continue; // 任务数不足时打回率无统计意义
     const rate = stats.rejected / stats.total;
     if (rate <= 0.3) continue;
 
     firedTriggers.add(key);
-    // Persist so we don't re-trigger after engine restart (iteration stays 'active')
+    // 持久化到日志，引擎重启后仍可恢复，避免对同一活跃迭代重复触发
     insert("logs", { role: "system", action: "trigger_fired", content: key });
 
-    // Check if there's already an active iteration-review for this iteration
-    const existingReview = select("workflow_instances", {
+    // 若该迭代已存在活跃的 iteration-review 工作流，则跳过
+    const existingReview = select<{ context?: string }>("workflow_instances", {
       template: "iteration-review",
       status: "active",
-    }).filter((w: any) => {
+    }).filter((w) => {
       try {
-        return JSON.parse(w.context)?.iteration_id === iter.id;
+        return JSON.parse(w.context ?? "null")?.iteration_id === iter.id;
       } catch {
         return false;
       }
@@ -224,14 +203,7 @@ function checkRejectionRate(): void {
       from_role: "system",
       to_role: "PM",
       type: "system",
-      content: [
-        `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 30%，需要关注。`,
-        "",
-        statsReport,
-        "",
-        "请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。",
-        `完成后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
-      ].join("\n"),
+      content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 30%，需要关注。\n\n${statsReport}\n\n请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。\n完成后发消息告知引擎回顾完成（携带 related_workflow_id: ${workflowId}）。`,
       status: "unread",
       related_workflow_id: workflowId,
     });
@@ -243,35 +215,35 @@ function checkRejectionRate(): void {
     });
 
     console.log(
-      `   ⚠️ 自动触发: 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% (workflow #${workflowId})`,
+      `   ⚠️ 自动触发: 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% (workflow #${workflowId})`
     );
   }
 }
 
 /**
- * Generate iteration statistics report using SQL aggregation.
- * Replaces OPS role's metrics collection — zero LLM cost.
+ * 通过 SQL 聚合生成迭代统计报告。
+ * 由引擎直接计算，替代 OPS 角色的指标收集，零 LLM 成本。
  */
 function generateIterationStats(iterationId: number): string {
   const lines: string[] = [`## 迭代 #${iterationId} 统计报告`];
 
-  // Task summary
-  const taskStats = rawQuery(
+  // 任务概况
+  const taskStats = rawQuery<{ status: string; cnt: number }>(
     `SELECT status, COUNT(*) as cnt FROM tasks WHERE iteration = ? GROUP BY status ORDER BY status`,
-    [iterationId],
+    [iterationId]
   );
-  const totalTasks = taskStats.reduce((s: number, r: any) => s + r.cnt, 0);
+  const totalTasks = taskStats.reduce((s, r) => s + r.cnt, 0);
   lines.push(`\n### 任务概况 (共 ${totalTasks} 个)`);
   for (const row of taskStats) {
     lines.push(`- ${row.status}: ${row.cnt}`);
   }
 
-  // Rejection stats from task_events (more accurate than current status)
-  const rejections = rawQuery(
+  // 从 task_events 统计打回次数（比直接看当前状态更准确）
+  const rejections = rawQuery<{ cnt: number }>(
     `SELECT COUNT(*) as cnt FROM task_events te
      JOIN tasks t ON te.task_id = t.id
      WHERE t.iteration = ? AND te.to_status = 'rejected'`,
-    [iterationId],
+    [iterationId]
   );
   const rejectionCount = rejections[0]?.cnt ?? 0;
   const rejectionRate = totalTasks > 0 ? Math.round((rejectionCount / totalTasks) * 100) : 0;
@@ -279,17 +251,23 @@ function generateIterationStats(iterationId: number): string {
   lines.push(`- 累计打回次数: ${rejectionCount}`);
   lines.push(`- 打回率: ${rejectionRate}%`);
 
-  // Blocked stats
-  const blockedEvents = rawQuery(
+  // 阻塞统计
+  const blockedEvents = rawQuery<{ cnt: number }>(
     `SELECT COUNT(DISTINCT te.task_id) as cnt FROM task_events te
      JOIN tasks t ON te.task_id = t.id
      WHERE t.iteration = ? AND te.to_status = 'blocked'`,
-    [iterationId],
+    [iterationId]
   );
   lines.push(`- 曾被阻塞的任务数: ${blockedEvents[0]?.cnt ?? 0}`);
 
-  // Token consumption
-  const tokenStats = rawQuery(
+  // Token 消耗统计
+  const tokenStats = rawQuery<{
+    role: string;
+    dispatches: number;
+    input_total: number;
+    output_total: number;
+    total: number;
+  }>(
     `SELECT role,
             COUNT(*) as dispatches,
             SUM(input_tokens) as input_total,
@@ -302,7 +280,7 @@ function generateIterationStats(iterationId: number): string {
           OR id IN (SELECT DISTINCT workflow_id FROM tasks WHERE iteration = ?)
      )
      GROUP BY role ORDER BY total DESC`,
-    [iterationId],
+    [iterationId]
   );
   if (tokenStats.length > 0) {
     lines.push(`\n### Token 消耗`);
@@ -315,15 +293,15 @@ function generateIterationStats(iterationId: number): string {
     lines.push(`- 合计: ${formatTokens(grandTotal)} tokens`);
   }
 
-  // Top rejected tasks (most rejected)
-  const topRejected = rawQuery(
+  // 打回次数最多的任务
+  const topRejected = rawQuery<{ id: number; title: string; reject_count: number }>(
     `SELECT t.id, t.title, COUNT(*) as reject_count
      FROM task_events te
      JOIN tasks t ON te.task_id = t.id
      WHERE t.iteration = ? AND te.to_status = 'rejected'
      GROUP BY te.task_id
      ORDER BY reject_count DESC LIMIT 5`,
-    [iterationId],
+    [iterationId]
   );
   if (topRejected.length > 0) {
     lines.push(`\n### 打回次数最多的任务`);
@@ -334,5 +312,3 @@ function generateIterationStats(iterationId: number): string {
 
   return lines.join("\n");
 }
-
-// formatTokens imported from ../utils/format.js

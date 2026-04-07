@@ -1,11 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import { execSync } from "node:child_process";
-import {
-  checkEngineRunning,
-  removePidFile,
-  isProcessRunning,
-} from "../config/index.js";
+import { checkEngineRunning, removePidFile, isProcessRunning } from "../config/index.js";
 import { removeServerInfo } from "../engine/opencode-server.js";
 
 export async function stopCommand() {
@@ -48,7 +42,9 @@ export async function stopCommand() {
   console.log("   ⚠️  引擎未在 120s 内退出，强制终止...");
   try {
     process.kill(pid, "SIGKILL");
-  } catch {}
+  } catch {
+    // process may already be dead
+  }
   removePidFile();
   cleanupOrphanedProcesses(workspace);
   console.log("\n✅ win-agent 已停止 (强制)");
@@ -61,10 +57,10 @@ export async function stopCommand() {
 function cleanupOrphanedProcesses(workspace: string): void {
   try {
     // Kill orphaned opencode servers started by win-agent
-    const result = execSync(
-      "ps -eo pid,command | grep '[.]opencode serve' | grep -v grep",
-      { encoding: "utf-8", timeout: 5000 },
-    ).trim();
+    const result = execSync("ps -eo pid,command | grep '[.]opencode serve' | grep -v grep", {
+      encoding: "utf-8",
+      timeout: 5000,
+    }).trim();
     if (result) {
       for (const line of result.split("\n")) {
         const pidStr = line.trim().split(/\s+/)[0];
@@ -73,17 +69,21 @@ function cleanupOrphanedProcesses(workspace: string): void {
           try {
             process.kill(opPid, "SIGTERM");
             console.log(`   ✓ 清理孤立 opencode 进程 (PID: ${opPid})`);
-          } catch { /* already dead */ }
+          } catch {
+            /* already dead */
+          }
         }
       }
     }
-  } catch { /* no orphaned processes */ }
+  } catch {
+    /* no orphaned processes */
+  }
 
   try {
     // Kill orphaned win-agent engine processes for this workspace
     const result = execSync(
       `ps -eo pid,command | grep 'win-agent _engine ${workspace}' | grep -v grep`,
-      { encoding: "utf-8", timeout: 5000 },
+      { encoding: "utf-8", timeout: 5000 }
     ).trim();
     if (result) {
       for (const line of result.split("\n")) {
@@ -93,11 +93,15 @@ function cleanupOrphanedProcesses(workspace: string): void {
           try {
             process.kill(opPid, "SIGTERM");
             console.log(`   ✓ 清理孤立引擎进程 (PID: ${opPid})`);
-          } catch { /* already dead */ }
+          } catch {
+            /* already dead */
+          }
         }
       }
     }
-  } catch { /* no orphaned processes */ }
+  } catch {
+    /* no orphaned processes */
+  }
 
   // Clean up server info file
   removeServerInfo(workspace);

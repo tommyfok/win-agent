@@ -12,15 +12,13 @@ const __dirname = path.dirname(__filename);
  */
 function getTemplatesDir(): string {
   const candidates = [
-    path.resolve(__dirname, "../templates"),     // dev: src/workspace/ -> src/templates/
+    path.resolve(__dirname, "../templates"), // dev: src/workspace/ -> src/templates/
     path.resolve(__dirname, "../src/templates"), // dist: dist/ -> src/templates/
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;
   }
-  throw new Error(
-    "找不到包内模板目录，已尝试:\n" + candidates.map((c) => `  ${c}`).join("\n")
-  );
+  throw new Error("找不到包内模板目录，已尝试:\n" + candidates.map((c) => `  ${c}`).join("\n"));
 }
 
 interface FileDiff {
@@ -43,8 +41,8 @@ export async function updateCommand() {
   let templatesDir: string;
   try {
     templatesDir = path.join(getTemplatesDir(), "roles");
-  } catch (err: any) {
-    console.log(`❌ ${err.message}`);
+  } catch (err: unknown) {
+    console.log(`❌ ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
@@ -106,14 +104,14 @@ export async function updateCommand() {
   // ── 确认方式 ──
   let mode: "all" | "one-by-one" | "cancel";
   try {
-    mode = await select({
+    mode = (await select({
       message: "如何处理差异文件？",
       choices: [
         { name: "全部更新（覆盖所有差异文件）", value: "all" },
         { name: "逐个确认（每个文件单独决定）", value: "one-by-one" },
         { name: "取消，不做任何修改", value: "cancel" },
       ],
-    }) as "all" | "one-by-one" | "cancel";
+    })) as "all" | "one-by-one" | "cancel";
   } catch {
     console.log("\n已取消");
     return;
@@ -133,9 +131,7 @@ export async function updateCommand() {
 
   for (const d of diffs) {
     if (mode === "one-by-one") {
-      const label = d.destContent === null
-        ? `新建 ${d.file}`
-        : `覆盖 ${d.file}`;
+      const label = d.destContent === null ? `新建 ${d.file}` : `覆盖 ${d.file}`;
       let yes: boolean;
       try {
         yes = await confirm({ message: label + "？", default: false });

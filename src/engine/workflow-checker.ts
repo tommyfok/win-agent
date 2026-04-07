@@ -3,6 +3,15 @@ import type { SessionManager } from "./session-manager.js";
 import { cleanExpiredMemories } from "../embedding/memory.js";
 import { cleanExpiredOutputs } from "./output-cleaner.js";
 
+interface WorkflowRow {
+  id: number;
+  template: string;
+  phase: string;
+  status: string;
+  updated_at: string;
+  context?: string;
+}
+
 /**
  * Check all active workflow instances for completion conditions.
  * When a workflow's completion condition is met:
@@ -10,10 +19,8 @@ import { cleanExpiredOutputs } from "./output-cleaner.js";
  * 2. Release task sessions for DEV/QA
  * 3. Send a system message to PM to trigger final reporting
  */
-export function checkWorkflowCompletion(
-  sessionManager?: SessionManager | null,
-): void {
-  const activeWorkflows = select("workflow_instances", { status: "active" });
+export function checkWorkflowCompletion(sessionManager?: SessionManager | null): void {
+  const activeWorkflows = select<WorkflowRow>("workflow_instances", { status: "active" });
 
   for (const wf of activeWorkflows) {
     // Check phase advancement for multi-phase workflows before completion
@@ -22,15 +29,11 @@ export function checkWorkflowCompletion(
     const completed = checkCompletion(wf);
     if (completed) {
       // Update workflow status
-      update(
-        "workflow_instances",
-        { id: wf.id },
-        { status: "completed", phase: "done" },
-      );
+      update("workflow_instances", { id: wf.id }, { status: "completed", phase: "done" });
 
       // Release task sessions for completed tasks
       if (sessionManager) {
-        const tasks = select("tasks", { workflow_id: wf.id }) as Array<{ id: number }>;
+        const tasks = select<{ id: number }>("tasks", { workflow_id: wf.id });
         for (const task of tasks) {
           sessionManager.releaseTaskSession(task.id);
         }
@@ -89,7 +92,7 @@ export function checkWorkflowCompletion(
 /**
  * Check if a workflow's completion condition is met.
  */
-function checkCompletion(wf: any): boolean {
+function checkCompletion(wf: WorkflowRow): boolean {
   const template = wf.template as string;
 
   switch (template) {
@@ -111,10 +114,7 @@ function checkCompletion(wf: any): boolean {
  * and at least one non-cancelled task must exist.
  */
 function checkAllTasksDone(workflowId: number): boolean {
-  const tasks = select("tasks", { workflow_id: workflowId }) as Array<{
-    id: number;
-    status: string;
-  }>;
+  const tasks = select<{ id: number; status: string }>("tasks", { workflow_id: workflowId });
 
   // No tasks yet — workflow not complete
   if (tasks.length === 0) return false;
@@ -129,7 +129,7 @@ function checkAllTasksDone(workflowId: number): boolean {
  * Since the workflow itself transitions phases via messages,
  * we check if we're already in the done phase.
  */
-function checkIterationReviewDone(wf: any): boolean {
+function checkIterationReviewDone(wf: WorkflowRow): boolean {
   // The workflow is completed when it reaches the "done" phase
   // and PM has archived it. Since we check active workflows,
   // and the phase is updated by message handling, we look for
@@ -141,10 +141,10 @@ function checkIterationReviewDone(wf: any): boolean {
  * Check if a multi-phase workflow should advance to the next phase.
  * For iteration-review: PM sends a message with the workflow_id to signal review done → advance to done.
  */
-function checkPhaseAdvancement(wf: any): void {
+function checkPhaseAdvancement(wf: WorkflowRow): void {
   if (wf.template !== "iteration-review") return;
 
-  const phase = wf.phase as string;
+  const phase = wf.phase;
 
   // Simplified flow (OPS removed): review → done
   // PM sends any message with this workflow_id after reviewing stats → advance to done
@@ -156,7 +156,7 @@ function checkPhaseAdvancement(wf: any): void {
        AND from_role = 'PM'
        AND created_at >= ?
      LIMIT 1`,
-    [wf.id, wf.updated_at],
+    [wf.id, wf.updated_at]
   );
 
   if (triggerMessages.length === 0) return;
@@ -171,26 +171,22 @@ function checkPhaseAdvancement(wf: any): void {
     content: `工作流 #${wf.id} (${wf.template}) 阶段推进: review → done`,
   });
 
-  console.log(
-    `   ➡️  工作流 #${wf.id} (${wf.template}) 阶段: review → done`,
-  );
+  console.log(`   ➡️  工作流 #${wf.id} (${wf.template}) 阶段: review → done`);
 }
 
 /**
  * Send self-reflection trigger messages to all roles that participated in a workflow.
  * Participating roles are determined by who sent/received messages related to the workflow.
  */
-function sendReflectionTriggers(wf: any): void {
+function sendReflectionTriggers(wf: WorkflowRow): void {
   // Find all roles that participated in this workflow via messages
-  const messages = select("messages", { related_workflow_id: wf.id }) as Array<{
-    from_role: string;
-    to_role: string;
-  }>;
+  const messages = select<{ from_role: string; to_role: string }>(
+    "messages",
+    { related_workflow_id: wf.id }
+  );
 
   // Also check tasks assigned to roles
-  const tasks = select("tasks", { workflow_id: wf.id }) as Array<{
-    assigned_to: string | null;
-  }>;
+  const tasks = select<{ assigned_to: string | null }>("tasks", { workflow_id: wf.id });
 
   const participatingRoles = new Set<string>();
   for (const msg of messages) {
@@ -226,7 +222,7 @@ function sendReflectionTriggers(wf: any): void {
 /**
  * Build a reflection prompt tailored to each role.
  */
-function buildReflectionPrompt(role: string, wf: any): string {
+function buildReflectionPrompt(role: string, wf: WorkflowRow): string {
   const base = `【自我反思】工作流 #${wf.id}（${wf.template}）已完成，请进行自我反思。`;
 
   const roleGuidance: Record<string, string> = {
@@ -251,7 +247,7 @@ function buildReflectionPrompt(role: string, wf: any): string {
 /**
  * Build a completion notification message for PM.
  */
-function buildCompletionMessage(wf: any): string {
+function buildCompletionMessage(wf: WorkflowRow): string {
   switch (wf.template) {
     case "new-feature":
       return `🎉 工作流 #${wf.id}（新功能开发）所有任务已完成。请汇总验收报告，向用户汇报完成情况。`;

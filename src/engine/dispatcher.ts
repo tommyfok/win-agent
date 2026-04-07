@@ -1,15 +1,12 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { SessionManager } from "./session-manager.js";
 import { select, update } from "../db/repository.js";
-import {
-  queryRelevantKnowledge,
-  type KnowledgeEntry,
-} from "../embedding/knowledge.js";
+import { queryRelevantKnowledge, type KnowledgeEntry } from "../embedding/knowledge.js";
 import { insert as dbInsert } from "../db/repository.js";
 import { checkAndBlockUnmetDependencies } from "./dependency-checker.js";
 import { withRetry, withTimeout } from "./retry.js";
 import { checkAndRotate } from "./memory-rotator.js";
-import { Role } from "./role-manager.js";
+import type { Role } from "./role-manager.js";
 
 /**
  * Dispatch messages to a role, grouped by related_task_id.
@@ -20,8 +17,7 @@ export async function dispatchToRoleGrouped(
   client: OpencodeClient,
   sessionManager: SessionManager,
   role: Role,
-  messages: MessageRow[],
-  workspace: string,
+  messages: MessageRow[]
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // Group messages by related_task_id
   const groups = new Map<number | null, MessageRow[]>();
@@ -41,7 +37,7 @@ export async function dispatchToRoleGrouped(
   let totalOutput = 0;
 
   for (const [taskKey, group] of groups) {
-    const result = await dispatchToRole(client, sessionManager, role, group, workspace);
+    const result = await dispatchToRole(client, sessionManager, role, group);
     if (result.sessionId) {
       // Rotation check uses this group's own sessionId and taskId (not accumulated totals)
       await checkAndRotate(
@@ -50,7 +46,7 @@ export async function dispatchToRoleGrouped(
         result.sessionId,
         result.inputTokens,
         result.outputTokens,
-        taskKey ?? undefined,
+        taskKey ?? undefined
       );
       lastSessionId = result.sessionId;
     }
@@ -99,8 +95,7 @@ export async function dispatchToRole(
   client: OpencodeClient,
   sessionManager: SessionManager,
   role: Role,
-  messages: MessageRow[],
-  workspace: string,
+  messages: MessageRow[]
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
   // cancel_task messages are always delivered so DEV/QA can execute rollback/cleanup.
@@ -144,14 +139,13 @@ export async function dispatchToRole(
   }
 
   // 3. Get task context for DEV/QA (task details + dependencies)
-  const taskContext = (role === "DEV" || role === "QA")
-    ? getTaskContext(messages)
-    : null;
+  const taskContext = role === "DEV" || role === "QA" ? getTaskContext(messages) : null;
 
   // 4. Build and send prompt
   const pendingContext = sessionManager.consumePendingContext(sessionId);
-  const prompt = (pendingContext ? pendingContext + "\n\n---\n\n" : "")
-    + buildDispatchPrompt(role, messages, knowledge, taskContext);
+  const prompt =
+    (pendingContext ? pendingContext + "\n\n---\n\n" : "") +
+    buildDispatchPrompt(role, messages, knowledge, taskContext);
 
   // session.prompt with retry + timeout (5 min per attempt, 3 attempts)
   const result = await withRetry(
@@ -165,9 +159,9 @@ export async function dispatchToRole(
           },
         }),
         5 * 60 * 1000,
-        `${role} session.prompt`,
+        `${role} session.prompt`
       ),
-    { maxAttempts: 3, label: `${role} dispatch` },
+    { maxAttempts: 3, label: `${role} dispatch` }
   );
 
   // 5. Mark messages as read
@@ -229,16 +223,13 @@ export async function dispatchToRole(
 async function getSessionForRole(
   sessionManager: SessionManager,
   role: Role,
-  messages: MessageRow[],
+  messages: MessageRow[]
 ): Promise<string> {
   if (role === "DEV" || role === "QA") {
     // Use the task ID from the first message that has one
     const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
     if (taskId) {
-      return sessionManager.getTaskSession(
-        taskId,
-        role,
-      );
+      return sessionManager.getTaskSession(taskId, role);
     }
     // No task ID found — this shouldn't happen since DEV/QA messages should always
     // carry a related_task_id. Log a warning and use a sentinel session to avoid
@@ -306,40 +297,40 @@ function getTaskContext(messages: MessageRow[]): TaskContext | null {
  * 1. 待处理消息 (pending messages)
  * 2. 当前任务 (task context, DEV/QA only)
  * 3. 相关知识库 (relevant knowledge, if any)
- * 4. 操作提示 (action hints)
+ * 4. DEV/QA 待处理队列 (PM only, dedup guard)
+ * 5. 操作提示 (action hints)
  */
 export function buildDispatchPrompt(
   role: string,
   messages: MessageRow[],
   knowledge: KnowledgeEntry[],
-  taskContext?: TaskContext | null,
+  taskContext?: TaskContext | null
 ): string {
   const parts: string[] = [];
 
   // 1. Pending messages
   parts.push("## 待处理消息");
   for (const msg of messages) {
-    const taskRef = msg.related_task_id
-      ? ` (task#${msg.related_task_id})`
-      : "";
+    const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : "";
     parts.push(`**来自 ${msg.from_role}**${taskRef}：\n${msg.content}`);
   }
 
   // 2. Task context (for DEV/QA)
   if (taskContext) {
-    const depLines = taskContext.dependencies.length > 0
-      ? taskContext.dependencies
-          .map((d) => `  - task#${d.id} ${d.title} [${d.status}]`)
-          .join("\n")
-      : "  无前置依赖";
+    const depLines =
+      taskContext.dependencies.length > 0
+        ? taskContext.dependencies
+            .map((d) => `  - task#${d.id} ${d.title} [${d.status}]`)
+            .join("\n")
+        : "  无前置依赖";
     parts.push(
       `## 当前任务 (task#${taskContext.id})\n` +
-      `- 标题: ${taskContext.title}\n` +
-      `- 状态: ${taskContext.status}\n` +
-      (taskContext.description ? `- 描述: ${taskContext.description}\n` : "") +
-      (taskContext.acceptanceCriteria ? `- 验收标准:\n${taskContext.acceptanceCriteria}\n` : "") +
-      (taskContext.acceptanceProcess ? `- 验收流程:\n${taskContext.acceptanceProcess}\n` : "") +
-      `- 前置依赖:\n${depLines}`,
+        `- 标题: ${taskContext.title}\n` +
+        `- 状态: ${taskContext.status}\n` +
+        (taskContext.description ? `- 描述: ${taskContext.description}\n` : "") +
+        (taskContext.acceptanceCriteria ? `- 验收标准:\n${taskContext.acceptanceCriteria}\n` : "") +
+        (taskContext.acceptanceProcess ? `- 验收流程:\n${taskContext.acceptanceProcess}\n` : "") +
+        `- 前置依赖:\n${depLines}`
     );
   }
 
@@ -351,9 +342,43 @@ export function buildDispatchPrompt(
     }
   }
 
-  // 4. Action hints
+  // 4. DEV/QA pending queue (PM only) — dedup guard so PM doesn't resend
+  //    directives that are already queued and waiting to be dispatched.
+  if (role === "PM") {
+    const pendingDevMsgs = select(
+      "messages",
+      { from_role: "PM", to_role: "DEV", status: "unread" },
+      { orderBy: "created_at ASC" }
+    ) as MessageRow[];
+    const pendingQaMsgs = select(
+      "messages",
+      { from_role: "PM", to_role: "QA", status: "unread" },
+      { orderBy: "created_at ASC" }
+    ) as MessageRow[];
+
+    if (pendingDevMsgs.length > 0 || pendingQaMsgs.length > 0) {
+      const lines: string[] = [];
+      if (pendingDevMsgs.length > 0) {
+        lines.push(`DEV 待处理队列（${pendingDevMsgs.length} 条未读，无需重发）：`);
+        for (const m of pendingDevMsgs) {
+          const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
+          lines.push(`  - [msg#${m.id}]${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
+        }
+      }
+      if (pendingQaMsgs.length > 0) {
+        lines.push(`QA 待处理队列（${pendingQaMsgs.length} 条未读，无需重发）：`);
+        for (const m of pendingQaMsgs) {
+          const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
+          lines.push(`  - [msg#${m.id}]${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
+        }
+      }
+      parts.push(`## 已排队消息（勿重复发送）\n${lines.join("\n")}`);
+    }
+  }
+
+  // 5. Action hints
   parts.push(
-    "## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。",
+    "## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。"
   );
 
   return parts.join("\n\n");

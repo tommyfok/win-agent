@@ -18,16 +18,8 @@ export interface RetryOptions {
  * Retry an async operation with exponential backoff.
  * Throws the last error if all attempts fail.
  */
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  opts: RetryOptions = {},
-): Promise<T> {
-  const {
-    maxAttempts = 3,
-    baseDelay = 1000,
-    backoffFactor = 2,
-    label = "operation",
-  } = opts;
+export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
+  const { maxAttempts = 3, baseDelay = 1000, backoffFactor = 2, label = "operation" } = opts;
 
   let lastError: unknown;
 
@@ -39,9 +31,7 @@ export async function withRetry<T>(
       if (attempt === maxAttempts) break;
 
       const delay = baseDelay * backoffFactor ** (attempt - 1);
-      console.log(
-        `   ⚠️  ${label} 失败 (尝试 ${attempt}/${maxAttempts})，${delay}ms 后重试...`,
-      );
+      console.log(`   ⚠️  ${label} 失败 (尝试 ${attempt}/${maxAttempts})，${delay}ms 后重试...`);
       await new Promise<void>((r) => setTimeout(r, delay));
     }
   }
@@ -56,15 +46,12 @@ export async function withRetry<T>(
 export async function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
-  label = "operation",
+  label = "operation"
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
 
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`${label} 超时 (${ms}ms)`)),
-      ms,
-    );
+    timer = setTimeout(() => reject(new Error(`${label} 超时 (${ms}ms)`)), ms);
   });
 
   try {

@@ -34,20 +34,21 @@ const outputHistory: Map<string, number[]> = new Map();
  * Fetch the model's context limit from the opencode provider API.
  * Call once at engine startup. Falls back to DEFAULT_MAX_CONTEXT on failure.
  */
-export async function detectModelContextLimit(
-  client: OpencodeClient,
-): Promise<number> {
+export async function detectModelContextLimit(client: OpencodeClient): Promise<number> {
   try {
     const result = await client.provider.list();
-    const providers = (result.data as any)?.all;
+    const data = result.data as { all?: unknown[] } | null;
+    const providers = data?.all;
     if (Array.isArray(providers)) {
       // Find the largest context limit across all available models
       let maxCtx = 0;
       for (const provider of providers) {
-        const models = provider.models;
+        const p = provider as { models?: Record<string, unknown> };
+        const models = p.models;
         if (models && typeof models === "object") {
-          for (const model of Object.values(models) as any[]) {
-            const ctx = model?.limit?.context;
+          for (const model of Object.values(models)) {
+            const m = model as { limit?: { context?: number } };
+            const ctx = m?.limit?.context;
             if (typeof ctx === "number" && ctx > maxCtx) {
               maxCtx = ctx;
             }
@@ -124,7 +125,7 @@ export async function checkAndRotate(
   sessionId: string,
   inputTokens: number,
   outputTokens: number,
-  taskId?: number,
+  taskId?: number
 ): Promise<string> {
   const maxContext = getMaxContext();
   const usage = inputTokens / maxContext;
@@ -135,7 +136,7 @@ export async function checkAndRotate(
   // Check hard threshold
   if (usage > ROTATION_THRESHOLD) {
     console.log(
-      `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%（阈值 ${Math.round(ROTATION_THRESHOLD * 100)}%），执行 session 轮转`,
+      `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%（阈值 ${Math.round(ROTATION_THRESHOLD * 100)}%），执行 session 轮转`
     );
     insert("logs", {
       role: "system",
@@ -147,9 +148,7 @@ export async function checkAndRotate(
 
   // Check context anxiety (only if we're past 50% usage — don't trigger too early)
   if (usage > 0.5 && detectContextAnxiety(role, outputTokens)) {
-    console.log(
-      `   🔄 ${role} 检测到 context anxiety（输出突然变短），提前执行 session 轮转`,
-    );
+    console.log(`   🔄 ${role} 检测到 context anxiety（输出突然变短），提前执行 session 轮转`);
     insert("logs", {
       role: "system",
       action: "session_rotation",

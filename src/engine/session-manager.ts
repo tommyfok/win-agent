@@ -1,10 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { OpencodeClient } from "@opencode-ai/sdk";
-import {
-  insertMemory,
-  buildRecallPrompt as buildVectorRecallPrompt,
-} from "../embedding/memory.js";
+import { insertMemory, buildRecallPrompt as buildVectorRecallPrompt } from "../embedding/memory.js";
 import { withRetry, withTimeout } from "./retry.js";
 import { insert as dbInsert } from "../db/repository.js";
 import { ensureWorkspaceId } from "../config/index.js";
@@ -60,7 +57,7 @@ export class SessionManager {
 
   constructor(
     private client: OpencodeClient,
-    private workspace: string,
+    private workspace: string
   ) {
     const wsId = ensureWorkspaceId(workspace);
     this.sessionPrefix = `wa-${wsId}`;
@@ -96,7 +93,7 @@ export class SessionManager {
 
     while (Date.now() - startTime < maxWait) {
       let allIdle = true;
-      for (const [role, sessionId] of this.activeSessions) {
+      for (const [, sessionId] of this.activeSessions) {
         try {
           // Check session messages - if assistant has responded, session is ready
           const msgs = await this.client.session.messages({ path: { id: sessionId } });
@@ -159,7 +156,9 @@ export class SessionManager {
         if (s.title?.startsWith(this.sessionPrefix)) {
           try {
             await this.client.session.delete({ path: { id: s.id } });
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
       }
     } catch {
@@ -215,11 +214,7 @@ export class SessionManager {
    *
    * @returns The new session ID
    */
-  async rotateSession(
-    role: string,
-    sessionId: string,
-    taskId?: number
-  ): Promise<string> {
+  async rotateSession(role: string, sessionId: string, taskId?: number): Promise<string> {
     // 1. Ask role to write memory (with timeout, no retry — best effort)
     try {
       const result = await withTimeout(
@@ -231,7 +226,7 @@ export class SessionManager {
           },
         }),
         3 * 60 * 1000,
-        `${role} memory write`,
+        `${role} memory write`
       );
 
       // Try to extract memory from the response — try JSON block first, then plain text fallback
@@ -259,7 +254,9 @@ export class SessionManager {
             input_tokens: result.data?.info?.tokens?.input ?? 0,
             output_tokens: result.data?.info?.tokens?.output ?? 0,
           });
-        } catch { /* Non-fatal */ }
+        } catch {
+          /* Non-fatal */
+        }
       }
     } catch {
       // Memory write failed — continue with rotation anyway
@@ -305,7 +302,7 @@ export class SessionManager {
             },
           }),
           3 * 60 * 1000,
-          `${role} memory write`,
+          `${role} memory write`
         );
 
         const textParts = result.data?.parts?.filter(
@@ -327,7 +324,9 @@ export class SessionManager {
               input_tokens: result.data?.info?.tokens?.input ?? 0,
               output_tokens: result.data?.info?.tokens?.output ?? 0,
             });
-          } catch { /* Non-fatal */ }
+          } catch {
+            /* Non-fatal */
+          }
         }
         console.log(`   ✓ ${role} 记忆已保存`);
       } catch (err) {
@@ -347,10 +346,11 @@ export class SessionManager {
   private async createRoleSession(role: string): Promise<string> {
     // Create session (with retry for transient server issues)
     const sessionResult = await withRetry(
-      () => this.client.session.create({
-        body: { title: `${this.sessionPrefix}-${role}` },
-      }),
-      { maxAttempts: 3, label: `${role} session.create` },
+      () =>
+        this.client.session.create({
+          body: { title: `${this.sessionPrefix}-${role}` },
+        }),
+      { maxAttempts: 3, label: `${role} session.create` }
     );
     const sessionId = sessionResult.data!.id;
 
@@ -360,7 +360,9 @@ export class SessionManager {
     // Role prompt (so agent knows its full responsibilities from the start)
     try {
       const rolePrompt = loadRolePrompt(this.workspace, role);
-      parts.push(`# 你的身份：${role}\n\n以下是你的角色定义、工作职责和行为准则：\n\n${rolePrompt}`);
+      parts.push(
+        `# 你的身份：${role}\n\n以下是你的角色定义、工作职责和行为准则：\n\n${rolePrompt}`
+      );
     } catch {
       // Role prompt not found — non-fatal
     }
@@ -392,7 +394,7 @@ export class SessionManager {
             ],
           },
         }),
-      { maxAttempts: 2, label: `${role} agent bind` },
+      { maxAttempts: 2, label: `${role} agent bind` }
     );
 
     return sessionId;
@@ -411,10 +413,7 @@ export class SessionManager {
    * Get all active session IDs (for cleanup/monitoring).
    */
   getAllSessionIds(): string[] {
-    return [
-      ...this.activeSessions.values(),
-      ...this.taskSessions.values(),
-    ];
+    return [...this.activeSessions.values(), ...this.taskSessions.values()];
   }
 }
 
@@ -422,9 +421,7 @@ export class SessionManager {
  * Parse LLM memory response with fallback.
  * Tries JSON code block first, then raw JSON, then plain text fallback.
  */
-function parseMemoryResponse(
-  text: string,
-): { summary: string; content: string } | null {
+function parseMemoryResponse(text: string): { summary: string; content: string } | null {
   // Try ```json block
   const jsonBlockMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
   if (jsonBlockMatch) {

@@ -2,7 +2,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { EmbeddingProvider } from "./index.js";
 
-let pipelineInstance: any = null;
+type TransformerPipeline = (
+  text: string,
+  options: { pooling: string; normalize: boolean }
+) => Promise<{ data: Float32Array }>;
+
+let pipelineInstance: TransformerPipeline | null = null;
 
 /**
  * Resolve project root from the current file location.
@@ -22,9 +27,7 @@ const LOCAL_MODELS_DIR = path.join(PROJECT_ROOT, "models");
  * Models are loaded from the project's models/ directory (committed to git).
  * Default model: Xenova/bge-small-zh-v1.5 (512 dimensions).
  */
-export function createLocalEmbedding(
-  model?: string
-): EmbeddingProvider {
+export function createLocalEmbedding(model?: string): EmbeddingProvider {
   const modelId = model || "Xenova/bge-small-zh-v1.5";
   return {
     async generate(text: string): Promise<number[]> {

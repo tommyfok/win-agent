@@ -221,11 +221,9 @@ export function createAllTables(db: Database.Database): void {
 export function getMissingTables(db: Database.Database): string[] {
   const existing = new Set(
     db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-      )
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
       .all()
-      .map((row: any) => row.name as string)
+      .map((row: { name: string }) => row.name)
   );
 
   const missing: string[] = [];

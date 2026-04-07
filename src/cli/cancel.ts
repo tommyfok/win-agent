@@ -1,8 +1,5 @@
 import { confirm } from "@inquirer/prompts";
-import {
-  checkEngineRunning,
-  getDbPath,
-} from "../config/index.js";
+import { checkEngineRunning, getDbPath } from "../config/index.js";
 import { openDb, getDb } from "../db/connection.js";
 import {
   select as dbSelect,
@@ -38,7 +35,10 @@ export async function cancelCommand(workflowId: string) {
   }
 
   // 2. Query target workflow
-  const workflows = dbSelect("workflow_instances", { id });
+  const workflows = dbSelect<{ id: number; status: string; template: string; phase: string }>(
+    "workflow_instances",
+    { id }
+  );
   if (workflows.length === 0) {
     console.log(`⚠️  未找到工作流 #${id}`);
     process.exit(1);
@@ -51,19 +51,32 @@ export async function cancelCommand(workflowId: string) {
   }
 
   // 3. Show task overview
-  const tasks = dbSelect("tasks", { workflow_id: id });
-  const inProgressStatuses = ["pending_dev", "planning", "in_dev", "pending_qa", "in_qa", "paused", "blocked"];
-  const inProgressTasks = tasks.filter((t: any) => inProgressStatuses.includes(t.status));
-  const doneTasks = tasks.filter((t: any) => t.status === "done");
+  const tasks = dbSelect<{ id: number; status: string; title: string }>("tasks", {
+    workflow_id: id,
+  });
+  const inProgressStatuses = [
+    "pending_dev",
+    "planning",
+    "in_dev",
+    "pending_qa",
+    "in_qa",
+    "paused",
+    "blocked",
+  ];
+  const inProgressTasks = tasks.filter((t) => inProgressStatuses.includes(t.status));
+  const doneTasks = tasks.filter((t) => t.status === "done");
 
-  const taskStatusCounts = rawQuery(`
+  const taskStatusCounts = rawQuery<{ status: string; cnt: number }>(
+    `
     SELECT status, COUNT(*) as cnt
     FROM tasks
     WHERE workflow_id = ?
     GROUP BY status
-  `, [id]);
+  `,
+    [id]
+  );
 
-  const parts = taskStatusCounts.map((r: any) => `${r.status}: ${r.cnt}`).join(", ");
+  const parts = taskStatusCounts.map((r) => `${r.status}: ${r.cnt}`).join(", ");
 
   console.log(`\n⚠️  即将取消工作流 #${id} [${wf.template}]`);
   console.log(`   当前阶段: ${wf.phase}`);

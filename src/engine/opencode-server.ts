@@ -1,10 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
-import {
-  createOpencodeClient,
-  type OpencodeClient,
-} from "@opencode-ai/sdk";
+import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
 import { loadConfig, type ProviderConfig, type WinAgentConfig } from "../config/index.js";
 
 /** Build Basic Auth headers if serverPassword is configured */
@@ -60,9 +57,8 @@ function buildOpencodeConfig(provider: ProviderConfig) {
   const isCustom = provider.type === "custom-openai" || provider.type === "custom-anthropic";
 
   if (isCustom) {
-    const npm = provider.type === "custom-anthropic"
-      ? "@ai-sdk/anthropic"
-      : "@ai-sdk/openai-compatible";
+    const npm =
+      provider.type === "custom-anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai-compatible";
     return {
       model: `custom/${provider.model}`,
       provider: {
@@ -93,7 +89,9 @@ function buildOpencodeConfig(provider: ProviderConfig) {
     model: `${provider.type}/${provider.model}`,
     provider: {
       [provider.type]: {
-        ...(provider.apiKey ? { env: [`${provider.type.toUpperCase()}_API_KEY=${provider.apiKey}`] } : {}),
+        ...(provider.apiKey
+          ? { env: [`${provider.type.toUpperCase()}_API_KEY=${provider.apiKey}`] }
+          : {}),
       },
     },
     permission: {
@@ -143,7 +141,11 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
   if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
   const pkgJsonPath = path.join(opencodeDir, "package.json");
   if (!fs.existsSync(pkgJsonPath)) {
-    fs.writeFileSync(pkgJsonPath, JSON.stringify({ name: "opencode-workspace", private: true }, null, 2), "utf-8");
+    fs.writeFileSync(
+      pkgJsonPath,
+      JSON.stringify({ name: "opencode-workspace", private: true }, null, 2),
+      "utf-8"
+    );
   }
 
   // Collect all packages that need to be installed
@@ -152,9 +154,8 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
   // 1. Provider SDK package (for custom providers)
   const isCustom = provider.type === "custom-openai" || provider.type === "custom-anthropic";
   if (isCustom) {
-    const npm = provider.type === "custom-anthropic"
-      ? "@ai-sdk/anthropic"
-      : "@ai-sdk/openai-compatible";
+    const npm =
+      provider.type === "custom-anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai-compatible";
     const pkgDir = path.join(opencodeDir, "node_modules", ...npm.split("/"));
     if (!fs.existsSync(pkgDir)) needed.push(npm);
   }
@@ -178,8 +179,9 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
     });
     console.log(`   ✓ 依赖已安装`);
   } catch (err) {
-    const error = new Error(`Failed to install opencode packages: ${err}`);
-    (error as any).code = "INSTALL_FAILED";
+    const error = Object.assign(new Error(`Failed to install opencode packages: ${err}`), {
+      code: "INSTALL_FAILED",
+    });
     throw error;
   }
 }
@@ -191,9 +193,7 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
  * 2. If alive, reuse it
  * 3. Otherwise, start a new server and persist its info
  */
-export async function startOpencodeServer(
-  workspace: string,
-): Promise<OpencodeServerHandle> {
+export async function startOpencodeServer(workspace: string): Promise<OpencodeServerHandle> {
   const config = loadConfig(workspace);
   if (!config.provider) {
     throw new Error("Provider not configured. Run `win-agent start` in your project directory.");
@@ -288,7 +288,11 @@ export async function startOpencodeServer(
         // Kill the detached process group
         if (proc.pid) process.kill(-proc.pid, "SIGTERM");
       } catch {
-        try { proc.kill(); } catch {}
+        try {
+          proc.kill();
+        } catch {
+          // process already terminated
+        }
       }
     },
   };
@@ -298,7 +302,7 @@ export async function startOpencodeServer(
     await client.session.list();
   } catch (err) {
     server.close();
-    throw new Error(`opencode server health check failed: ${err}`);
+    throw new Error(`opencode server health check failed: ${err}`, { cause: err });
   }
 
   // Persist server info for reuse

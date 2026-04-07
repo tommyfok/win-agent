@@ -1,13 +1,12 @@
 import {
-  loadConfig, saveConfig, loadPresets, upsertPreset,
-  type WinAgentConfig, type ProviderPreset,
+  loadConfig,
+  saveConfig,
+  loadPresets,
+  upsertPreset,
+  type WinAgentConfig,
+  type ProviderPreset,
 } from "../config/index.js";
 import { input, select } from "@inquirer/prompts";
-
-interface ModelInfo {
-  id: string;
-  reasoning: boolean;
-}
 
 /**
  * Fetch model list from an OpenAI-compatible /models endpoint.
@@ -20,7 +19,7 @@ async function fetchModelsOpenAI(baseUrl: string, apiKey: string): Promise<strin
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return [];
-    const body = await res.json() as { data?: Array<{ id: string }> };
+    const body = (await res.json()) as { data?: Array<{ id: string }> };
     return (body.data ?? []).map((m) => m.id).sort();
   } catch {
     return [];
@@ -31,7 +30,11 @@ async function fetchModelsOpenAI(baseUrl: string, apiKey: string): Promise<strin
  * Detect if a model supports reasoning by making a quick test call.
  * Checks if the response contains `reasoning_content` in the message.
  */
-async function detectReasoningOpenAI(baseUrl: string, apiKey: string, model: string): Promise<boolean> {
+async function detectReasoningOpenAI(
+  baseUrl: string,
+  apiKey: string,
+  model: string
+): Promise<boolean> {
   const url = baseUrl.replace(/\/+$/, "") + "/chat/completions";
   const res = await fetch(url, {
     method: "POST",
@@ -47,7 +50,7 @@ async function detectReasoningOpenAI(baseUrl: string, apiKey: string, model: str
     signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) return false;
-  const body = await res.json() as {
+  const body = (await res.json()) as {
     choices?: Array<{ message?: { reasoning_content?: string } }>;
   };
   return body.choices?.[0]?.message?.reasoning_content !== undefined;
@@ -64,7 +67,7 @@ function presetLabel(p: ProviderPreset): string {
  * Prompt the user to configure a new provider interactively.
  * Returns a partial config with provider and embedding filled in.
  */
-async function promptNewProvider(existingProvider?: WinAgentConfig["provider"]): Promise<{
+async function promptNewProvider(_existingProvider?: WinAgentConfig["provider"]): Promise<{
   provider: WinAgentConfig["provider"];
   embedding: WinAgentConfig["embedding"];
 }> {
@@ -113,12 +116,19 @@ async function promptNewProvider(existingProvider?: WinAgentConfig["provider"]):
   } else {
     model = await input({
       message: "请输入模型名称",
-      default: type === "anthropic" ? "claude-sonnet-4-20250514" : type === "openai" ? "gpt-4o" : undefined,
+      default:
+        type === "anthropic"
+          ? "claude-sonnet-4-20250514"
+          : type === "openai"
+            ? "gpt-4o"
+            : undefined,
     });
   }
 
   const provider = {
-    type, apiKey, model,
+    type,
+    apiKey,
+    model,
     ...(baseUrl ? { baseUrl } : {}),
     ...(reasoning ? { reasoning } : {}),
   };
@@ -151,7 +161,6 @@ async function promptNewProvider(existingProvider?: WinAgentConfig["provider"]):
   return { provider, embedding };
 }
 
-
 /**
  * Run interactive environment check. Prompts for missing config items.
  * Config is stored in <cwd>/.win-agent/config.json.
@@ -162,13 +171,15 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
   console.log("\n🔍 环境检查中...\n");
   console.log(`工作空间: ${workspace}`);
 
-  let config = loadConfig(workspace);
+  const config = loadConfig(workspace);
   let changed = false;
 
   // 1. Provider/Model
   console.log("\n1. LLM Provider 配置");
   if (config.provider?.type && config.provider?.apiKey && config.provider?.model) {
-    console.log(`   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? " (推理模型)" : ""}`);
+    console.log(
+      `   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? " (推理模型)" : ""}`
+    );
   } else {
     // Check global presets
     const presets = loadPresets();
@@ -266,7 +277,9 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
   }
 
   console.log("\n✅ 环境检查通过");
-  console.log(`   Provider: ${config.provider?.type} / ${config.provider?.model}${config.provider?.reasoning ? " (推理模型)" : ""}`);
+  console.log(
+    `   Provider: ${config.provider?.type} / ${config.provider?.model}${config.provider?.reasoning ? " (推理模型)" : ""}`
+  );
   console.log(`   Embedding: ${config.embedding?.type} / ${config.embedding?.model}`);
 
   return { config, workspace };
@@ -275,8 +288,8 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
 export async function checkCommand() {
   try {
     await runEnvCheck();
-  } catch (err: any) {
-    if (err?.name === "ExitPromptError" || err?.message?.includes("User force closed")) {
+  } catch (err: unknown) {
+    if (err instanceof Error && (err.name === "ExitPromptError" || err.message.includes("User force closed"))) {
       console.log("\n👋 已取消");
       process.exit(0);
     }

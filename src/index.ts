@@ -7,6 +7,7 @@ import { talkCommand } from "./cli/talk.js";
 import { statusCommand } from "./cli/status.js";
 import { cancelCommand } from "./cli/cancel.js";
 import { stopCommand } from "./cli/stop.js";
+import { restartCommand } from "./cli/restart.js";
 import { cleanCommand } from "./cli/clean.js";
 import { logCommand } from "./cli/log.js";
 import { updateCommand } from "./cli/update.js";
@@ -25,15 +26,9 @@ program
   .description("One-time project setup: configure, scan workspace, inject context into role files")
   .action(onboardingCommand);
 
-program
-  .command("start")
-  .description("Start the engine")
-  .action(startCommand);
+program.command("start").description("Start the engine").action(startCommand);
 
-program
-  .command("talk")
-  .description("Open PM conversation in browser")
-  .action(talkCommand);
+program.command("talk").description("Open PM conversation in browser").action(talkCommand);
 
 program
   .command("status")
@@ -45,15 +40,14 @@ program
   .description("Cancel a workflow instance")
   .action(cancelCommand);
 
-program
-  .command("stop")
-  .description("Stop the engine")
-  .action(stopCommand);
+program.command("stop").description("Stop the engine").action(stopCommand);
 
 program
-  .command("log")
-  .description("Tail the engine log file")
-  .action(logCommand);
+  .command("restart")
+  .description("Stop the engine, restart it, and open PM conversation after 10s")
+  .action(restartCommand);
+
+program.command("log").description("Tail the engine log file").action(logCommand);
 
 program
   .command("update")
@@ -69,8 +63,7 @@ registerTaskCommands(program);
 
 // Internal command — spawned by `start` as a background daemon
 program
-  .command("_engine <workspace>")
-  .description(false as any) // hidden from help
+  .command("_engine <workspace>", { hidden: true })
   .action(engineCommand);
 
 program.parse();

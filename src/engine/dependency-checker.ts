@@ -4,7 +4,7 @@ export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: st
   // Already blocked — don't overwrite pre_suspend_status (would create infinite loop)
   if (currentStatus === "blocked") return true;
 
-  const unmetDeps = rawQuery(
+  const unmetDeps = rawQuery<{ id: number; title: string }>(
     `SELECT t.id, t.title FROM task_dependencies td
      JOIN tasks t ON t.id = td.depends_on
      WHERE td.task_id = ? AND t.status != 'done'`,
@@ -17,7 +17,7 @@ export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: st
       from_status: currentStatus,
       to_status: "blocked",
       changed_by: "system",
-      reason: `依赖未完成: ${unmetDeps.map((d: any) => `#${d.id} ${d.title}`).join(", ")}`,
+      reason: `依赖未完成: ${unmetDeps.map((d) => `#${d.id} ${d.title}`).join(", ")}`,
     });
     return true;
   }
@@ -25,7 +25,12 @@ export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: st
 }
 
 export function checkAndUnblockDependencies(): void {
-  const blockedTasks = select("tasks", { status: "blocked" });
+  const blockedTasks = select<{
+    id: number;
+    title: string;
+    pre_suspend_status: string | null;
+    assigned_to: string | null;
+  }>("tasks", { status: "blocked" });
   for (const task of blockedTasks) {
     const unmet = rawQuery(
       `SELECT 1 FROM task_dependencies td
@@ -53,7 +58,7 @@ export function checkAndUnblockDependencies(): void {
         status: "unread",
       });
       // Also notify the assigned role directly so DEV/QA can resume without waiting for PM
-      const assignedRole = task.assigned_to as string | null;
+      const assignedRole = task.assigned_to;
       if (assignedRole && assignedRole !== "PM") {
         insert("messages", {
           from_role: "system",

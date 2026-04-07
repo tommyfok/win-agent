@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { openDb, closeDb } from "../db/connection.js";
-import { createAllTables, getMissingTables, patchMissingTables } from "../db/schema.js";
+import { openDb } from "../db/connection.js";
+import { createAllTables, patchMissingTables } from "../db/schema.js";
 import { seedPermissions } from "../db/permissions.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,8 +13,8 @@ function getTemplatesDir(): string {
   // In production (dist/), templates are alongside the built files
   // We need to look for them relative to the project root
   const candidates = [
-    path.resolve(__dirname, "../templates"),       // dev: src/workspace -> src/templates
-    path.resolve(__dirname, "../src/templates"),     // dist: dist/ -> src/templates
+    path.resolve(__dirname, "../templates"), // dev: src/workspace -> src/templates
+    path.resolve(__dirname, "../src/templates"), // dist: dist/ -> src/templates
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;
@@ -23,15 +23,15 @@ function getTemplatesDir(): string {
 }
 
 const WIN_AGENT_DIRS = [
-  "",              // .win-agent/
-  "roles",         // .win-agent/roles/
-  "attachments",   // .win-agent/attachments/
-  "backups",       // .win-agent/backups/
+  "", // .win-agent/
+  "roles", // .win-agent/roles/
+  "attachments", // .win-agent/attachments/
+  "backups", // .win-agent/backups/
 ];
 
 export interface InitResult {
-  created: boolean;     // true if newly created, false if already existed
-  patched: string[];    // list of tables that were patched (missing → created)
+  created: boolean; // true if newly created, false if already existed
+  patched: string[]; // list of tables that were patched (missing → created)
 }
 
 export function initWorkspace(workspace: string): InitResult {

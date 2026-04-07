@@ -9,13 +9,16 @@ export interface QueryOptions {
   offset?: number;
 }
 
-export function select(
+/** Primitive values accepted by SQLite prepared statements. */
+export type SqlValue = string | number | bigint | boolean | null | Buffer;
+
+export function select<T = Record<string, SqlValue>>(
   table: string,
-  where?: Record<string, any>,
+  where?: Record<string, SqlValue>,
   options?: QueryOptions
-): any[] {
+): T[] {
   const db = getDb();
-  const params: any[] = [];
+  const params: SqlValue[] = [];
   let sql = `SELECT * FROM ${table}`;
 
   if (where && Object.keys(where).length > 0) {
@@ -24,9 +27,9 @@ export function select(
       if (value === null) {
         clauses.push(`${key} IS NULL`);
       } else if (Array.isArray(value)) {
-        const placeholders = value.map(() => "?").join(", ");
+        const placeholders = (value as SqlValue[]).map(() => "?").join(", ");
         clauses.push(`${key} IN (${placeholders})`);
-        params.push(...value);
+        params.push(...(value as SqlValue[]));
       } else {
         clauses.push(`${key} = ?`);
         params.push(value);
@@ -51,12 +54,12 @@ export function select(
     params.push(options.offset);
   }
 
-  return db.prepare(sql).all(...params);
+  return db.prepare(sql).all(...params) as T[];
 }
 
 export function insert(
   table: string,
-  data: Record<string, any>
+  data: Record<string, SqlValue>
 ): { lastInsertRowid: number | bigint } {
   const db = getDb();
   const keys = Object.keys(data);
@@ -69,11 +72,11 @@ export function insert(
 
 export function update(
   table: string,
-  where: Record<string, any>,
-  data: Record<string, any>
+  where: Record<string, SqlValue>,
+  data: Record<string, SqlValue>
 ): { changes: number } {
   const db = getDb();
-  const params: any[] = [];
+  const params: SqlValue[] = [];
 
   const setClauses = Object.keys(data).map((key) => {
     params.push(data[key]);
@@ -108,12 +111,9 @@ export function update(
   return { changes: result.changes };
 }
 
-export function del(
-  table: string,
-  where: Record<string, any>
-): { changes: number } {
+export function del(table: string, where: Record<string, SqlValue>): { changes: number } {
   const db = getDb();
-  const params: any[] = [];
+  const params: SqlValue[] = [];
   const clauses: string[] = [];
 
   for (const [key, value] of Object.entries(where)) {
@@ -130,14 +130,17 @@ export function del(
   return { changes: result.changes };
 }
 
-export function rawQuery(sql: string, params: any[] = []): any[] {
+export function rawQuery<T = Record<string, SqlValue>>(
+  sql: string,
+  params: SqlValue[] = []
+): T[] {
   const db = getDb();
-  return db.prepare(sql).all(...params);
+  return db.prepare(sql).all(...params) as T[];
 }
 
 export function rawRun(
   sql: string,
-  params: any[] = []
+  params: SqlValue[] = []
 ): { changes: number; lastInsertRowid: number } {
   const db = getDb();
   const result = db.prepare(sql).run(...params);
