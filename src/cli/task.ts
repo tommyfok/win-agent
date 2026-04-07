@@ -276,6 +276,68 @@ function taskCancel(taskId: string) {
   console.log(`✅ 任务 #${id}「${task.title}」已取消`);
 }
 
+function taskStatus() {
+  ensureDb();
+
+  const allTasks = rawQuery<TaskRow>("SELECT * FROM tasks ORDER BY created_at ASC");
+
+  if (allTasks.length === 0) {
+    console.log("  没有任何任务");
+    return;
+  }
+
+  // Group by status
+  const groups = new Map<string, TaskRow[]>();
+  for (const task of allTasks) {
+    const list = groups.get(task.status) || [];
+    list.push(task);
+    groups.set(task.status, list);
+  }
+
+  // Display order: active statuses first, then terminal
+  const displayOrder: TaskStatus[] = [
+    TaskStatus.InDev,
+    TaskStatus.InQA,
+    TaskStatus.PendingDev,
+    TaskStatus.Planning,
+    TaskStatus.PendingQA,
+    TaskStatus.Rejected,
+    TaskStatus.Blocked,
+    TaskStatus.Paused,
+    TaskStatus.Done,
+    TaskStatus.Cancelled,
+  ];
+
+  // Summary line
+  const total = allTasks.length;
+  const done = groups.get(TaskStatus.Done)?.length ?? 0;
+  const cancelled = groups.get(TaskStatus.Cancelled)?.length ?? 0;
+  const active = total - done - cancelled;
+  console.log(`\n📊 任务概览: ${total} 个任务, ${active} 进行中, ${done} 已完成, ${cancelled} 已取消\n`);
+
+  // Priority icons
+  const priorityIcon: Record<string, string> = { high: "🔴", medium: "🟡", low: "⚪" };
+
+  for (const status of displayOrder) {
+    const tasks = groups.get(status);
+    if (!tasks || tasks.length === 0) continue;
+
+    const label = getStatusLabel(status);
+    console.log(`  ── ${label} (${tasks.length}) ──`);
+
+    // Sort by priority within group
+    const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    tasks.sort((a, b) => (priorityOrder[b.priority] ?? 0) - (priorityOrder[a.priority] ?? 0));
+
+    for (const task of tasks) {
+      const icon = priorityIcon[task.priority] ?? "⚪";
+      const assignee = task.assigned_to ? ` → ${task.assigned_to}` : "";
+      console.log(`    ${icon} #${task.id} ${task.title}${assignee}`);
+    }
+    console.log("");
+  }
+}
+
 function taskReprioritize(taskId: string, priority: string) {
   ensureDb();
 
@@ -315,6 +377,13 @@ function taskReprioritize(taskId: string, priority: string) {
 
 export function registerTaskCommands(program: Command) {
   const task = program.command("task").description("任务管理");
+
+  task
+    .command("status")
+    .description("查看所有任务状态概览")
+    .action(() => {
+      taskStatus();
+    });
 
   task
     .command("list")

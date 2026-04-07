@@ -48,7 +48,6 @@ function checkIterationAutoCreate(): void {
   // 由 new-feature/bug-fix 工作流创建的任务有 workflow_id，不应被自动合并进当前迭代。
   const unassigned = rawQuery<{ id: number }>(
     "SELECT id FROM tasks WHERE iteration = 0 AND status != 'cancelled' AND workflow_id IS NULL",
-    []
   );
 
   if (unassigned.length === 0) return;
