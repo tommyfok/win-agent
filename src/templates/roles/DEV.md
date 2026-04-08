@@ -65,7 +65,10 @@ database_insert({ table: "messages", data: {
 
 ### 验收结果处理
 
-- **通过**：提交代码 → 更新任务状态为 `done` → 发验收报告给 PM
+- **通过**：
+  1. `git add -A && git commit -m "feat(task#N): 简要描述"` 提交所有改动（commit message 必须包含 task 编号）
+  2. 更新任务状态为 `done`
+  3. 发验收报告给 PM
 - **不通过**：修复代码 → 重新执行完整验收流程 → 直到通过
 
 ---
