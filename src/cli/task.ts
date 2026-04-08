@@ -36,10 +36,7 @@ function getStatusLabel(status: string): string {
 
 const statusLabels: Record<TaskStatus, string> = {
   [TaskStatus.PendingDev]: "待开发",
-  [TaskStatus.Planning]: "计划协商中",
   [TaskStatus.InDev]: "开发中",
-  [TaskStatus.PendingQA]: "待验收",
-  [TaskStatus.InQA]: "验收中",
   [TaskStatus.Done]: "已完成",
   [TaskStatus.Rejected]: "已打回",
   [TaskStatus.Cancelled]: "已取消",
@@ -148,8 +145,7 @@ function taskPause(taskId: string) {
 
   const task = tasks[0];
   const validFrom: TaskStatus[] = [
-    TaskStatus.PendingDev, TaskStatus.Planning, TaskStatus.InDev,
-    TaskStatus.PendingQA, TaskStatus.InQA, TaskStatus.Rejected,
+    TaskStatus.PendingDev, TaskStatus.InDev, TaskStatus.Rejected,
   ];
 
   if (!validFrom.includes(task.status)) {
@@ -297,10 +293,7 @@ function taskStatus() {
   // Display order: active statuses first, then terminal
   const displayOrder: TaskStatus[] = [
     TaskStatus.InDev,
-    TaskStatus.InQA,
     TaskStatus.PendingDev,
-    TaskStatus.Planning,
-    TaskStatus.PendingQA,
     TaskStatus.Rejected,
     TaskStatus.Blocked,
     TaskStatus.Paused,

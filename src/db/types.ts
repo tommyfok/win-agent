@@ -4,10 +4,7 @@
  */
 export const TaskStatus = {
   PendingDev: "pending_dev",
-  Planning: "planning",
   InDev: "in_dev",
-  PendingQA: "pending_qa",
-  InQA: "in_qa",
   Done: "done",
   Rejected: "rejected",
   Cancelled: "cancelled",

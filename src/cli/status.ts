@@ -66,10 +66,7 @@ export async function statusCommand() {
     const parts: string[] = [];
     const statusLabels: Record<string, string> = {
       pending_dev: "待开发",
-      planning: "计划协商中",
       in_dev: "开发中",
-      pending_qa: "待验收",
-      in_qa: "验收中",
       done: "已完成",
       rejected: "已打回",
       paused: "已暂停",

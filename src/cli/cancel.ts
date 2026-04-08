@@ -56,10 +56,7 @@ export async function cancelCommand(workflowId: string) {
   });
   const inProgressStatuses = [
     "pending_dev",
-    "planning",
     "in_dev",
-    "pending_qa",
-    "in_qa",
     "paused",
     "blocked",
   ];
