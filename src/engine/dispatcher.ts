@@ -112,7 +112,7 @@ export async function dispatchToRole(
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
   // cancel_task messages are always delivered so DEV can execute rollback/cleanup.
   if (role === "DEV") {
-    const SKIP_STATUSES: TaskStatus[] = [TaskStatus.Paused, TaskStatus.Cancelled, TaskStatus.Blocked];
+    const SKIP_STATUSES: TaskStatus[] = [TaskStatus.Paused, TaskStatus.Cancelled, TaskStatus.Blocked, TaskStatus.Done];
     const filtered: MessageRow[] = [];
     for (const msg of messages) {
       if (msg.related_task_id && msg.type !== "cancel_task") {

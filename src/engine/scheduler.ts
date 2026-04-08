@@ -6,7 +6,7 @@ import { AbortError } from "./retry.js";
 import { checkAndRotate } from "./memory-rotator.js";
 import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
 import { checkWorkflowCompletion } from "./workflow-checker.js";
-import { select, insert, rawRun } from "../db/repository.js";
+import { select, insert, update, rawRun } from "../db/repository.js";
 import { MessageStatus } from "../db/types.js";
 import { checkAndUnblockDependencies } from "./dependency-checker.js";
 /** Sleep helper */
@@ -294,6 +294,20 @@ async function schedulerTick(
         );
       }
       console.log(`   ✓ ${role} 调度完成`);
+    } catch (err) {
+      // Mark messages as read to prevent infinite retry of the same batch.
+      // AbortError is rethrown for graceful shutdown handling.
+      if (err instanceof AbortError) throw err;
+      console.error(`   ❌ ${role} 调度失败，标记 ${messages.length} 条消息为已读防止重复: ${err}`);
+      for (const msg of messages) {
+        update("messages", { id: msg.id }, { status: MessageStatus.Read });
+      }
+      insert("logs", {
+        role: "system",
+        action: "dispatch_failed",
+        content: `${role} dispatch failed, ${messages.length} messages marked read: ${String(err).slice(0, 200)}`,
+        related_task_id: dispatchTaskId,
+      });
     } finally {
       currentDispatch = null;
       currentAbortController = null;
