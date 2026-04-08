@@ -39,8 +39,8 @@ async function _cleanCommand() {
   const skillNames = DEFAULT_SKILLS.map((s) => getSkillDirName(s.pkg)).join(", ");
   console.log("\n将清理以下内容：");
   console.log(`  - ${winAgentDir}/`);
-  console.log(`  - .opencode/agents/{PM,DEV,QA}.md`);
-  console.log(`  - .opencode/tools/database_{PM,DEV,QA}.ts`);
+  console.log(`  - .opencode/agents/{PM,DEV}.md`);
+  console.log(`  - .opencode/tools/database_{PM,DEV}.ts`);
   console.log(`  - .opencode/skills/{${skillNames}}`);
   console.log(`  - .opencode/opencode.json 中的 permission 字段`);
   if (sessionPrefix) {
@@ -78,7 +78,7 @@ function cleanOpencodeFiles(opencodeDir: string): void {
 
   // 1. Remove agent files
   const agentsDir = path.join(opencodeDir, "agents");
-  for (const role of ["PM", "DEV", "QA"]) {
+  for (const role of ["PM", "DEV"]) {
     const f = path.join(agentsDir, `${role}.md`);
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }
@@ -86,7 +86,7 @@ function cleanOpencodeFiles(opencodeDir: string): void {
 
   // 2. Remove tool files
   const toolsDir = path.join(opencodeDir, "tools");
-  for (const role of ["PM", "DEV", "QA"]) {
+  for (const role of ["PM", "DEV"]) {
     const f = path.join(toolsDir, `database_${role}.ts`);
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }

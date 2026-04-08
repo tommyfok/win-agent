@@ -116,7 +116,7 @@ function detectContextAnxiety(role: string, outputTokens: number): boolean {
  * @param outputTokens - The output token count from the last prompt response
  * @param role - The role whose session to rotate
  * @param sessionId - The current session ID
- * @param taskId - Optional task ID (for DEV/QA sessions)
+ * @param taskId - Optional task ID (for DEV sessions)
  * @returns The (possibly new) session ID
  */
 export async function checkAndRotate(

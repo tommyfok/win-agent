@@ -58,7 +58,7 @@ export function checkAndUnblockDependencies(): void {
         related_task_id: task.id,
         status: MessageStatus.Unread,
       });
-      // Also notify the assigned role directly so DEV/QA can resume without waiting for PM.
+      // Also notify the assigned role directly so DEV can resume without waiting for PM.
       // Dedup: skip if there's already an unread system notification for this task+role.
       const assignedRole = task.assigned_to;
       if (assignedRole && assignedRole !== "PM") {

@@ -82,7 +82,7 @@ export interface MessageRow {
   created_at: string;
 }
 
-/** Task context injected for DEV/QA roles */
+/** Task context injected for DEV role */
 interface TaskContext {
   id: number;
   title: string;
@@ -110,8 +110,8 @@ export async function dispatchToRole(
   options?: DispatchOptions
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
-  // cancel_task messages are always delivered so DEV/QA can execute rollback/cleanup.
-  if (role === "DEV" || role === "QA") {
+  // cancel_task messages are always delivered so DEV can execute rollback/cleanup.
+  if (role === "DEV") {
     const SKIP_STATUSES: TaskStatus[] = [TaskStatus.Paused, TaskStatus.Cancelled, TaskStatus.Blocked];
     const filtered: MessageRow[] = [];
     for (const msg of messages) {
@@ -123,7 +123,7 @@ export async function dispatchToRole(
           continue;
         }
         // Check unmet dependencies before dispatching to DEV
-        if (role === "DEV" && taskStatus) {
+        if (taskStatus) {
           const blocked = checkAndBlockUnmetDependencies(msg.related_task_id, taskStatus);
           if (blocked) {
             update("messages", { id: msg.id }, { status: MessageStatus.Read });
@@ -152,8 +152,8 @@ export async function dispatchToRole(
     // Non-fatal — proceed without knowledge context
   }
 
-  // 3. Get task context for DEV/QA (task details + dependencies)
-  const taskContext = role === "DEV" || role === "QA" ? getTaskContext(messages) : null;
+  // 3. Get task context for DEV (task details + dependencies)
+  const taskContext = role === "DEV" ? getTaskContext(messages) : null;
 
   // 4. Build and send prompt
   const pendingContext = sessionManager.consumePendingContext(sessionId);
@@ -232,20 +232,20 @@ export async function dispatchToRole(
 
 /**
  * Get the appropriate session for a role.
- * DEV/QA: task-scoped session. PM: persistent session.
+ * DEV: task-scoped session. PM: persistent session.
  */
 async function getSessionForRole(
   sessionManager: SessionManager,
   role: Role,
   messages: MessageRow[]
 ): Promise<string> {
-  if (role === "DEV" || role === "QA") {
+  if (role === "DEV") {
     // Use the task ID from the first message that has one
     const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
     if (taskId) {
       return sessionManager.getTaskSession(taskId, role);
     }
-    // No task ID found — this shouldn't happen since DEV/QA messages should always
+    // No task ID found — this shouldn't happen since DEV messages should always
     // carry a related_task_id. Log a warning and use a sentinel session to avoid
     // silently colliding with a real task session.
     console.warn(`   ⚠️  ${role} 收到无 related_task_id 的消息，使用 fallback session`);
@@ -256,7 +256,7 @@ async function getSessionForRole(
 }
 
 /**
- * Get task context for DEV/QA roles.
+ * Get task context for DEV role.
  * Includes task details and dependency status.
  */
 function getTaskContext(messages: MessageRow[]): TaskContext | null {
@@ -311,9 +311,9 @@ function getTaskContext(messages: MessageRow[]): TaskContext | null {
  *
  * Sections:
  * 1. 待处理消息 (pending messages)
- * 2. 当前任务 (task context, DEV/QA only)
+ * 2. 当前任务 (task context, DEV only)
  * 3. 相关知识库 (relevant knowledge, if any)
- * 4. DEV/QA 待处理队列 (PM only, dedup guard)
+ * 4. DEV 待处理队列 (PM only, dedup guard)
  * 5. 操作提示 (action hints)
  */
 export function buildDispatchPrompt(
@@ -331,7 +331,7 @@ export function buildDispatchPrompt(
     parts.push(`**来自 ${msg.from_role}**${taskRef}：\n${msg.content}`);
   }
 
-  // 2. Task context (for DEV/QA)
+  // 2. Task context (for DEV)
   if (taskContext) {
     const depLines =
       taskContext.dependencies.length > 0
@@ -358,7 +358,7 @@ export function buildDispatchPrompt(
     }
   }
 
-  // 4. DEV/QA pending queue (PM only) — dedup guard so PM doesn't resend
+  // 4. DEV pending queue (PM only) — dedup guard so PM doesn't resend
   //    directives that are already queued and waiting to be dispatched.
   //    Includes both PM and system messages so PM is aware of system notifications.
   if (role === "PM") {
@@ -367,27 +367,13 @@ export function buildDispatchPrompt(
       { to_role: "DEV", status: MessageStatus.Unread },
       { orderBy: "created_at ASC" }
     );
-    const pendingQaMsgs = select<MessageRow>(
-      "messages",
-      { to_role: "QA", status: MessageStatus.Unread },
-      { orderBy: "created_at ASC" }
-    );
 
-    if (pendingDevMsgs.length > 0 || pendingQaMsgs.length > 0) {
+    if (pendingDevMsgs.length > 0) {
       const lines: string[] = [];
-      if (pendingDevMsgs.length > 0) {
-        lines.push(`DEV 待处理队列（${pendingDevMsgs.length} 条未读，无需重发）：`);
-        for (const m of pendingDevMsgs) {
-          const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
-          lines.push(`  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
-        }
-      }
-      if (pendingQaMsgs.length > 0) {
-        lines.push(`QA 待处理队列（${pendingQaMsgs.length} 条未读，无需重发）：`);
-        for (const m of pendingQaMsgs) {
-          const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
-          lines.push(`  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
-        }
+      lines.push(`DEV 待处理队列（${pendingDevMsgs.length} 条未读，无需重发）：`);
+      for (const m of pendingDevMsgs) {
+        const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
+        lines.push(`  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
       }
       parts.push(`## 已排队消息（勿重复发送）\n${lines.join("\n")}`);
     }

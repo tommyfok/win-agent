@@ -6,7 +6,7 @@ import { withRetry, withTimeout } from "./retry.js";
 import { insert as dbInsert } from "../db/repository.js";
 import { ensureWorkspaceId } from "../config/index.js";
 
-type Role = "PM" | "DEV" | "QA";
+type Role = "PM" | "DEV";
 const PERSISTENT_ROLES: Role[] = ["PM"];
 
 /** Persisted state of an interrupted dispatch (written by engine on shutdown). */
@@ -52,13 +52,13 @@ function loadRolePrompt(workspace: string, role: string): string {
  * SessionManager manages opencode sessions for all roles.
  *
  * - PM: persistent sessions created at engine startup
- * - DEV/QA: per-task sessions created on demand
+ * - DEV: per-task sessions created on demand
  * - All sessions support context-based rotation (write memory → new session → recall)
  */
 export class SessionManager {
   /** role → sessionId for persistent roles (PM) */
   private activeSessions: Map<string, string> = new Map();
-  /** "taskId-role" → sessionId for task-scoped roles (DEV, QA) */
+  /** "taskId-role" → sessionId for task-scoped roles (DEV) */
   private taskSessions: Map<string, string> = new Map();
   /** Unique prefix for this workspace's sessions */
   private sessionPrefix: string;
@@ -144,7 +144,7 @@ export class SessionManager {
   /**
    * Write active session IDs to .win-agent/sessions.json so other
    * processes (e.g. `win-agent talk`) can read them.
-   * Includes both PM (activeSessions) and DEV/QA task sessions (taskSessions).
+   * Includes both PM (activeSessions) and DEV task sessions (taskSessions).
    */
   private persistSessionIds(): void {
     const data: Record<string, string> = {};
@@ -225,11 +225,11 @@ export class SessionManager {
   }
 
   /**
-   * Get or create a task-scoped session for DEV/QA.
+   * Get or create a task-scoped session for DEV.
    * If a session already exists for this task, return it.
    * Otherwise create a new session with role identity and memory recall.
    */
-  async getTaskSession(taskId: number, role: "DEV" | "QA"): Promise<string> {
+  async getTaskSession(taskId: number, role: "DEV"): Promise<string> {
     const key = `${taskId}-${role}`;
     const existing = this.taskSessions.get(key);
     if (existing) return existing;
@@ -245,7 +245,6 @@ export class SessionManager {
    */
   releaseTaskSession(taskId: number): void {
     this.taskSessions.delete(`${taskId}-DEV`);
-    this.taskSessions.delete(`${taskId}-QA`);
   }
 
   /**
@@ -318,13 +317,13 @@ export class SessionManager {
   }
 
   /**
-   * Trigger all roles (PM + DEV/QA task sessions) to write memory (used on engine stop).
+   * Trigger all roles (PM + DEV task sessions) to write memory (used on engine stop).
    */
   async writeAllMemories(trigger: string): Promise<void> {
     // Build a combined list of [role, sessionId] for all active sessions
     const sessions: Array<[string, string]> = [
       ...this.activeSessions.entries(),
-      // DEV/QA task sessions: key format is "taskId-role"
+      // DEV task sessions: key format is "taskId-role"
       ...Array.from(this.taskSessions.entries()).map(([key, id]) => {
         const role = key.split("-")[1]; // e.g. "42-DEV" → "DEV"
         return [role, id] as [string, string];
@@ -499,7 +498,7 @@ export class SessionManager {
     // Re-register session in our maps
     if (role === "PM") {
       this.activeSessions.set(role, sessionId);
-    } else if (taskId && (role === "DEV" || role === "QA")) {
+    } else if (taskId && role === "DEV") {
       this.taskSessions.set(`${taskId}-${role}`, sessionId);
     }
     this.persistSessionIds();

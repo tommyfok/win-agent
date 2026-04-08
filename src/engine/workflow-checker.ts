@@ -17,7 +17,7 @@ interface WorkflowRow {
  * Check all active workflow instances for completion conditions.
  * When a workflow's completion condition is met:
  * 1. Update workflow status to 'completed' and phase to 'done'
- * 2. Release task sessions for DEV/QA
+ * 2. Release task sessions for DEV
  * 3. Send a system message to PM to trigger final reporting
  */
 export function checkWorkflowCompletion(sessionManager?: SessionManager | null): void {
@@ -228,8 +228,7 @@ function buildReflectionPrompt(role: string, wf: WorkflowRow): string {
 
   const roleGuidance: Record<string, string> = {
     PM: "请回顾：需求理解是否准确？技术方案可行性如何？任务拆分粒度是否合理？验收标准是否清晰？沟通效率如何？",
-    DEV: "请回顾：代码质量如何？自测是否充分？有无被打回？被打回的根因是什么？",
-    QA: "请回顾：验收标准是否适用？缺陷描述质量如何？是否有遗漏的测试场景？",
+    DEV: "请回顾：代码质量如何？验收测试是否充分？是否有遗漏的测试场景？有无被打回？被打回的根因是什么？",
   };
 
   const guidance = roleGuidance[role] ?? "请回顾本次工作中的经验教训。";

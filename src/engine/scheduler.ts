@@ -70,7 +70,7 @@ let pmLastDispatchEnd = 0;
 
 /**
  * PM starvation protection: after N consecutive PM-only dispatches,
- * skip PM for one tick to let DEV/QA get scheduled.
+ * skip PM for one tick to let DEV get scheduled.
  */
 const PM_MAX_CONSECUTIVE = 3;
 let pmConsecutiveCount = 0;
@@ -232,7 +232,7 @@ async function schedulerTick(
     }
 
     // PM starvation protection: if PM has been dispatched too many times
-    // consecutively, skip PM for this tick to let DEV/QA get scheduled.
+    // consecutively, skip PM for this tick to let DEV get scheduled.
     if (role === "PM" && pmConsecutiveCount >= PM_MAX_CONSECUTIVE) {
       // Check if other roles have pending messages
       const othersPending = ALL_ROLES.some(
@@ -268,8 +268,8 @@ async function schedulerTick(
       startedAt: new Date().toISOString(),
     };
     try {
-      // DEV/QA: group messages by task to ensure correct session & context per task
-      const dispatch = role === "DEV" || role === "QA" ? dispatchToRoleGrouped : dispatchToRole;
+      // DEV: group messages by task to ensure correct session & context per task
+      const dispatch = role === "DEV" ? dispatchToRoleGrouped : dispatchToRole;
       const { sessionId, inputTokens, outputTokens } = await dispatch(
         client,
         sessionManager,
@@ -281,7 +281,7 @@ async function schedulerTick(
         }
       );
 
-      // For PM: check session rotation. DEV/QA rotation is handled per-group
+      // For PM: check session rotation. DEV rotation is handled per-group
       // inside dispatchToRoleGrouped to avoid cross-task token accumulation.
       if (role === "PM" && sessionId) {
         await checkAndRotate(
