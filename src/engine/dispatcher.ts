@@ -328,7 +328,7 @@ export function buildDispatchPrompt(
   parts.push("## 待处理消息");
   for (const msg of messages) {
     const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : "";
-    parts.push(`**来自 ${msg.from_role}**${taskRef}：\n${msg.content}`);
+    parts.push(`**来自 ${msg.from_role}** [type: ${msg.type}]${taskRef}：\n${msg.content}`);
   }
 
   // 2. Task context (for DEV)

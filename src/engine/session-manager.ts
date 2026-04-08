@@ -225,14 +225,14 @@ export class SessionManager {
   }
 
   /**
-   * Get or create a task-scoped session for DEV.
-   * If a session already exists for this task, return it.
-   * Otherwise create a new session with role identity and memory recall.
+   * Create a fresh session for DEV on every dispatch.
+   * Each dispatch gets a clean context with role identity and memory recall.
+   * The previous task session (if any) is released first.
    */
   async getTaskSession(taskId: number, role: "DEV"): Promise<string> {
     const key = `${taskId}-${role}`;
-    const existing = this.taskSessions.get(key);
-    if (existing) return existing;
+    // Release previous session for this task (if any) so DEV always starts clean
+    this.taskSessions.delete(key);
 
     const sessionId = await this.createRoleSession(role);
     this.taskSessions.set(key, sessionId);
