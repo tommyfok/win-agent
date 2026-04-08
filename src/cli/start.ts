@@ -161,13 +161,29 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
     if (currentMtime === snapshotMtime) unmodified.push(file);
   }
 
-  if (unmodified.length === 0) return;
+  // Check overview.md
+  let overviewUnmodified = false;
+  const overviewSnapshotRow = dbSelect<{ key: string; value: string }>("project_config", { key: "overview_mtime_snapshot" });
+  if (overviewSnapshotRow.length > 0) {
+    const overviewPath = path.join(workspace, ".win-agent", "overview.md");
+    if (fs.existsSync(overviewPath)) {
+      const currentMtime = fs.statSync(overviewPath).mtimeMs;
+      if (currentMtime === Number(overviewSnapshotRow[0].value)) {
+        overviewUnmodified = true;
+      }
+    }
+  }
 
-  console.log("\n❌ 以下角色文件自 onboard 后未经修改，请审核后再启动：");
+  if (unmodified.length === 0 && !overviewUnmodified) return;
+
+  console.log("\n❌ 以下文件自 onboard 后未经修改，请审核后再启动：");
   for (const file of unmodified) {
     console.log(`   • .win-agent/roles/${file}`);
   }
-  console.log("\n   根据项目实际情况调整角色定义，完成后重新执行 npx win-agent start");
+  if (overviewUnmodified) {
+    console.log("   • .win-agent/overview.md");
+  }
+  console.log("\n   根据项目实际情况审核并调整以上文件，完成后重新执行 npx win-agent start");
   removePidFile();
   process.exit(1);
 }

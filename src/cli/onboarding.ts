@@ -334,6 +334,18 @@ export function snapshotRoleMtimes(workspace: string): void {
   } else {
     dbInsert("project_config", { key: "role_mtimes_snapshot", value: JSON.stringify(snapshot) });
   }
+
+  // Snapshot overview.md mtime
+  const overviewPath = path.join(workspace, ".win-agent", "overview.md");
+  if (fs.existsSync(overviewPath)) {
+    const mtime = String(fs.statSync(overviewPath).mtimeMs);
+    const existingOv = dbSelect<{ key: string; value: string }>("project_config", { key: "overview_mtime_snapshot" });
+    if (existingOv.length > 0) {
+      dbUpdate("project_config", { key: "overview_mtime_snapshot" }, { value: mtime });
+    } else {
+      dbInsert("project_config", { key: "overview_mtime_snapshot", value: mtime });
+    }
+  }
 }
 
 // ─── 角色文件上下文注入 ────────────────────────────────────────────────────────
