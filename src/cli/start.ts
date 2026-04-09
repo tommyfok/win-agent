@@ -177,7 +177,7 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
     key: 'overview_mtime_snapshot',
   });
   if (overviewSnapshotRow.length > 0) {
-    const overviewPath = path.join(workspace, '.win-agent', 'overview.md');
+    const overviewPath = path.join(workspace, '.win-agent', 'docs', 'overview.md');
     if (fs.existsSync(overviewPath)) {
       const currentMtime = fs.statSync(overviewPath).mtimeMs;
       if (currentMtime === Number(overviewSnapshotRow[0].value)) {
@@ -209,7 +209,7 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
     console.log(`   • .win-agent/roles/${file}`);
   }
   if (overviewUnmodified) {
-    console.log('   • .win-agent/overview.md');
+    console.log('   • .win-agent/docs/overview.md');
   }
   for (const file of docsUnmodified) {
     console.log(`   • .win-agent/docs/${file}`);

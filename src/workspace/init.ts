@@ -69,6 +69,64 @@ export function initWorkspace(workspace: string): InitResult {
   return { created: true, patched: [] };
 }
 
+// ─── Code Detection ──────────────────────────────────────────────────────────
+
+const CODE_INDICATORS = [
+  'package.json',
+  'tsconfig.json',
+  'Cargo.toml',
+  'go.mod',
+  'pom.xml',
+  'build.gradle',
+  'requirements.txt',
+  'pyproject.toml',
+  'Makefile',
+  'CMakeLists.txt',
+  'src',
+  'lib',
+  'app',
+];
+
+function isCodeEntry(name: string): boolean {
+  return (
+    CODE_INDICATORS.includes(name) ||
+    name.endsWith('.ts') ||
+    name.endsWith('.js') ||
+    name.endsWith('.py')
+  );
+}
+
+/**
+ * Detect whether a workspace contains existing code.
+ * Checks root level and one level of subdirectories (monorepo support).
+ */
+export function detectExistingCode(workspace: string): boolean {
+  const entries = fs.readdirSync(workspace);
+  if (entries.some(isCodeEntry)) return true;
+  return detectSubProjects(workspace).length > 0;
+}
+
+/**
+ * Detect sub-projects in a monorepo workspace.
+ * Returns directory names of subdirectories that contain code indicators.
+ */
+export function detectSubProjects(workspace: string): string[] {
+  const entries = fs.readdirSync(workspace);
+  const subProjects: string[] = [];
+  for (const entry of entries) {
+    if (entry.startsWith('.') || entry === 'node_modules') continue;
+    const subDir = path.join(workspace, entry);
+    try {
+      if (!fs.statSync(subDir).isDirectory()) continue;
+      const subEntries = fs.readdirSync(subDir);
+      if (subEntries.some(isCodeEntry)) subProjects.push(entry);
+    } catch {
+      /* permission error or symlink, skip */
+    }
+  }
+  return subProjects;
+}
+
 function copyTemplates(srcDir: string, destDir: string, ext: string): void {
   if (!fs.existsSync(srcDir)) return;
 

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { input, confirm } from '@inquirer/prompts';
 import { runEnvCheck } from './check.js';
-import { initWorkspace } from '../workspace/init.js';
+import { initWorkspace, detectExistingCode, detectSubProjects } from '../workspace/init.js';
 import { openDb, closeDb, getDb } from '../db/connection.js';
 import { select as dbSelect, insert as dbInsert, update as dbUpdate } from '../db/repository.js';
 import {
@@ -16,20 +16,78 @@ import { setEmbeddingDimension } from '../db/schema.js';
 import { getDbPath } from '../config/index.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
 
-const WORKSPACE_ANALYSIS_PROMPT = `请分析当前工作空间，生成一份项目技术概览文档。
+/**
+ * Strip any preamble text before the first markdown heading in LLM output.
+ * LLMs sometimes produce conversational filler like "现在我来生成文档了。" before the actual content.
+ */
+export function cleanOverviewOutput(raw: string): string {
+  const match = raw.match(/^([\s\S]*?)(##\s)/);
+  if (match && match[1].trim().length > 0) {
+    // There's non-empty text before the first ## heading — strip it
+    return raw.slice(match.index! + match[1].length);
+  }
+  return raw;
+}
+
+export function buildWorkspaceAnalysisPrompt(subProjects: string[]): string {
+  const isMonorepo = subProjects.length > 0;
+  const subProjectList = subProjects.map((p) => `  - ${p}`).join('\n');
+
+  const monorepoSection = isMonorepo
+    ? `
+
+**重要：这是一个 Monorepo 项目，包含以下子项目：**
+${subProjectList}
+
+你必须逐个进入每个子项目目录，读取其 package.json / Makefile / 配置文件等，分析其独立的技术栈和开发命令。不要只看根目录。`
+    : '';
+
+  const chaptersSection = isMonorepo
+    ? `请直接输出 Markdown 格式的概览文档，必须包含以下章节：
+## 整体架构
+  描述各子项目之间的关系和整体架构
+## 子项目明细
+  对每个子项目分别输出以下内容（使用三级标题 ### 子项目名）：
+  ### <子项目名>
+  - **类型与技术栈**：项目类型、使用的语言/框架
+  - **目录结构**：关键路径
+  - **主要模块**：功能划分
+  - **开发命令**（必须实际读取 package.json 等确认真实命令）：
+    - 安装依赖
+    - 构建命令
+    - 启动/开发命令
+    - Lint 命令
+    - 测试命令
+    - 其他开发相关命令
+    没有的标注"无"
+## 共享配置与约定
+  跨子项目的共享配置、公共依赖、统一规范等（如有）`
+    : `请直接输出 Markdown 格式的概览文档，必须包含以下章节：
+## 技术栈
+## 目录结构（关键路径）
+## 主要模块
+## 开发人员工作流程
+  该章节必须包含以下内容（根据项目实际情况填写，没有的标注"无"）：
+  - 构建命令（如 npm run build）
+  - Lint 命令（如 npm run lint）
+  - 单元测试命令（如 npm test）
+  - 集成测试/E2E 测试命令（如有）
+  - 其他开发相关命令`;
+
+  return `请分析当前工作空间，生成一份项目技术概览文档。
 
 使用 glob 和 read 工具扫描项目结构，重点了解：
 1. 项目类型和主要技术栈
 2. 目录结构和关键文件
 3. 主要模块/功能划分
 4. 依赖和配置情况
+5. 开发工作流程：构建、lint、测试命令（必须实际读取 package.json / Makefile 等确认真实命令）
+${monorepoSection}
 
-请直接输出 Markdown 格式的概览文档，必须包含以下章节：
-## 技术栈
-## 目录结构（关键路径）
-## 主要模块
+${chaptersSection}
 
-只输出文档内容，不需要额外解释。`;
+严格要求：直接以 Markdown 正文开头（即以 ## 标题开头），禁止输出任何过渡性语句、思考过程或额外解释（如"现在我来生成文档"、"我已经分析完毕"等）。`;
+}
 
 export async function onboardingCommand() {
   try {
@@ -122,7 +180,12 @@ async function _onboardingCommand() {
   }
 
   // ── 7️⃣ 工作空间分析 ──
+  const subProjects = detectSubProjects(workspace);
+  const isMonorepo = subProjects.length > 0;
   console.log('\n7️⃣  工作空间分析（AI 扫描项目结构）');
+  if (isMonorepo) {
+    console.log(`   检测到 Monorepo，子项目: ${subProjects.join(', ')}`);
+  }
   let overview = '';
   let serverHandle: Awaited<ReturnType<typeof startOpencodeServer>> | null = null;
   if (!detectExistingCode(workspace)) {
@@ -140,22 +203,24 @@ async function _onboardingCommand() {
         path: { id: sessionId },
         body: {
           agent: 'PM',
-          parts: [{ type: 'text', text: WORKSPACE_ANALYSIS_PROMPT }],
+          parts: [{ type: 'text', text: buildWorkspaceAnalysisPrompt(subProjects) }],
         },
       });
 
       const textParts = result.data?.parts?.filter(
         (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
       );
-      overview = textParts?.map((p) => p.text).join('\n') ?? '';
+      overview = cleanOverviewOutput(textParts?.map((p) => p.text).join('\n') ?? '');
 
-      const overviewPath = path.join(workspace, '.win-agent', 'overview.md');
+      const docsDir = path.join(workspace, '.win-agent', 'docs');
+      if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+      const overviewPath = path.join(docsDir, 'overview.md');
       fs.writeFileSync(
         overviewPath,
         `# 项目概览\n\n_由 \`win-agent onboard\` 自动生成_\n\n${overview}`,
         'utf-8'
       );
-      console.log('   ✓ 已写入 .win-agent/overview.md');
+      console.log('   ✓ 已写入 .win-agent/docs/overview.md');
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException)?.code === 'INSTALL_FAILED') {
         throw err;
@@ -175,7 +240,7 @@ async function _onboardingCommand() {
   console.log('   ✓ 完成');
 
   // ── 9️⃣ 确保 docs 规则文件存在 ──
-  ensureDocsFiles(workspace);
+  ensureDocsFiles(workspace, subProjects);
 
   // ── 完成 ──
   // Snapshot role file mtimes so `start` can detect user edits
@@ -189,7 +254,7 @@ async function _onboardingCommand() {
 
   console.log('\n✅ Onboarding 完成');
   console.log(`   项目: ${projectName}`);
-  if (overview) console.log('   概览: .win-agent/overview.md');
+  if (overview) console.log('   概览: .win-agent/docs/overview.md');
   console.log('   角色: .win-agent/roles/  （可直接编辑，重启后对 PM 生效）');
   console.log('\n提示：如需额外 MCP 工具，请在启动前通过 opencode mcp add 配置');
   console.log('就绪后执行：npx win-agent start');
@@ -260,28 +325,6 @@ async function importProjectContext(workspace: string) {
   }
 }
 
-function detectExistingCode(workspace: string): boolean {
-  const entries = fs.readdirSync(workspace);
-  const indicators = [
-    'package.json',
-    'tsconfig.json',
-    'Cargo.toml',
-    'go.mod',
-    'pom.xml',
-    'build.gradle',
-    'requirements.txt',
-    'pyproject.toml',
-    'Makefile',
-    'CMakeLists.txt',
-    'src',
-    'lib',
-    'app',
-  ];
-  return entries.some(
-    (e) => indicators.includes(e) || e.endsWith('.ts') || e.endsWith('.js') || e.endsWith('.py')
-  );
-}
-
 async function importReferenceDir(refDir: string, workspace: string): Promise<number> {
   const TEXT_EXTS = new Set(['.md', '.txt', '.rst', '.html', '.json', '.yaml', '.yml', '.xml']);
   const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp']);
@@ -342,7 +385,7 @@ export function snapshotRoleMtimes(workspace: string): void {
   }
 
   // Snapshot overview.md mtime
-  const overviewPath = path.join(workspace, '.win-agent', 'overview.md');
+  const overviewPath = path.join(workspace, '.win-agent', 'docs', 'overview.md');
   if (fs.existsSync(overviewPath)) {
     const mtime = String(fs.statSync(overviewPath).mtimeMs);
     const existingOv = dbSelect<{ key: string; value: string }>('project_config', {
@@ -358,10 +401,41 @@ export function snapshotRoleMtimes(workspace: string): void {
 
 // ─── Docs 规则文件 ───────────────────────────────────────────────────────────
 
-const DOCS_SKELETON: Record<string, string> = {
-  'development.md': `# 开发流程规范
+function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
+  const isMonorepo = subProjects.length > 0;
 
-> 请根据项目实际情况补充以下章节内容。
+  const perProjectDev = isMonorepo
+    ? '\n' +
+      subProjects
+        .map(
+          (p) => `### ${p}
+
+#### 编码规范
+
+#### 构建与部署
+`
+        )
+        .join('\n')
+    : '';
+
+  const perProjectVal = isMonorepo
+    ? '\n' +
+      subProjects
+        .map(
+          (p) => `### ${p}
+
+#### 自测要求
+
+#### E2E 验证
+`
+        )
+        .join('\n')
+    : '';
+
+  return {
+    'development.md': `# 开发流程规范
+
+> 请根据项目实际情况补充以下章节内容。${isMonorepo ? '\n> 这是一个 Monorepo 项目，请为每个子项目补充对应章节。' : ''}
 
 ## 编码规范
 
@@ -370,10 +444,10 @@ const DOCS_SKELETON: Record<string, string> = {
 ## 提交规范
 
 ## 构建与部署
-`,
-  'validation.md': `# 自测与验收规范
+${perProjectDev}`,
+    'validation.md': `# 自测与验收规范
 
-> 请根据项目实际情况补充以下章节内容。
+> 请根据项目实际情况补充以下章节内容。${isMonorepo ? '\n> 这是一个 Monorepo 项目，请为每个子项目补充对应章节。' : ''}
 
 ## 自测要求
 
@@ -382,18 +456,20 @@ const DOCS_SKELETON: Record<string, string> = {
 ## 回归测试
 
 ## 验收标准
-`,
-};
+${perProjectVal}`,
+  };
+}
 
-function ensureDocsFiles(workspace: string): void {
+function ensureDocsFiles(workspace: string, subProjects: string[]): void {
   const docsDir = path.join(workspace, '.win-agent', 'docs');
   if (!fs.existsSync(docsDir)) {
     fs.mkdirSync(docsDir, { recursive: true });
   }
-  for (const [filename, skeleton] of Object.entries(DOCS_SKELETON)) {
+  const skeleton = buildDocsSkeleton(subProjects);
+  for (const [filename, content] of Object.entries(skeleton)) {
     const filePath = path.join(docsDir, filename);
     if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, skeleton, 'utf-8');
+      fs.writeFileSync(filePath, content, 'utf-8');
       console.log(`   ✓ 已创建 .win-agent/docs/${filename}`);
     }
   }
@@ -434,7 +510,7 @@ function injectProjectContext(workspace: string, projectName: string, projectDes
     '## 项目背景',
     `- **项目名称**: ${projectName}`,
     `- **项目描述**: ${projectDescription}`,
-    '- **技术概览**: 详见 `.win-agent/overview.md`',
+    '- **技术概览**: 详见 `.win-agent/docs/overview.md`',
     '<!-- /win-agent:project-context -->',
     '',
   ].join('\n');

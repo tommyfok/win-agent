@@ -7,7 +7,8 @@ import { select as dbSelect } from '../db/repository.js';
 import { getDbPath } from '../config/index.js';
 import { syncAgents, deployTools } from '../workspace/sync-agents.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
-import { snapshotRoleMtimes } from './onboarding.js';
+import { snapshotRoleMtimes, cleanOverviewOutput } from './onboarding.js';
+import { detectExistingCode, detectSubProjects } from '../workspace/init.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,28 +28,7 @@ function getTemplatesDir(): string {
   throw new Error('找不到包内模板目录，已尝试:\n' + candidates.map((c) => `  ${c}`).join('\n'));
 }
 
-const WORKSPACE_ANALYSIS_PROMPT = `请分析当前工作空间，生成一份项目技术概览文档。
-
-使用 glob 和 read 工具扫描项目结构，重点了解：
-1. 项目类型和主要技术栈
-2. 目录结构和关键文件
-3. 主要模块/功能划分
-4. 依赖和配置情况
-5. 开发工作流程：构建、lint、测试命令（必须实际读取 package.json / Makefile 等确认真实命令）
-
-请直接输出 Markdown 格式的概览文档，必须包含以下章节：
-## 技术栈
-## 目录结构（关键路径）
-## 主要模块
-## 开发人员工作流程
-  该章节必须包含以下内容（根据项目实际情况填写，没有的标注"无"）：
-  - 构建命令（如 npm run build）
-  - Lint 命令（如 npm run lint）
-  - 单元测试命令（如 npm test）
-  - 集成测试/E2E 测试命令（如有）
-  - 其他开发相关命令
-
-只输出文档内容，不需要额外解释。`;
+import { buildWorkspaceAnalysisPrompt } from './onboarding.js';
 
 const PROJECT_CONTEXT_SENTINEL =
   /<!-- win-agent:project-context -->[\s\S]*?<!-- \/win-agent:project-context -->\n?/;
@@ -127,7 +107,9 @@ async function updateOverview(workspace: string) {
     return;
   }
 
-  const overviewPath = path.join(workspace, '.win-agent', 'overview.md');
+  const docsDir = path.join(workspace, '.win-agent', 'docs');
+  if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+  const overviewPath = path.join(docsDir, 'overview.md');
   const exists = fs.existsSync(overviewPath);
 
   const doUpdate = await confirm({
@@ -152,14 +134,14 @@ async function updateOverview(workspace: string) {
       path: { id: sessionId },
       body: {
         agent: 'PM',
-        parts: [{ type: 'text', text: WORKSPACE_ANALYSIS_PROMPT }],
+        parts: [{ type: 'text', text: buildWorkspaceAnalysisPrompt(detectSubProjects(workspace)) }],
       },
     });
 
     const textParts = result.data?.parts?.filter(
       (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
     );
-    const overview = textParts?.map((p) => p.text).join('\n') ?? '';
+    const overview = cleanOverviewOutput(textParts?.map((p) => p.text).join('\n') ?? '');
 
     if (exists) {
       const backupsDir = path.join(workspace, '.win-agent', 'backups');
@@ -173,7 +155,7 @@ async function updateOverview(workspace: string) {
       `# 项目概览\n\n_由 \`win-agent update\` 自动生成_\n\n${overview}`,
       'utf-8'
     );
-    console.log('   ✓ 已写入 .win-agent/overview.md');
+    console.log('   ✓ 已写入 .win-agent/docs/overview.md');
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException)?.code === 'INSTALL_FAILED') {
       throw err;
@@ -193,7 +175,7 @@ function ensureOverviewReference(workspace: string) {
   console.log('\n2️⃣  检查角色文件中的 overview 引用');
 
   const rolesDir = path.join(workspace, '.win-agent', 'roles');
-  const overviewPath = path.join(workspace, '.win-agent', 'overview.md');
+  const overviewPath = path.join(workspace, '.win-agent', 'docs', 'overview.md');
   const overviewExists = fs.existsSync(overviewPath);
 
   if (!overviewExists) {
@@ -248,7 +230,7 @@ function buildProjectContextBlock(projectName: string, projectDescription: strin
     '## 项目背景',
     `- **项目名称**: ${projectName}`,
     `- **项目描述**: ${projectDescription}`,
-    '- **技术概览**: 详见 `.win-agent/overview.md`',
+    '- **技术概览**: 详见 `.win-agent/docs/overview.md`',
     '<!-- /win-agent:project-context -->',
     '',
   ].join('\n');
@@ -500,25 +482,3 @@ function extractMergedContent(response: string): string | null {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function detectExistingCode(workspace: string): boolean {
-  const entries = fs.readdirSync(workspace);
-  const indicators = [
-    'package.json',
-    'tsconfig.json',
-    'Cargo.toml',
-    'go.mod',
-    'pom.xml',
-    'build.gradle',
-    'requirements.txt',
-    'pyproject.toml',
-    'Makefile',
-    'CMakeLists.txt',
-    'src',
-    'lib',
-    'app',
-  ];
-  return entries.some(
-    (e) => indicators.includes(e) || e.endsWith('.ts') || e.endsWith('.js') || e.endsWith('.py')
-  );
-}
