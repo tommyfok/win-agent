@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { checkEngineRunning, removePidFile, isProcessRunning } from '../config/index.js';
-import { removeServerInfo } from '../engine/opencode-server.js';
+import { removeServerInfo, loadServerPid, killProcessTree } from '../engine/opencode-server.js';
 
 export async function stopCommand() {
   const workspace = process.cwd();
@@ -56,6 +56,18 @@ export async function stopCommand() {
  * that weren't properly cleaned up by previous runs.
  */
 function cleanupOrphanedProcesses(workspace: string): void {
+  // Kill the opencode server's entire process tree (catches bash-spawned children
+  // like `npm run dev` that outlive the server itself)
+  const serverPid = loadServerPid(workspace);
+  if (serverPid) {
+    try {
+      killProcessTree(serverPid);
+      console.log(`   ✓ 已清理 opencode server 进程树 (PID: ${serverPid})`);
+    } catch {
+      /* already dead */
+    }
+  }
+
   try {
     // Kill orphaned opencode servers started by win-agent
     const result = execSync("ps -eo pid,command | grep '[.]opencode serve' | grep -v grep", {

@@ -13,6 +13,7 @@ import { MessageStatus } from '../db/types.js';
 import {
   startOpencodeServer,
   removeServerInfo,
+  killProcessTree,
   type OpencodeServerHandle,
 } from '../engine/opencode-server.js';
 import { syncAgents, deployTools } from '../workspace/sync-agents.js';
@@ -170,7 +171,16 @@ export async function engineCommand(workspace: string) {
     } catch {
       /* empty */
     }
-    if (serverHandle?.owned) {
+    if (serverHandle?.owned && serverHandle.pid) {
+      try {
+        // Kill the entire process tree (including bash-spawned children like npm run dev)
+        // before closing the server, so no orphaned processes remain
+        killProcessTree(serverHandle.pid);
+      } catch {
+        /* empty */
+      }
+      removeServerInfo(workspace);
+    } else if (serverHandle?.owned) {
       try {
         serverHandle.close();
       } catch {

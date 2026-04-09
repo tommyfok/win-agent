@@ -15,6 +15,8 @@ function buildAuthHeaders(config: WinAgentConfig): Record<string, string> {
 export interface OpencodeServerHandle {
   client: OpencodeClient;
   url: string;
+  /** The opencode server process PID (only set when owned) */
+  pid: number | null;
   /** Whether this handle owns the server (started it) vs reusing an existing one */
   owned: boolean;
   close: () => void;
@@ -24,6 +26,7 @@ export interface OpencodeServerHandle {
 interface ServerInfo {
   url: string;
   port: number;
+  pid: number | null;
   startedAt: string;
 }
 
@@ -48,6 +51,43 @@ function loadServerInfo(workspace: string): ServerInfo | null {
 export function removeServerInfo(workspace: string): void {
   const file = serverInfoFile(workspace);
   if (fs.existsSync(file)) fs.unlinkSync(file);
+}
+
+/** Read the opencode server PID from persisted info (for use by stop command). */
+export function loadServerPid(workspace: string): number | null {
+  return loadServerInfo(workspace)?.pid ?? null;
+}
+
+/**
+ * Recursively kill a process and all its descendants (children, grandchildren, etc.).
+ * Kills bottom-up (leaf processes first) to avoid orphaning.
+ */
+export function killProcessTree(pid: number): void {
+  // Find direct children first, then recurse
+  let children: number[] = [];
+  try {
+    const result = execSync(`pgrep -P ${pid}`, { encoding: 'utf-8', timeout: 5000 }).trim();
+    if (result) {
+      children = result
+        .split('\n')
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => !isNaN(n) && n > 0);
+    }
+  } catch {
+    /* no children or pgrep failed */
+  }
+
+  // Kill children first (bottom-up)
+  for (const child of children) {
+    killProcessTree(child);
+  }
+
+  // Then kill this process
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    /* already dead */
+  }
 }
 
 /**
@@ -208,6 +248,7 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
       return {
         client,
         url: existing.url,
+        pid: existing.pid,
         owned: false,
         close: () => {}, // Don't close a server we didn't start
       };
@@ -312,12 +353,14 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
   saveServerInfo(workspace, {
     url: accessibleUrl,
     port: parseInt(parsedUrl.port, 10),
+    pid: proc.pid ?? null,
     startedAt: new Date().toISOString(),
   });
 
   return {
     client,
     url: server.url,
+    pid: proc.pid ?? null,
     owned: true,
     close: server.close,
   };
