@@ -86,7 +86,27 @@ ${subProjectList}
 
   return `请分析当前工作空间，生成一份项目技术概览文档。
 
-使用 glob 和 read 工具扫描项目结构，重点了解：
+按以下步骤扫描项目（严格使用给定的 glob 模式，禁止扫描 \`.\` 开头的目录）：
+
+Step 1 — 了解项目顶层结构：
+  glob("[!.]*")
+
+Step 2 — 定位关键配置文件：
+  glob("[!.]*/package.json")
+  glob("[!.]*/tsconfig.json")
+  glob("[!.]*/Makefile")
+  glob("[!.]*/Dockerfile")
+  glob("[!.]*/go.mod")
+  glob("[!.]*/Cargo.toml")
+  glob("[!.]*/pyproject.toml")
+  也读取根目录的 package.json、README.md、CONTRIBUTING.md（如果存在）
+
+Step 3 — 了解源码目录结构：
+  glob("[!.]*/**/*", 仅浏览目录层级，不需要读取每个源文件)
+
+Step 4 — read 读取 Step 2 中找到的配置文件，提取技术栈和命令信息
+
+重点了解：
 1. 项目类型和主要技术栈
 2. 目录结构和关键文件
 3. 主要模块/功能划分
@@ -106,53 +126,101 @@ export function buildDevelopmentDocPrompt(subProjects: string[]): string {
   const monorepoNote = isMonorepo
     ? `\n**重要：这是一个 Monorepo 项目，包含以下子项目：**
 ${subProjectList}
-你必须逐个分析每个子项目的配置。`
+你必须逐个分析每个子项目的配置，在相关章节下使用三级标题 ### 子项目名 分别说明。`
     : '';
 
-  const perProjectSection = isMonorepo
-    ? `
-对每个子项目，在"构建与部署"章节下使用三级标题 ### 子项目名，分别列出其实际命令。`
-    : '';
+  return `请分析当前工作空间，生成一份面向 AI 开发 Agent 的开发指南文档。
 
-  return `请分析当前工作空间，生成一份开发流程规范文档。
+**核心目标**：这份文档将被 AI Agent 在执行开发任务时参考，因此内容必须是明确、可执行的步骤和命令，而非描述性的规范说明。
 
-使用 glob 和 read 工具扫描项目，重点读取：
-1. ESLint / Prettier / EditorConfig / Biome 等代码规范配置文件
-2. package.json 中的 scripts（构建、lint、测试等命令）
-3. Git hooks 配置（husky、lint-staged、commitlint 等）
-4. CI/CD 配置文件（.github/workflows/、Jenkinsfile、.gitlab-ci.yml 等）
-5. Dockerfile / docker-compose / 部署相关配置
-6. tsconfig.json / jsconfig.json 等编译配置
+按以下步骤扫描项目（严格使用给定的 glob 模式，禁止扫描 \`.\` 开头的目录）：
+
+Step 1 — 定位配置文件：
+  glob("[!.]**/package.json")
+  glob("[!.]**/tsconfig.json")
+  glob("[!.]**/jsconfig.json")
+  glob("[!.]**/.eslintrc*")
+  glob("[!.]**/prettier.config*")
+  glob("[!.]**/biome.json")
+  glob("[!.]**/Dockerfile")
+  glob("[!.]**/docker-compose*")
+  glob("[!.]**/go.mod")
+  glob("[!.]**/Cargo.toml")
+  glob("[!.]**/pyproject.toml")
+  glob("[!.]**/pom.xml")
+  也读取根目录的 README.md、CONTRIBUTING.md（如果存在）
+
+Step 2 — read 读取 Step 1 中找到的文件，提取依赖、脚本命令、规范配置等信息
 ${monorepoNote}
 
-请直接输出 Markdown 格式文档，必须包含以下章节：
+请直接输出 Markdown 格式文档，包含以下章节：
 
-## 编码规范
-  基于实际扫描到的配置文件内容填写。例如：使用了哪些 ESLint 插件/规则集、Prettier 配置要点、TypeScript 严格模式是否开启等。
-  如果没有找到相关配置文件，标记 TODO。
+## 技术栈
 
-## 分支策略
-  如果能从 CI/CD 配置、README、CONTRIBUTING.md 等文件推断出分支策略则填写，否则标记 TODO。
+用一个简短的列表列出项目的核心技术栈（语言、框架、运行时、包管理器等）。例如：
+- 语言：TypeScript
+- 运行时：Node.js 20
+- 框架：NestJS
+- 包管理器：pnpm
 
-## 提交规范
-  如果项目配置了 commitlint、husky 等则基于实际配置填写，否则标记 TODO。
+## 开发命令
 
-## 构建与部署
-  必须基于 package.json / Makefile 等实际确认的命令填写。包括：
-  - 安装依赖命令
-  - 构建命令
-  - 开发模式启动命令
-  - Lint / 格式化命令
-  - 部署方式（如果能从配置推断）
-${perProjectSection}
+这是最重要的章节。必须基于 package.json / Makefile 等实际确认的命令，列出开发过程中需要用到的所有命令。格式为直接可执行的命令行，例如：
+
+\`\`\`bash
+# 安装依赖
+pnpm install
+
+# 开发模式启动
+pnpm dev
+
+# 构建
+pnpm build
+
+# Lint 检查
+pnpm lint
+
+# 运行测试
+pnpm test
+\`\`\`
+
+如果有多个子项目，分别列出各子项目的命令。
+
+## 开发流程
+
+用**编号步骤**描述 Agent 拿到一个开发任务后应该遵循的标准流程。例如：
+1. 阅读需求，理解要实现的功能
+2. 确认相关的代码模块和文件位置
+3. 编写代码实现功能
+4. 运行 lint 检查并修复问题
+5. 运行测试确认无回归
+6. ...
+
+根据项目实际情况调整步骤。如果项目配置了 pre-commit hooks / lint-staged 等，在相关步骤中提及。
+
+## 技术栈最佳实践
+
+根据检测到的技术栈，给出针对性的开发最佳实践要点。这些是 Agent 编码时应该遵循的原则。
+
+**要求**：根据项目实际使用的技术栈来写，不同技术栈侧重点不同。例如：
+- **TypeScript 项目**：类型安全要求、避免 any、使用严格模式等
+- **React 项目**：组件设计模式、hooks 使用规范、状态管理方式等
+- **Vue 项目**：组合式 API vs 选项式 API、组件通信方式等
+- **NestJS 项目**：模块组织、依赖注入、DTO 验证等
+- **Node.js 服务端**：错误处理、日志规范、中间件模式等
+- **Go 项目**：错误处理模式、并发模式、项目布局等
+- **Python 项目**：类型提示、虚拟环境、代码风格等
+
+每条最佳实践应该简短明确（1-2 句话），列出 5-10 条最重要的即可，不要面面俱到。
+
+## 分支与提交规范
+
+简要说明分支策略和提交规范。如果项目有 commitlint 等配置则基于实际配置写，否则标记 TODO。此章节尽量简短，3-5 行即可。
 
 ## 重要规则：TODO 标记
 对于无法从项目中确定、需要用户补充的内容，必须使用以下格式标记：
 
 > ⚠️ **TODO**: 请补充具体说明（这里写上你认为用户应该补充什么）
-
-例如：
-> ⚠️ **TODO**: 请补充分支命名规范和主要分支的用途说明
 
 严格要求：直接以 ## 标题开头，禁止输出任何过渡性语句、思考过程或额外解释。`;
 }
@@ -174,13 +242,29 @@ ${subProjectList}
 
   return `请分析当前工作空间，生成一份自测与验收规范文档。
 
-使用 glob 和 read 工具扫描项目，重点读取：
-1. 测试框架配置（jest.config、vitest.config、mocha、pytest 等）
-2. package.json 中的测试相关 scripts
-3. 测试目录结构（__tests__、test/、tests/、spec/ 等）
-4. E2E 测试配置（Playwright、Cypress、Selenium 等）
-5. 测试覆盖率配置（c8、istanbul、nyc 等）
-6. CI 中的测试步骤
+按以下步骤扫描项目（严格使用给定的 glob 模式，禁止扫描 \`.\` 开头的目录）：
+
+Step 1 — 定位测试相关配置文件：
+  glob("[!.]**/jest.config*")
+  glob("[!.]**/vitest.config*")
+  glob("[!.]**/playwright.config*")
+  glob("[!.]**/cypress.config*")
+  glob("[!.]**/.nycrc*")
+  glob("[!.]**/pytest.ini")
+  glob("[!.]**/setup.cfg")
+  glob("[!.]**/package.json")
+
+Step 2 — 定位测试目录和 CI 配置：
+  glob("[!.]**/__tests__/**/*")
+  glob("[!.]**/test/**/*")
+  glob("[!.]**/tests/**/*")
+  glob("[!.]**/spec/**/*")
+  glob("[!.]**/e2e/**/*")
+  glob("[!.]**/.github/workflows/*")
+  glob("[!.]**/Jenkinsfile")
+  glob("[!.]**/.gitlab-ci.yml")
+
+Step 3 — read 读取 Step 1-2 中找到的配置文件，提取测试框架、命令、覆盖率要求等信息
 ${monorepoNote}
 
 请直接输出 Markdown 格式文档，必须包含以下章节：
@@ -559,13 +643,7 @@ function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
         .map(
           (p) => `### ${p}
 
-#### 编码规范
-
-> ⚠️ **TODO**: 请补充 ${p} 的编码规范
-
-#### 构建与部署
-
-> ⚠️ **TODO**: 请补充 ${p} 的构建与部署命令
+> ⚠️ **TODO**: 请补充 ${p} 的开发命令和技术栈最佳实践
 `
         )
         .join('\n')
@@ -594,21 +672,25 @@ function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
 
 _AI 分析未能运行，以下为模板骨架，请补充标记为 TODO 的部分_
 
-## 编码规范
+## 技术栈
 
-> ⚠️ **TODO**: 请补充项目的编码规范（ESLint 规则、Prettier 配置等）
+> ⚠️ **TODO**: 请补充项目的核心技术栈（语言、框架、运行时、包管理器等）
 
-## 分支策略
+## 开发命令
 
-> ⚠️ **TODO**: 请补充分支命名规范和主要分支的用途说明
+> ⚠️ **TODO**: 请补充安装依赖、开发启动、构建、lint、测试等命令
 
-## 提交规范
+## 开发流程
 
-> ⚠️ **TODO**: 请补充 Git 提交信息规范
+> ⚠️ **TODO**: 请补充开发任务的标准执行步骤
 
-## 构建与部署
+## 技术栈最佳实践
 
-> ⚠️ **TODO**: 请补充构建、开发、部署相关命令
+> ⚠️ **TODO**: 请补充基于项目技术栈的开发最佳实践要点
+
+## 分支与提交规范
+
+> ⚠️ **TODO**: 请简要补充分支策略和提交规范
 ${perProjectDev}`,
     'validation.md': `# 自测与验收规范
 

@@ -104,14 +104,58 @@ interface AgentFrontmatter {
   permission: Record<string, string | Record<string, string>>;
 }
 
-/** Build skill permission for roles that should not see PM-only skills */
-function buildSkillPermission(): Record<string, string> {
-  const pmOnlySkills = DEFAULT_SKILLS.filter(
-    (s) => s.roles.length === 1 && s.roles[0] === 'PM'
-  ).map((s) => getSkillDirName(s.pkg));
+/**
+ * Scan project-level skill directories to find locally installed skill names.
+ * opencode discovers skills from these project-local paths:
+ *   .opencode/skills/<name>/SKILL.md
+ *   .claude/skills/<name>/SKILL.md
+ *   .agents/skills/<name>/SKILL.md
+ */
+function scanProjectSkills(workspace: string): string[] {
+  const skillDirs = [
+    path.join(workspace, '.opencode', 'skills'),
+    path.join(workspace, '.claude', 'skills'),
+    path.join(workspace, '.agents', 'skills'),
+  ];
+  const names = new Set<string>();
+  for (const dir of skillDirs) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) names.add(entry.name);
+      }
+    } catch {
+      /* unreadable dir */
+    }
+  }
+  return [...names];
+}
+
+/**
+ * Build skill permission allowlist for a given role.
+ * Strategy: deny all by default ("*": "deny"), explicitly allow only:
+ *   1. DEFAULT_SKILLS assigned to this role
+ *   2. Project-locally installed skills
+ * This prevents global skills from polluting the workspace.
+ */
+function buildSkillPermission(role: string, workspace: string): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const name of pmOnlySkills) result[name] = 'deny';
-  result['*'] = 'allow';
+
+  // Allow DEFAULT_SKILLS assigned to this role
+  for (const skill of DEFAULT_SKILLS) {
+    if (skill.roles.includes(role)) {
+      result[getSkillDirName(skill.pkg)] = 'allow';
+    }
+  }
+
+  // Allow all project-locally installed skills
+  for (const name of scanProjectSkills(workspace)) {
+    result[name] = 'allow';
+  }
+
+  // Deny everything else (blocks global skills not in the allowlist)
+  result['*'] = 'deny';
   return result;
 }
 
@@ -130,48 +174,52 @@ function buildToolConfig(
   return { ...tools, ...extraTools };
 }
 
-const AGENT_CONFIGS: Record<string, AgentFrontmatter> = {
-  PM: {
-    description: '产品经理 - 需求管理、方案设计、任务拆分、进度管控、用户沟通',
-    mode: 'subagent',
-    tools: buildToolConfig('PM', {
-      read: true,
-      write: true,
-      edit: true,
-      bash: true,
-      glob: true,
-      grep: true,
-    }),
-    permission: {
-      write: {
-        '.win-agent/roles/*': 'allow',
-        '*': 'deny',
+/** Build agent configs with workspace-aware skill permissions */
+function buildAgentConfigs(workspace: string): Record<string, AgentFrontmatter> {
+  return {
+    PM: {
+      description: '产品经理 - 需求管理、方案设计、任务拆分、进度管控、用户沟通',
+      mode: 'subagent',
+      tools: buildToolConfig('PM', {
+        read: true,
+        write: true,
+        edit: true,
+        bash: true,
+        glob: true,
+        grep: true,
+      }),
+      permission: {
+        write: {
+          '.win-agent/roles/*': 'allow',
+          '*': 'deny',
+        },
+        edit: {
+          '.win-agent/roles/*': 'allow',
+          '*': 'deny',
+        },
+        bash: 'allow',
+        skill: buildSkillPermission('PM', workspace),
       },
-      edit: {
-        '.win-agent/roles/*': 'allow',
-        '*': 'deny',
+    },
+    DEV: {
+      description: '程序员 - 代码实现、自测、任务状态更新',
+      mode: 'subagent',
+      tools: buildToolConfig('DEV', {
+        read: true,
+        write: true,
+        edit: true,
+        bash: true,
+        glob: true,
+        grep: true,
+      }),
+      permission: {
+        edit: 'allow',
+        bash: 'allow',
+        skill: buildSkillPermission('DEV', workspace),
       },
-      bash: 'allow',
     },
-  },
-  DEV: {
-    description: '程序员 - 代码实现、自测、任务状态更新',
-    mode: 'subagent',
-    tools: buildToolConfig('DEV', {
-      read: true,
-      write: true,
-      edit: true,
-      bash: true,
-      glob: true,
-      grep: true,
-    }),
-    permission: {
-      edit: 'allow',
-      bash: 'allow',
-      skill: buildSkillPermission(),
-    },
-  },
-};
+  };
+}
 
 /**
  * Generate YAML frontmatter string from agent config.
@@ -231,9 +279,10 @@ export function syncAgents(workspace: string): string[] {
     fs.writeFileSync(configFile, JSON.stringify(opencodeConfig, null, 2), 'utf-8');
   }
 
+  const agentConfigs = buildAgentConfigs(workspace);
   const synced: string[] = [];
 
-  for (const [role, config] of Object.entries(AGENT_CONFIGS)) {
+  for (const [role, config] of Object.entries(agentConfigs)) {
     const promptFile = path.join(rolesDir, `${role}.md`);
     if (!fs.existsSync(promptFile)) {
       console.log(`   ⚠️  角色文件不存在: ${role}.md`);
@@ -270,7 +319,7 @@ export function deployTools(workspace: string): void {
   if (fs.existsSync(legacyFile)) fs.unlinkSync(legacyFile);
 
   // Generate per-role database tools with hardcoded role name
-  for (const role of Object.keys(AGENT_CONFIGS)) {
+  for (const role of ['PM', 'DEV']) {
     const toolContent = getDatabaseToolContent(workspace, role);
     const toolFile = path.join(toolsDir, `database_${role}.ts`);
     fs.writeFileSync(toolFile, toolContent, 'utf-8');

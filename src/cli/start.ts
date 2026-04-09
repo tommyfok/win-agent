@@ -10,6 +10,7 @@ import { syncAgents, deployTools } from '../workspace/sync-agents.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
 import { hasTodoMarkers } from './onboarding.js';
+import { checkRecommendedSkills, printSkillRecommendations } from './skills.js';
 
 // Re-export for stop command compatibility
 export { getServerHandle, getSessionManager } from './engine.js';
@@ -92,6 +93,26 @@ async function _startCommand() {
     process.exit(1);
   }
   await checkRoleFilesReviewed(workspace);
+
+  // ── Skills 推荐检查 ──
+  console.log('\n   Skills 检查...');
+  const skillResult = checkRecommendedSkills(workspace);
+  if (printSkillRecommendations(skillResult)) {
+    const { confirm } = await import('@inquirer/prompts');
+    const skipSkills = await confirm({
+      message: '是否跳过 Skills 安装，继续启动？',
+      default: true,
+    });
+    if (!skipSkills) {
+      console.log('\n   请安装上述 Skills 后重新启动：npx win-agent start');
+      removePidFile();
+      process.exit(0);
+    }
+  } else if (skillResult.detectedTechs.length > 0) {
+    console.log(
+      `   ✓ 技术栈: ${skillResult.detectedTechs.map((t) => t.label).join(', ')}`
+    );
+  }
 
   // ── 5️⃣ 启动后台引擎 ──
   console.log('\n5️⃣  启动后台引擎');
