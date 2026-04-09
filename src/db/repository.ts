@@ -1,4 +1,4 @@
-import { getDb } from "./connection.js";
+import { getDb } from './connection.js';
 
 /** Cache of whether each table has an updated_at column (avoids repeated PRAGMA queries). */
 const tableHasUpdatedAt = new Map<string, boolean>();
@@ -27,7 +27,7 @@ export function select<T = Record<string, SqlValue>>(
       if (value === null) {
         clauses.push(`${key} IS NULL`);
       } else if (Array.isArray(value)) {
-        const placeholders = (value as SqlValue[]).map(() => "?").join(", ");
+        const placeholders = (value as SqlValue[]).map(() => '?').join(', ');
         clauses.push(`${key} IN (${placeholders})`);
         params.push(...(value as SqlValue[]));
       } else {
@@ -35,7 +35,7 @@ export function select<T = Record<string, SqlValue>>(
         params.push(value);
       }
     }
-    sql += ` WHERE ${clauses.join(" AND ")}`;
+    sql += ` WHERE ${clauses.join(' AND ')}`;
   }
 
   if (options?.orderBy) {
@@ -63,8 +63,8 @@ export function insert(
 ): { lastInsertRowid: number | bigint } {
   const db = getDb();
   const keys = Object.keys(data);
-  const placeholders = keys.map(() => "?").join(", ");
-  const sql = `INSERT INTO ${table} (${keys.join(", ")}) VALUES (${placeholders})`;
+  const placeholders = keys.map(() => '?').join(', ');
+  const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
   const values = keys.map((k) => data[k]);
   const result = db.prepare(sql).run(...values);
   return { lastInsertRowid: result.lastInsertRowid };
@@ -88,11 +88,11 @@ export function update(
     let hasCol = tableHasUpdatedAt.get(table);
     if (hasCol === undefined) {
       const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-      hasCol = cols.some((c) => c.name === "updated_at");
+      hasCol = cols.some((c) => c.name === 'updated_at');
       tableHasUpdatedAt.set(table, hasCol);
     }
     if (hasCol) {
-      setClauses.push("updated_at = CURRENT_TIMESTAMP");
+      setClauses.push('updated_at = CURRENT_TIMESTAMP');
     }
   }
 
@@ -106,7 +106,7 @@ export function update(
     }
   }
 
-  const sql = `UPDATE ${table} SET ${setClauses.join(", ")} WHERE ${whereClauses.join(" AND ")}`;
+  const sql = `UPDATE ${table} SET ${setClauses.join(', ')} WHERE ${whereClauses.join(' AND ')}`;
   const result = db.prepare(sql).run(...params);
   return { changes: result.changes };
 }
@@ -125,15 +125,12 @@ export function del(table: string, where: Record<string, SqlValue>): { changes: 
     }
   }
 
-  const sql = `DELETE FROM ${table} WHERE ${clauses.join(" AND ")}`;
+  const sql = `DELETE FROM ${table} WHERE ${clauses.join(' AND ')}`;
   const result = db.prepare(sql).run(...params);
   return { changes: result.changes };
 }
 
-export function rawQuery<T = Record<string, SqlValue>>(
-  sql: string,
-  params: SqlValue[] = []
-): T[] {
+export function rawQuery<T = Record<string, SqlValue>>(sql: string, params: SqlValue[] = []): T[] {
   const db = getDb();
   return db.prepare(sql).all(...params) as T[];
 }

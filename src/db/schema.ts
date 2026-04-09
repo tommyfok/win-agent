@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type Database from 'better-sqlite3';
 
 const TABLE_SCHEMAS: Record<string, string> = {
   messages: `
@@ -176,34 +176,34 @@ function getVectorTableSQL(): string[] {
 
 /** Indexes for scheduler polling and common queries */
 const INDEX_STATEMENTS: string[] = [
-  "CREATE INDEX IF NOT EXISTS idx_messages_dispatch ON messages(to_role, status)",
-  "CREATE INDEX IF NOT EXISTS idx_messages_workflow ON messages(related_workflow_id)",
-  "CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id)",
-  "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, assigned_to)",
-  "CREATE INDEX IF NOT EXISTS idx_tasks_iteration ON tasks(iteration)",
-  "CREATE INDEX IF NOT EXISTS idx_memory_role ON memory(role, created_at)",
-  "CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)",
-  "CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, submitted_by)",
-  "CREATE INDEX IF NOT EXISTS idx_role_outputs_role ON role_outputs(role, created_at)",
-  "CREATE INDEX IF NOT EXISTS idx_role_outputs_workflow ON role_outputs(related_workflow_id)",
-  "CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)",
+  'CREATE INDEX IF NOT EXISTS idx_messages_dispatch ON messages(to_role, status)',
+  'CREATE INDEX IF NOT EXISTS idx_messages_workflow ON messages(related_workflow_id)',
+  'CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id)',
+  'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, assigned_to)',
+  'CREATE INDEX IF NOT EXISTS idx_tasks_iteration ON tasks(iteration)',
+  'CREATE INDEX IF NOT EXISTS idx_memory_role ON memory(role, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, submitted_by)',
+  'CREATE INDEX IF NOT EXISTS idx_role_outputs_role ON role_outputs(role, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_role_outputs_workflow ON role_outputs(related_workflow_id)',
+  'CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)',
 ];
 
 // Table creation order matters due to foreign key references
 const CREATE_ORDER = [
-  "workflow_instances",
-  "tasks",
-  "task_dependencies",
-  "messages",
-  "knowledge",
-  "logs",
-  "memory",
-  "iterations",
-  "proposals",
-  "role_permissions",
-  "project_config",
-  "role_outputs",
-  "task_events",
+  'workflow_instances',
+  'tasks',
+  'task_dependencies',
+  'messages',
+  'knowledge',
+  'logs',
+  'memory',
+  'iterations',
+  'proposals',
+  'role_permissions',
+  'project_config',
+  'role_outputs',
+  'task_events',
 ];
 
 export function createAllTables(db: Database.Database): void {
@@ -233,8 +233,8 @@ export function getMissingTables(db: Database.Database): string[] {
     }
   }
   // Check virtual tables
-  if (!existing.has("knowledge_vec")) missing.push("knowledge_vec");
-  if (!existing.has("memory_vec")) missing.push("memory_vec");
+  if (!existing.has('knowledge_vec')) missing.push('knowledge_vec');
+  if (!existing.has('memory_vec')) missing.push('memory_vec');
   return missing;
 }
 
@@ -247,10 +247,10 @@ export function patchMissingTables(db: Database.Database): string[] {
   }
   // Patch virtual tables
   const vecSQL = getVectorTableSQL();
-  if (missing.includes("knowledge_vec")) {
+  if (missing.includes('knowledge_vec')) {
     db.exec(vecSQL[0]);
   }
-  if (missing.includes("memory_vec")) {
+  if (missing.includes('memory_vec')) {
     db.exec(vecSQL[1]);
   }
   // Always ensure indexes exist

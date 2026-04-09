@@ -1,14 +1,14 @@
-import fs from "node:fs";
-import path from "node:path";
-import { execSync, spawn } from "node:child_process";
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
-import { loadConfig, type ProviderConfig, type WinAgentConfig } from "../config/index.js";
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync, spawn } from 'node:child_process';
+import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
+import { loadConfig, type ProviderConfig, type WinAgentConfig } from '../config/index.js';
 
 /** Build Basic Auth headers if serverPassword is configured */
 function buildAuthHeaders(config: WinAgentConfig): Record<string, string> {
   if (!config.serverPassword) return {};
-  const user = "opencode";
-  const credentials = Buffer.from(`${user}:${config.serverPassword}`).toString("base64");
+  const user = 'opencode';
+  const credentials = Buffer.from(`${user}:${config.serverPassword}`).toString('base64');
   return { Authorization: `Basic ${credentials}` };
 }
 
@@ -28,18 +28,18 @@ interface ServerInfo {
 }
 
 function serverInfoFile(workspace: string): string {
-  return path.join(workspace, ".win-agent", "opencode-server.json");
+  return path.join(workspace, '.win-agent', 'opencode-server.json');
 }
 
 function saveServerInfo(workspace: string, info: ServerInfo): void {
-  fs.writeFileSync(serverInfoFile(workspace), JSON.stringify(info, null, 2), "utf-8");
+  fs.writeFileSync(serverInfoFile(workspace), JSON.stringify(info, null, 2), 'utf-8');
 }
 
 function loadServerInfo(workspace: string): ServerInfo | null {
   const file = serverInfoFile(workspace);
   if (!fs.existsSync(file)) return null;
   try {
-    return JSON.parse(fs.readFileSync(file, "utf-8"));
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
   } catch {
     return null;
   }
@@ -54,11 +54,11 @@ export function removeServerInfo(workspace: string): void {
  * Build opencode Config from win-agent's provider config.
  */
 function buildOpencodeConfig(provider: ProviderConfig) {
-  const isCustom = provider.type === "custom-openai" || provider.type === "custom-anthropic";
+  const isCustom = provider.type === 'custom-openai' || provider.type === 'custom-anthropic';
 
   if (isCustom) {
     const npm =
-      provider.type === "custom-anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai-compatible";
+      provider.type === 'custom-anthropic' ? '@ai-sdk/anthropic' : '@ai-sdk/openai-compatible';
     return {
       model: `custom/${provider.model}`,
       provider: {
@@ -78,8 +78,8 @@ function buildOpencodeConfig(provider: ProviderConfig) {
         },
       },
       permission: {
-        edit: "allow" as const,
-        bash: "allow" as const,
+        edit: 'allow' as const,
+        bash: 'allow' as const,
       },
     };
   }
@@ -95,8 +95,8 @@ function buildOpencodeConfig(provider: ProviderConfig) {
       },
     },
     permission: {
-      edit: "allow" as const,
-      bash: "allow" as const,
+      edit: 'allow' as const,
+      bash: 'allow' as const,
     },
   };
 }
@@ -110,7 +110,7 @@ async function tryConnect(url: string, workspace: string): Promise<OpencodeClien
     const config = loadConfig(workspace);
     const client = createOpencodeClient({ baseUrl: url, headers: buildAuthHeaders(config) });
     // Load our persisted session IDs
-    const { SessionManager } = await import("./session-manager.js");
+    const { SessionManager } = await import('./session-manager.js');
     const savedSessions = SessionManager.loadPersistedSessions(workspace);
     const pmSessionId = savedSessions?.PM;
     if (pmSessionId) {
@@ -135,16 +135,16 @@ async function tryConnect(url: string, workspace: string): Promise<OpencodeClien
  * opencode dynamically imports these packages for custom providers.
  */
 function ensureOpencodePackages(workspace: string, provider: ProviderConfig): void {
-  const opencodeDir = path.join(workspace, ".opencode");
+  const opencodeDir = path.join(workspace, '.opencode');
 
   // Ensure .opencode/ dir and package.json exist so npm install works
   if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
-  const pkgJsonPath = path.join(opencodeDir, "package.json");
+  const pkgJsonPath = path.join(opencodeDir, 'package.json');
   if (!fs.existsSync(pkgJsonPath)) {
     fs.writeFileSync(
       pkgJsonPath,
-      JSON.stringify({ name: "opencode-workspace", private: true }, null, 2),
-      "utf-8"
+      JSON.stringify({ name: 'opencode-workspace', private: true }, null, 2),
+      'utf-8'
     );
   }
 
@@ -152,35 +152,35 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
   const needed: string[] = [];
 
   // 1. Provider SDK package (for custom providers)
-  const isCustom = provider.type === "custom-openai" || provider.type === "custom-anthropic";
+  const isCustom = provider.type === 'custom-openai' || provider.type === 'custom-anthropic';
   if (isCustom) {
     const npm =
-      provider.type === "custom-anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai-compatible";
-    const pkgDir = path.join(opencodeDir, "node_modules", ...npm.split("/"));
+      provider.type === 'custom-anthropic' ? '@ai-sdk/anthropic' : '@ai-sdk/openai-compatible';
+    const pkgDir = path.join(opencodeDir, 'node_modules', ...npm.split('/'));
     if (!fs.existsSync(pkgDir)) needed.push(npm);
   }
 
   // 2. Tool dependencies (required by .opencode/tools/*.ts)
   // bun:sqlite is built-in; only sqlite-vec needs npm install
-  const toolDeps = ["sqlite-vec"];
+  const toolDeps = ['sqlite-vec'];
   for (const dep of toolDeps) {
-    const depDir = path.join(opencodeDir, "node_modules", dep);
+    const depDir = path.join(opencodeDir, 'node_modules', dep);
     if (!fs.existsSync(depDir)) needed.push(dep);
   }
 
   if (needed.length === 0) return;
 
-  console.log(`   → 安装 opencode 依赖: ${needed.join(", ")}...`);
+  console.log(`   → 安装 opencode 依赖: ${needed.join(', ')}...`);
   try {
-    execSync(`npm install --save --registry=https://registry.npmmirror.com ${needed.join(" ")}`, {
+    execSync(`npm install --save --registry=https://registry.npmmirror.com ${needed.join(' ')}`, {
       cwd: opencodeDir,
-      stdio: "pipe",
+      stdio: 'pipe',
       timeout: 120000,
     });
     console.log(`   ✓ 依赖已安装`);
   } catch (err) {
     const error = Object.assign(new Error(`Failed to install opencode packages: ${err}`), {
-      code: "INSTALL_FAILED",
+      code: 'INSTALL_FAILED',
     });
     throw error;
   }
@@ -196,7 +196,7 @@ function ensureOpencodePackages(workspace: string, provider: ProviderConfig): vo
 export async function startOpencodeServer(workspace: string): Promise<OpencodeServerHandle> {
   const config = loadConfig(workspace);
   if (!config.provider) {
-    throw new Error("Provider not configured. Run `win-agent start` in your project directory.");
+    throw new Error('Provider not configured. Run `win-agent start` in your project directory.');
   }
 
   // 1. Try to reuse existing server
@@ -223,8 +223,8 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
   const opcodeConfig = buildOpencodeConfig(config.provider);
 
   // Spawn opencode server manually so we can see its stderr/stdout
-  const opcodeConfigWithLog = { ...opcodeConfig, logLevel: "DEBUG" };
-  const proc = spawn("opencode", ["serve", `--hostname=0.0.0.0`, `--port=0`, `--log-level=DEBUG`], {
+  const opcodeConfigWithLog = { ...opcodeConfig, logLevel: 'DEBUG' };
+  const proc = spawn('opencode', ['serve', `--hostname=0.0.0.0`, `--port=0`, `--log-level=DEBUG`], {
     env: {
       ...process.env,
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opcodeConfigWithLog),
@@ -233,26 +233,26 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
     // Detach so the child doesn't receive SIGINT from the terminal's process group.
     // This lets us write memories before shutting down the server.
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Don't let the detached child keep the parent alive if cleanup forgets to kill it.
   proc.unref();
 
   // Forward stderr to console for debugging
-  proc.stderr?.on("data", (chunk: Buffer) => {
+  proc.stderr?.on('data', (chunk: Buffer) => {
     const text = chunk.toString().trim();
     if (text) console.log(`   [opencode] ${text}`);
   });
 
   // Wait for server to start (parse stdout for listening message)
   const serverUrl = await new Promise<string>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("opencode server start timeout")), 10000);
-    let output = "";
-    proc.stdout?.on("data", (chunk: Buffer) => {
+    const timeout = setTimeout(() => reject(new Error('opencode server start timeout')), 10000);
+    let output = '';
+    proc.stdout?.on('data', (chunk: Buffer) => {
       output += chunk.toString();
-      const lines = output.split("\n");
+      const lines = output.split('\n');
       for (const line of lines) {
-        if (line.startsWith("opencode server listening")) {
+        if (line.startsWith('opencode server listening')) {
           const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
           if (match) {
             clearTimeout(timeout);
@@ -263,30 +263,30 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
       }
     });
     // Also forward stdout after startup
-    proc.stdout?.on("data", (chunk: Buffer) => {
+    proc.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trim();
-      if (text && !text.includes("server listening")) {
+      if (text && !text.includes('server listening')) {
         console.log(`   [opencode:stdout] ${text}`);
       }
     });
-    proc.on("exit", (code) => {
+    proc.on('exit', (code) => {
       clearTimeout(timeout);
       reject(new Error(`opencode exited with code ${code}\n${output}`));
     });
-    proc.on("error", (err) => {
+    proc.on('error', (err) => {
       clearTimeout(timeout);
       reject(err);
     });
   });
 
-  const clientUrl = serverUrl.replace("://0.0.0.0", "://127.0.0.1");
+  const clientUrl = serverUrl.replace('://0.0.0.0', '://127.0.0.1');
   const client = createOpencodeClient({ baseUrl: clientUrl, headers: buildAuthHeaders(config) });
   const server = {
     url: serverUrl,
     close: () => {
       try {
         // Kill the detached process group
-        if (proc.pid) process.kill(-proc.pid, "SIGTERM");
+        if (proc.pid) process.kill(-proc.pid, 'SIGTERM');
       } catch {
         try {
           proc.kill();
@@ -307,7 +307,7 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
 
   // Persist server info for reuse
   // Replace 0.0.0.0 with 127.0.0.1 — browsers can't access 0.0.0.0
-  const accessibleUrl = server.url.replace("://0.0.0.0", "://127.0.0.1");
+  const accessibleUrl = server.url.replace('://0.0.0.0', '://127.0.0.1');
   const parsedUrl = new URL(accessibleUrl);
   saveServerInfo(workspace, {
     url: accessibleUrl,

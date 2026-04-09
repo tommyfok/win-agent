@@ -1,13 +1,13 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { confirm, select } from "@inquirer/prompts";
-import { openDb, closeDb, getDb } from "../db/connection.js";
-import { select as dbSelect } from "../db/repository.js";
-import { getDbPath } from "../config/index.js";
-import { syncAgents, deployTools } from "../workspace/sync-agents.js";
-import { startOpencodeServer, removeServerInfo } from "../engine/opencode-server.js";
-import { snapshotRoleMtimes } from "./onboarding.js";
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { confirm, select } from '@inquirer/prompts';
+import { openDb, closeDb, getDb } from '../db/connection.js';
+import { select as dbSelect } from '../db/repository.js';
+import { getDbPath } from '../config/index.js';
+import { syncAgents, deployTools } from '../workspace/sync-agents.js';
+import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
+import { snapshotRoleMtimes } from './onboarding.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,13 +18,13 @@ const __dirname = path.dirname(__filename);
  */
 function getTemplatesDir(): string {
   const candidates = [
-    path.resolve(__dirname, "../templates"), // dev: src/workspace/ -> src/templates/
-    path.resolve(__dirname, "../src/templates"), // dist: dist/ -> src/templates/
+    path.resolve(__dirname, '../templates'), // dev: src/workspace/ -> src/templates/
+    path.resolve(__dirname, '../src/templates'), // dist: dist/ -> src/templates/
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;
   }
-  throw new Error("找不到包内模板目录，已尝试:\n" + candidates.map((c) => `  ${c}`).join("\n"));
+  throw new Error('找不到包内模板目录，已尝试:\n' + candidates.map((c) => `  ${c}`).join('\n'));
 }
 
 const WORKSPACE_ANALYSIS_PROMPT = `请分析当前工作空间，生成一份项目技术概览文档。
@@ -52,9 +52,9 @@ export async function updateCommand() {
   } catch (err: unknown) {
     if (
       err instanceof Error &&
-      (err.name === "ExitPromptError" || err.message?.includes("User force closed"))
+      (err.name === 'ExitPromptError' || err.message?.includes('User force closed'))
     ) {
-      console.log("\n👋 已取消");
+      console.log('\n👋 已取消');
       process.exit(0);
     }
     throw err;
@@ -63,16 +63,16 @@ export async function updateCommand() {
 
 async function _updateCommand() {
   const workspace = process.cwd();
-  const rolesDir = path.join(workspace, ".win-agent", "roles");
+  const rolesDir = path.join(workspace, '.win-agent', 'roles');
 
   if (!fs.existsSync(rolesDir)) {
-    console.log("⚠️  工作空间未初始化，请先执行: npx win-agent onboard");
+    console.log('⚠️  工作空间未初始化，请先执行: npx win-agent onboard');
     process.exit(1);
   }
 
   let templatesDir: string;
   try {
-    templatesDir = path.join(getTemplatesDir(), "roles");
+    templatesDir = path.join(getTemplatesDir(), 'roles');
   } catch (err: unknown) {
     console.log(`❌ ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
@@ -86,7 +86,7 @@ async function _updateCommand() {
     openDb(dbPath);
   }
 
-  console.log("\n📦 win-agent update\n");
+  console.log('\n📦 win-agent update\n');
 
   // ── Step 1: 更新 overview.md ──
   await updateOverview(workspace);
@@ -105,30 +105,30 @@ async function _updateCommand() {
   snapshotRoleMtimes(workspace);
 
   closeDb();
-  console.log("\n✅ 更新完成");
-  console.log("   如引擎正在运行，重启后生效: npx win-agent stop && npx win-agent start");
+  console.log('\n✅ 更新完成');
+  console.log('   如引擎正在运行，重启后生效: npx win-agent stop && npx win-agent start');
 }
 
 // ─── Step 1: 更新 overview.md ─────────────────────────────────────────────────
 
 async function updateOverview(workspace: string) {
-  console.log("1️⃣  更新项目概览（overview.md）");
+  console.log('1️⃣  更新项目概览（overview.md）');
 
   const hasCode = detectExistingCode(workspace);
   if (!hasCode) {
-    console.log("   空目录，跳过");
+    console.log('   空目录，跳过');
     return;
   }
 
-  const overviewPath = path.join(workspace, ".win-agent", "overview.md");
+  const overviewPath = path.join(workspace, '.win-agent', 'overview.md');
   const exists = fs.existsSync(overviewPath);
 
   const doUpdate = await confirm({
-    message: exists ? "重新生成 overview.md？" : "生成 overview.md？",
+    message: exists ? '重新生成 overview.md？' : '生成 overview.md？',
     default: !exists,
   });
   if (!doUpdate) {
-    console.log("   已跳过");
+    console.log('   已跳过');
     return;
   }
 
@@ -137,38 +137,38 @@ async function updateOverview(workspace: string) {
     serverHandle = await startOpencodeServer(workspace);
     const { client } = serverHandle;
 
-    const session = await client.session.create({ body: { title: "wa-update-overview" } });
+    const session = await client.session.create({ body: { title: 'wa-update-overview' } });
     const sessionId = session.data!.id;
 
-    console.log("   → 分析中，请稍候...");
+    console.log('   → 分析中，请稍候...');
     const result = await client.session.prompt({
       path: { id: sessionId },
       body: {
-        agent: "PM",
-        parts: [{ type: "text", text: WORKSPACE_ANALYSIS_PROMPT }],
+        agent: 'PM',
+        parts: [{ type: 'text', text: WORKSPACE_ANALYSIS_PROMPT }],
       },
     });
 
     const textParts = result.data?.parts?.filter(
-      (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
+      (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
     );
-    const overview = textParts?.map((p) => p.text).join("\n") ?? "";
+    const overview = textParts?.map((p) => p.text).join('\n') ?? '';
 
     if (exists) {
-      const backupsDir = path.join(workspace, ".win-agent", "backups");
+      const backupsDir = path.join(workspace, '.win-agent', 'backups');
       fs.mkdirSync(backupsDir, { recursive: true });
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       fs.copyFileSync(overviewPath, path.join(backupsDir, `overview.${timestamp}.md`));
     }
 
     fs.writeFileSync(
       overviewPath,
       `# 项目概览\n\n_由 \`win-agent update\` 自动生成_\n\n${overview}`,
-      "utf-8"
+      'utf-8'
     );
-    console.log("   ✓ 已写入 .win-agent/overview.md");
+    console.log('   ✓ 已写入 .win-agent/overview.md');
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException)?.code === "INSTALL_FAILED") {
+    if ((err as NodeJS.ErrnoException)?.code === 'INSTALL_FAILED') {
       throw err;
     }
     console.log(`   ⚠️  概览生成失败，跳过: ${err}`);
@@ -183,68 +183,68 @@ async function updateOverview(workspace: string) {
 // ─── Step 2: 检查 overview 引用 ──────────────────────────────────────────────
 
 function ensureOverviewReference(workspace: string) {
-  console.log("\n2️⃣  检查角色文件中的 overview 引用");
+  console.log('\n2️⃣  检查角色文件中的 overview 引用');
 
-  const rolesDir = path.join(workspace, ".win-agent", "roles");
-  const overviewPath = path.join(workspace, ".win-agent", "overview.md");
+  const rolesDir = path.join(workspace, '.win-agent', 'roles');
+  const overviewPath = path.join(workspace, '.win-agent', 'overview.md');
   const overviewExists = fs.existsSync(overviewPath);
 
   if (!overviewExists) {
-    console.log("   overview.md 不存在，跳过引用检查");
+    console.log('   overview.md 不存在，跳过引用检查');
     return;
   }
 
   const projectName =
-    dbSelect<{ key: string; value: string }>("project_config", { key: "projectName" })[0]?.value ??
-    "";
+    dbSelect<{ key: string; value: string }>('project_config', { key: 'projectName' })[0]?.value ??
+    '';
   const projectDescription =
-    dbSelect<{ key: string; value: string }>("project_config", { key: "projectDescription" })[0]
-      ?.value ?? "";
+    dbSelect<{ key: string; value: string }>('project_config', { key: 'projectDescription' })[0]
+      ?.value ?? '';
 
   let fixed = 0;
   for (const file of fs.readdirSync(rolesDir)) {
-    if (!file.endsWith(".md")) continue;
+    if (!file.endsWith('.md')) continue;
     const filePath = path.join(rolesDir, file);
-    const content = fs.readFileSync(filePath, "utf-8");
+    const content = fs.readFileSync(filePath, 'utf-8');
 
     if (PROJECT_CONTEXT_SENTINEL.test(content)) {
       // Check if the existing block has the overview reference line
       const match = content.match(PROJECT_CONTEXT_SENTINEL);
-      if (match && match[0].includes("overview.md")) {
+      if (match && match[0].includes('overview.md')) {
         continue; // Already has reference
       }
       // Has project context block but missing overview reference — update it
       const block = buildProjectContextBlock(projectName, projectDescription);
       const updated = content.replace(PROJECT_CONTEXT_SENTINEL, block);
-      fs.writeFileSync(filePath, updated, "utf-8");
+      fs.writeFileSync(filePath, updated, 'utf-8');
       console.log(`   ✓ ${file}: 已补充 overview 引用`);
       fixed++;
     } else {
       // No project context block at all — inject one
       const block = buildProjectContextBlock(projectName, projectDescription);
-      const firstNewline = content.indexOf("\n") + 1;
-      const updated = content.slice(0, firstNewline) + "\n" + block + content.slice(firstNewline);
-      fs.writeFileSync(filePath, updated, "utf-8");
+      const firstNewline = content.indexOf('\n') + 1;
+      const updated = content.slice(0, firstNewline) + '\n' + block + content.slice(firstNewline);
+      fs.writeFileSync(filePath, updated, 'utf-8');
       console.log(`   ✓ ${file}: 已注入项目上下文（含 overview 引用）`);
       fixed++;
     }
   }
 
   if (fixed === 0) {
-    console.log("   ✓ 所有角色文件已包含 overview 引用");
+    console.log('   ✓ 所有角色文件已包含 overview 引用');
   }
 }
 
 function buildProjectContextBlock(projectName: string, projectDescription: string): string {
   return [
-    "<!-- win-agent:project-context -->",
-    "## 项目背景",
+    '<!-- win-agent:project-context -->',
+    '## 项目背景',
     `- **项目名称**: ${projectName}`,
     `- **项目描述**: ${projectDescription}`,
-    "- **技术概览**: 详见 `.win-agent/overview.md`",
-    "<!-- /win-agent:project-context -->",
-    "",
-  ].join("\n");
+    '- **技术概览**: 详见 `.win-agent/overview.md`',
+    '<!-- /win-agent:project-context -->',
+    '',
+  ].join('\n');
 }
 
 // ─── Step 3: AI 融合角色模板 ─────────────────────────────────────────────────
@@ -256,10 +256,10 @@ interface RoleDiff {
 }
 
 async function mergeRoleTemplates(workspace: string, templatesDir: string) {
-  console.log("\n3️⃣  角色模板融合");
+  console.log('\n3️⃣  角色模板融合');
 
-  const rolesDir = path.join(workspace, ".win-agent", "roles");
-  const templateFiles = fs.readdirSync(templatesDir).filter((f) => f.endsWith(".md"));
+  const rolesDir = path.join(workspace, '.win-agent', 'roles');
+  const templateFiles = fs.readdirSync(templatesDir).filter((f) => f.endsWith('.md'));
 
   const newFiles: string[] = [];
   const upToDate: string[] = [];
@@ -268,17 +268,17 @@ async function mergeRoleTemplates(workspace: string, templatesDir: string) {
   for (const file of templateFiles) {
     const templatePath = path.join(templatesDir, file);
     const workspacePath = path.join(rolesDir, file);
-    const templateContent = fs.readFileSync(templatePath, "utf-8");
+    const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
     if (!fs.existsSync(workspacePath)) {
       // New role file — just copy it
       fs.copyFileSync(templatePath, workspacePath);
       newFiles.push(file);
     } else {
-      const workspaceContent = fs.readFileSync(workspacePath, "utf-8");
+      const workspaceContent = fs.readFileSync(workspacePath, 'utf-8');
       // Strip project-context block before comparing (it's injected, not part of template)
-      const strippedWorkspace = workspaceContent.replace(PROJECT_CONTEXT_SENTINEL, "").trim();
-      const strippedTemplate = templateContent.replace(PROJECT_CONTEXT_SENTINEL, "").trim();
+      const strippedWorkspace = workspaceContent.replace(PROJECT_CONTEXT_SENTINEL, '').trim();
+      const strippedTemplate = templateContent.replace(PROJECT_CONTEXT_SENTINEL, '').trim();
 
       if (strippedTemplate === strippedWorkspace) {
         upToDate.push(file);
@@ -289,46 +289,46 @@ async function mergeRoleTemplates(workspace: string, templatesDir: string) {
   }
 
   if (newFiles.length > 0) {
-    console.log(`   ＋ 新增角色: ${newFiles.join(", ")}`);
+    console.log(`   ＋ 新增角色: ${newFiles.join(', ')}`);
   }
   if (upToDate.length > 0) {
-    console.log(`   ✅ 已是最新: ${upToDate.join(", ")}`);
+    console.log(`   ✅ 已是最新: ${upToDate.join(', ')}`);
   }
 
   if (diffs.length === 0) {
-    console.log("   🎉 所有角色模板均已是最新版本");
+    console.log('   🎉 所有角色模板均已是最新版本');
     return;
   }
 
   console.log(`\n   📝 发现 ${diffs.length} 个角色文件与最新模板不同:`);
   for (const d of diffs) {
-    const oldLines = d.workspaceContent.split("\n").length;
-    const newLines = d.templateContent.split("\n").length;
+    const oldLines = d.workspaceContent.split('\n').length;
+    const newLines = d.templateContent.split('\n').length;
     const delta = newLines - oldLines;
     const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
     console.log(`      ≠ ${d.file}  (${oldLines} 行 → ${newLines} 行, ${deltaStr})`);
   }
 
   const mode = await select({
-    message: "如何处理差异文件？",
+    message: '如何处理差异文件？',
     choices: [
-      { name: "AI 智能融合（推荐：分析差异，保留项目定制，合入模板更新）", value: "ai-merge" },
-      { name: "全部覆盖（丢弃所有自定义修改）", value: "overwrite" },
-      { name: "逐个确认覆盖", value: "one-by-one" },
-      { name: "跳过", value: "skip" },
+      { name: 'AI 智能融合（推荐：分析差异，保留项目定制，合入模板更新）', value: 'ai-merge' },
+      { name: '全部覆盖（丢弃所有自定义修改）', value: 'overwrite' },
+      { name: '逐个确认覆盖', value: 'one-by-one' },
+      { name: '跳过', value: 'skip' },
     ],
   });
 
-  if (mode === "skip") {
-    console.log("   已跳过");
+  if (mode === 'skip') {
+    console.log('   已跳过');
     return;
   }
 
-  const backupsDir = path.join(workspace, ".win-agent", "backups");
+  const backupsDir = path.join(workspace, '.win-agent', 'backups');
   fs.mkdirSync(backupsDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
-  if (mode === "ai-merge") {
+  if (mode === 'ai-merge') {
     await aiMergeRoles(workspace, diffs, backupsDir, timestamp);
     return;
   }
@@ -338,12 +338,12 @@ async function mergeRoleTemplates(workspace: string, templatesDir: string) {
   let skipped = 0;
 
   for (const d of diffs) {
-    if (mode === "one-by-one") {
+    if (mode === 'one-by-one') {
       let yes: boolean;
       try {
         yes = await confirm({ message: `覆盖 ${d.file}？`, default: false });
       } catch {
-        console.log("\n已取消");
+        console.log('\n已取消');
         break;
       }
       if (!yes) {
@@ -354,20 +354,18 @@ async function mergeRoleTemplates(workspace: string, templatesDir: string) {
     }
 
     // Backup
-    const backupName = `${path.basename(d.file, ".md")}.${timestamp}.md`;
-    fs.writeFileSync(path.join(backupsDir, backupName), d.workspaceContent, "utf-8");
+    const backupName = `${path.basename(d.file, '.md')}.${timestamp}.md`;
+    fs.writeFileSync(path.join(backupsDir, backupName), d.workspaceContent, 'utf-8');
 
     // Overwrite
-    const destPath = path.join(workspace, ".win-agent", "roles", d.file);
-    fs.writeFileSync(destPath, d.templateContent, "utf-8");
+    const destPath = path.join(workspace, '.win-agent', 'roles', d.file);
+    fs.writeFileSync(destPath, d.templateContent, 'utf-8');
     console.log(`   ✓ 已覆盖: ${d.file}`);
     updated++;
   }
 
   if (updated > 0 || skipped > 0) {
-    console.log(
-      `   完成: ${updated} 个已更新` + (skipped > 0 ? `，${skipped} 个已跳过` : "")
-    );
+    console.log(`   完成: ${updated} 个已更新` + (skipped > 0 ? `，${skipped} 个已跳过` : ''));
   }
 }
 
@@ -377,7 +375,7 @@ async function aiMergeRoles(
   backupsDir: string,
   timestamp: string
 ) {
-  console.log("\n   → 启动 AI 融合分析...");
+  console.log('\n   → 启动 AI 融合分析...');
 
   let serverHandle: Awaited<ReturnType<typeof startOpencodeServer>> | null = null;
   try {
@@ -388,8 +386,8 @@ async function aiMergeRoles(
       console.log(`\n   📄 融合 ${d.file}...`);
 
       // Backup before merge
-      const backupName = `${path.basename(d.file, ".md")}.${timestamp}.md`;
-      fs.writeFileSync(path.join(backupsDir, backupName), d.workspaceContent, "utf-8");
+      const backupName = `${path.basename(d.file, '.md')}.${timestamp}.md`;
+      fs.writeFileSync(path.join(backupsDir, backupName), d.workspaceContent, 'utf-8');
 
       const session = await client.session.create({
         body: { title: `wa-update-merge-${d.file}` },
@@ -401,15 +399,15 @@ async function aiMergeRoles(
       const result = await client.session.prompt({
         path: { id: sessionId },
         body: {
-          agent: "PM",
-          parts: [{ type: "text", text: mergePrompt }],
+          agent: 'PM',
+          parts: [{ type: 'text', text: mergePrompt }],
         },
       });
 
       const textParts = result.data?.parts?.filter(
-        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
+        (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
       );
-      const merged = extractMergedContent(textParts?.map((p) => p.text).join("\n") ?? "");
+      const merged = extractMergedContent(textParts?.map((p) => p.text).join('\n') ?? '');
 
       if (!merged) {
         console.log(`   ⚠️  ${d.file}: AI 未返回有效融合结果，跳过`);
@@ -417,7 +415,7 @@ async function aiMergeRoles(
       }
 
       // Show summary and confirm
-      const mergedLines = merged.split("\n").length;
+      const mergedLines = merged.split('\n').length;
       console.log(`   → ${d.file}: 融合结果 ${mergedLines} 行`);
 
       const accept = await confirm({
@@ -426,19 +424,19 @@ async function aiMergeRoles(
       });
 
       if (accept) {
-        const destPath = path.join(workspace, ".win-agent", "roles", d.file);
-        fs.writeFileSync(destPath, merged, "utf-8");
+        const destPath = path.join(workspace, '.win-agent', 'roles', d.file);
+        fs.writeFileSync(destPath, merged, 'utf-8');
         console.log(`   ✓ ${d.file}: 已更新`);
       } else {
         console.log(`   ⏭  ${d.file}: 已跳过`);
       }
     }
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException)?.code === "INSTALL_FAILED") {
+    if ((err as NodeJS.ErrnoException)?.code === 'INSTALL_FAILED') {
       throw err;
     }
     console.log(`   ⚠️  AI 融合失败: ${err}`);
-    console.log("   可重新运行 update 并选择「全部覆盖」或「逐个确认」");
+    console.log('   可重新运行 update 并选择「全部覆盖」或「逐个确认」');
   } finally {
     if (serverHandle?.owned) {
       serverHandle.close();
@@ -485,11 +483,11 @@ ${diff.templateContent}
 function extractMergedContent(response: string): string | null {
   // Extract content between ```merged and ```
   const match = response.match(/```merged\n([\s\S]*?)```/);
-  if (match) return match[1].trimEnd() + "\n";
+  if (match) return match[1].trimEnd() + '\n';
 
   // Fallback: try generic markdown code block
   const fallback = response.match(/```markdown\n([\s\S]*?)```/);
-  if (fallback) return fallback[1].trimEnd() + "\n";
+  if (fallback) return fallback[1].trimEnd() + '\n';
 
   return null;
 }
@@ -499,21 +497,21 @@ function extractMergedContent(response: string): string | null {
 function detectExistingCode(workspace: string): boolean {
   const entries = fs.readdirSync(workspace);
   const indicators = [
-    "package.json",
-    "tsconfig.json",
-    "Cargo.toml",
-    "go.mod",
-    "pom.xml",
-    "build.gradle",
-    "requirements.txt",
-    "pyproject.toml",
-    "Makefile",
-    "CMakeLists.txt",
-    "src",
-    "lib",
-    "app",
+    'package.json',
+    'tsconfig.json',
+    'Cargo.toml',
+    'go.mod',
+    'pom.xml',
+    'build.gradle',
+    'requirements.txt',
+    'pyproject.toml',
+    'Makefile',
+    'CMakeLists.txt',
+    'src',
+    'lib',
+    'app',
   ];
   return entries.some(
-    (e) => indicators.includes(e) || e.endsWith(".ts") || e.endsWith(".js") || e.endsWith(".py")
+    (e) => indicators.includes(e) || e.endsWith('.ts') || e.endsWith('.js') || e.endsWith('.py')
   );
 }

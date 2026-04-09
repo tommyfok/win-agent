@@ -1,7 +1,7 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import crypto from "node:crypto";
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 export interface ProviderConfig {
   type: string;
@@ -36,24 +36,24 @@ export interface ProviderPreset {
  * Workspace is always the current working directory.
  */
 function getWinAgentDir(workspace?: string): string {
-  return path.join(workspace ?? process.cwd(), ".win-agent");
+  return path.join(workspace ?? process.cwd(), '.win-agent');
 }
 
 // ── Global presets (~/.win-agent/providers.json) ──
 
 function globalDir(): string {
-  return path.join(os.homedir(), ".win-agent");
+  return path.join(os.homedir(), '.win-agent');
 }
 
 function presetsFile(): string {
-  return path.join(globalDir(), "providers.json");
+  return path.join(globalDir(), 'providers.json');
 }
 
 export function loadPresets(): ProviderPreset[] {
   const file = presetsFile();
   if (!fs.existsSync(file)) return [];
   try {
-    return JSON.parse(fs.readFileSync(file, "utf-8"));
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
   } catch {
     return [];
   }
@@ -62,7 +62,7 @@ export function loadPresets(): ProviderPreset[] {
 export function savePresets(presets: ProviderPreset[]): void {
   const dir = globalDir();
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(presetsFile(), JSON.stringify(presets, null, 2), "utf-8");
+  fs.writeFileSync(presetsFile(), JSON.stringify(presets, null, 2), 'utf-8');
 }
 
 /** Add or update a preset by name. */
@@ -78,11 +78,11 @@ export function upsertPreset(preset: ProviderPreset): void {
 }
 
 function configFile(workspace?: string): string {
-  return path.join(getWinAgentDir(workspace), "config.json");
+  return path.join(getWinAgentDir(workspace), 'config.json');
 }
 
 function pidFile(workspace?: string): string {
-  return path.join(getWinAgentDir(workspace), "engine.pid");
+  return path.join(getWinAgentDir(workspace), 'engine.pid');
 }
 
 export function loadConfig(workspace?: string): WinAgentConfig {
@@ -90,7 +90,7 @@ export function loadConfig(workspace?: string): WinAgentConfig {
   if (!fs.existsSync(file)) {
     return {};
   }
-  const raw = fs.readFileSync(file, "utf-8");
+  const raw = fs.readFileSync(file, 'utf-8');
   try {
     return JSON.parse(raw);
   } catch {
@@ -101,7 +101,7 @@ export function loadConfig(workspace?: string): WinAgentConfig {
 export function saveConfig(config: WinAgentConfig, workspace?: string): void {
   const dir = getWinAgentDir(workspace);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(configFile(workspace), JSON.stringify(config, null, 2), "utf-8");
+  fs.writeFileSync(configFile(workspace), JSON.stringify(config, null, 2), 'utf-8');
 }
 
 /**
@@ -111,7 +111,7 @@ export function saveConfig(config: WinAgentConfig, workspace?: string): void {
 export function ensureWorkspaceId(workspace?: string): string {
   const config = loadConfig(workspace);
   if (config.workspaceId) return config.workspaceId;
-  const id = crypto.randomBytes(4).toString("hex"); // 8-char hex
+  const id = crypto.randomBytes(4).toString('hex'); // 8-char hex
   config.workspaceId = id;
   saveConfig(config, workspace);
   return id;
@@ -120,7 +120,7 @@ export function ensureWorkspaceId(workspace?: string): string {
 export function writePidFile(workspace?: string, pid?: number): void {
   const dir = getWinAgentDir(workspace);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(pidFile(workspace), String(pid ?? process.pid), "utf-8");
+  fs.writeFileSync(pidFile(workspace), String(pid ?? process.pid), 'utf-8');
 }
 
 export function readPidFile(workspace?: string): number | null {
@@ -128,7 +128,7 @@ export function readPidFile(workspace?: string): number | null {
   if (!fs.existsSync(file)) {
     return null;
   }
-  const pid = parseInt(fs.readFileSync(file, "utf-8").trim(), 10);
+  const pid = parseInt(fs.readFileSync(file, 'utf-8').trim(), 10);
   return isNaN(pid) ? null : pid;
 }
 
@@ -162,5 +162,5 @@ export function checkEngineRunning(workspace?: string): { running: boolean; pid:
 }
 
 export function getDbPath(workspace: string): string {
-  return path.join(workspace, ".win-agent", "win-agent.db");
+  return path.join(workspace, '.win-agent', 'win-agent.db');
 }

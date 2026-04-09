@@ -1,13 +1,13 @@
-import type { OpencodeClient } from "@opencode-ai/sdk";
-import type { SessionManager } from "./session-manager.js";
-import { select, update } from "../db/repository.js";
-import { TaskStatus, MessageStatus } from "../db/types.js";
-import { queryRelevantKnowledge, type KnowledgeEntry } from "../embedding/knowledge.js";
-import { insert as dbInsert } from "../db/repository.js";
-import { checkAndBlockUnmetDependencies } from "./dependency-checker.js";
-import { withRetry, withTimeout } from "./retry.js";
-import { checkAndRotate } from "./memory-rotator.js";
-import type { Role } from "./role-manager.js";
+import type { OpencodeClient } from '@opencode-ai/sdk';
+import type { SessionManager } from './session-manager.js';
+import { select, update } from '../db/repository.js';
+import { TaskStatus, MessageStatus } from '../db/types.js';
+import { queryRelevantKnowledge, type KnowledgeEntry } from '../embedding/knowledge.js';
+import { insert as dbInsert } from '../db/repository.js';
+import { checkAndBlockUnmetDependencies } from './dependency-checker.js';
+import { withRetry, withTimeout } from './retry.js';
+import { checkAndRotate } from './memory-rotator.js';
+import type { Role } from './role-manager.js';
 
 /** Options for dispatch functions */
 export interface DispatchOptions {
@@ -111,22 +111,29 @@ export async function dispatchToRole(
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   // 0. Filter out messages for paused/blocked/cancelled tasks (9.4 dispatch awareness)
   // cancel_task messages are always delivered so DEV can execute rollback/cleanup.
-  if (role === "DEV") {
-    const SKIP_STATUSES: TaskStatus[] = [TaskStatus.Paused, TaskStatus.Cancelled, TaskStatus.Blocked, TaskStatus.Done];
+  if (role === 'DEV') {
+    const SKIP_STATUSES: TaskStatus[] = [
+      TaskStatus.Paused,
+      TaskStatus.Cancelled,
+      TaskStatus.Blocked,
+      TaskStatus.Done,
+    ];
     const filtered: MessageRow[] = [];
     for (const msg of messages) {
-      if (msg.related_task_id && msg.type !== "cancel_task") {
-        const tasks = select<{ id: number; status: TaskStatus }>("tasks", { id: msg.related_task_id });
+      if (msg.related_task_id && msg.type !== 'cancel_task') {
+        const tasks = select<{ id: number; status: TaskStatus }>('tasks', {
+          id: msg.related_task_id,
+        });
         const taskStatus = tasks[0]?.status;
         if (taskStatus && SKIP_STATUSES.includes(taskStatus)) {
-          update("messages", { id: msg.id }, { status: MessageStatus.Read });
+          update('messages', { id: msg.id }, { status: MessageStatus.Read });
           continue;
         }
         // Check unmet dependencies before dispatching to DEV
         if (taskStatus) {
           const blocked = checkAndBlockUnmetDependencies(msg.related_task_id, taskStatus);
           if (blocked) {
-            update("messages", { id: msg.id }, { status: MessageStatus.Read });
+            update('messages', { id: msg.id }, { status: MessageStatus.Read });
             continue;
           }
         }
@@ -144,7 +151,7 @@ export async function dispatchToRole(
   options?.onSessionResolved?.(sessionId);
 
   // 2. Query relevant knowledge
-  const messageContent = messages.map((m) => m.content).join("\n");
+  const messageContent = messages.map((m) => m.content).join('\n');
   let knowledge: KnowledgeEntry[] = [];
   try {
     knowledge = await queryRelevantKnowledge(messageContent);
@@ -153,12 +160,12 @@ export async function dispatchToRole(
   }
 
   // 3. Get task context for DEV (task details + dependencies)
-  const taskContext = role === "DEV" ? getTaskContext(messages) : null;
+  const taskContext = role === 'DEV' ? getTaskContext(messages) : null;
 
   // 4. Build and send prompt
   const pendingContext = sessionManager.consumePendingContext(sessionId);
   const prompt =
-    (pendingContext ? pendingContext + "\n\n---\n\n" : "") +
+    (pendingContext ? pendingContext + '\n\n---\n\n' : '') +
     buildDispatchPrompt(role, messages, knowledge, taskContext);
 
   // session.prompt with retry + timeout (5 min per attempt, 3 attempts)
@@ -169,7 +176,7 @@ export async function dispatchToRole(
           path: { id: sessionId },
           body: {
             agent: role,
-            parts: [{ type: "text", text: prompt }],
+            parts: [{ type: 'text', text: prompt }],
           },
         }),
         5 * 60 * 1000,
@@ -180,7 +187,7 @@ export async function dispatchToRole(
 
   // 5. Mark messages as read
   for (const msg of messages) {
-    update("messages", { id: msg.id }, { status: MessageStatus.Read });
+    update('messages', { id: msg.id }, { status: MessageStatus.Read });
   }
 
   // 6. Extract token usage and LLM output for traceability
@@ -189,14 +196,14 @@ export async function dispatchToRole(
 
   // Extract text parts for logging and persistence
   const textParts = result.data?.parts?.filter(
-    (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
+    (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
   );
-  const outputText = textParts?.map((p) => p.text).join("\n") ?? "";
+  const outputText = textParts?.map((p) => p.text).join('\n') ?? '';
 
   // Print LLM response summary to terminal for visibility
   if (outputText.length > 0) {
-    const preview = outputText.slice(0, 200).replace(/\n/g, " ");
-    console.log(`   💬 ${role} 回复: ${preview}${outputText.length > 200 ? "..." : ""}`);
+    const preview = outputText.slice(0, 200).replace(/\n/g, ' ');
+    console.log(`   💬 ${role} 回复: ${preview}${outputText.length > 200 ? '...' : ''}`);
   } else {
     console.log(`   ⚠️  ${role} 无文本回复 (tokens: in=${inputTokens} out=${outputTokens})`);
   }
@@ -204,7 +211,7 @@ export async function dispatchToRole(
   // Persist LLM output to role_outputs for auditability
   try {
     if (outputText.length > 0) {
-      dbInsert("role_outputs", {
+      dbInsert('role_outputs', {
         role,
         session_id: sessionId,
         input_summary: prompt.slice(0, 500),
@@ -220,10 +227,10 @@ export async function dispatchToRole(
   }
 
   // Log dispatch
-  dbInsert("logs", {
+  dbInsert('logs', {
     role,
-    action: "dispatch",
-    content: `处理 ${messages.length} 条消息 (from: ${[...new Set(messages.map((m) => m.from_role))].join(",")})`,
+    action: 'dispatch',
+    content: `处理 ${messages.length} 条消息 (from: ${[...new Set(messages.map((m) => m.from_role))].join(',')})`,
     related_task_id: messages[0]?.related_task_id ?? null,
   });
 
@@ -239,7 +246,7 @@ async function getSessionForRole(
   role: Role,
   messages: MessageRow[]
 ): Promise<string> {
-  if (role === "DEV") {
+  if (role === 'DEV') {
     // Use the task ID from the first message that has one
     const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
     if (taskId) {
@@ -276,16 +283,16 @@ function getTaskContext(messages: MessageRow[]): TaskContext | null {
     depends_on: number;
   }
 
-  const tasks = select<TaskRow>("tasks", { id: taskId });
+  const tasks = select<TaskRow>('tasks', { id: taskId });
   if (tasks.length === 0) return null;
 
   const task = tasks[0];
 
   // Get dependency tasks
-  const deps = select<DepRow>("task_dependencies", { task_id: taskId });
-  const dependencies: TaskContext["dependencies"] = [];
+  const deps = select<DepRow>('task_dependencies', { task_id: taskId });
+  const dependencies: TaskContext['dependencies'] = [];
   for (const dep of deps) {
-    const depTasks = select<TaskRow>("tasks", { id: dep.depends_on });
+    const depTasks = select<TaskRow>('tasks', { id: dep.depends_on });
     if (depTasks.length > 0) {
       dependencies.push({
         id: depTasks[0].id,
@@ -325,9 +332,9 @@ export function buildDispatchPrompt(
   const parts: string[] = [];
 
   // 1. Pending messages
-  parts.push("## 待处理消息");
+  parts.push('## 待处理消息');
   for (const msg of messages) {
-    const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : "";
+    const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : '';
     parts.push(`**来自 ${msg.from_role}** [type: ${msg.type}]${taskRef}：\n${msg.content}`);
   }
 
@@ -337,22 +344,22 @@ export function buildDispatchPrompt(
       taskContext.dependencies.length > 0
         ? taskContext.dependencies
             .map((d) => `  - task#${d.id} ${d.title} [${d.status}]`)
-            .join("\n")
-        : "  无前置依赖";
+            .join('\n')
+        : '  无前置依赖';
     parts.push(
       `## 当前任务 (task#${taskContext.id})\n` +
         `- 标题: ${taskContext.title}\n` +
         `- 状态: ${taskContext.status}\n` +
-        (taskContext.description ? `- 描述: ${taskContext.description}\n` : "") +
-        (taskContext.acceptanceCriteria ? `- 验收标准:\n${taskContext.acceptanceCriteria}\n` : "") +
-        (taskContext.acceptanceProcess ? `- 验收流程:\n${taskContext.acceptanceProcess}\n` : "") +
+        (taskContext.description ? `- 描述: ${taskContext.description}\n` : '') +
+        (taskContext.acceptanceCriteria ? `- 验收标准:\n${taskContext.acceptanceCriteria}\n` : '') +
+        (taskContext.acceptanceProcess ? `- 验收流程:\n${taskContext.acceptanceProcess}\n` : '') +
         `- 前置依赖:\n${depLines}`
     );
   }
 
   // 3. Relevant knowledge
   if (knowledge.length > 0) {
-    parts.push("## 相关知识库");
+    parts.push('## 相关知识库');
     for (const k of knowledge) {
       parts.push(`### ${k.title} (${k.category})\n${k.content}`);
     }
@@ -361,28 +368,30 @@ export function buildDispatchPrompt(
   // 4. DEV pending queue (PM only) — dedup guard so PM doesn't resend
   //    directives that are already queued and waiting to be dispatched.
   //    Includes both PM and system messages so PM is aware of system notifications.
-  if (role === "PM") {
+  if (role === 'PM') {
     const pendingDevMsgs = select<MessageRow>(
-      "messages",
-      { to_role: "DEV", status: MessageStatus.Unread },
-      { orderBy: "created_at ASC" }
+      'messages',
+      { to_role: 'DEV', status: MessageStatus.Unread },
+      { orderBy: 'created_at ASC' }
     );
 
     if (pendingDevMsgs.length > 0) {
       const lines: string[] = [];
       lines.push(`DEV 待处理队列（${pendingDevMsgs.length} 条未读，无需重发）：`);
       for (const m of pendingDevMsgs) {
-        const ref = m.related_task_id ? ` (task#${m.related_task_id})` : "";
-        lines.push(`  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, " ")}…`);
+        const ref = m.related_task_id ? ` (task#${m.related_task_id})` : '';
+        lines.push(
+          `  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, ' ')}…`
+        );
       }
-      parts.push(`## 已排队消息（勿重复发送）\n${lines.join("\n")}`);
+      parts.push(`## 已排队消息（勿重复发送）\n${lines.join('\n')}`);
     }
   }
 
   // 5. Action hints
   parts.push(
-    "## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。"
+    '## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。'
   );
 
-  return parts.join("\n\n");
+  return parts.join('\n\n');
 }

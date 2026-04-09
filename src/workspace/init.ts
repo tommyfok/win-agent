@@ -1,9 +1,9 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { openDb } from "../db/connection.js";
-import { createAllTables, patchMissingTables } from "../db/schema.js";
-import { seedPermissions } from "../db/permissions.js";
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { openDb } from '../db/connection.js';
+import { createAllTables, patchMissingTables } from '../db/schema.js';
+import { seedPermissions } from '../db/permissions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,20 +13,20 @@ function getTemplatesDir(): string {
   // In production (dist/), templates are alongside the built files
   // We need to look for them relative to the project root
   const candidates = [
-    path.resolve(__dirname, "../templates"), // dev: src/workspace -> src/templates
-    path.resolve(__dirname, "../src/templates"), // dist: dist/ -> src/templates
+    path.resolve(__dirname, '../templates'), // dev: src/workspace -> src/templates
+    path.resolve(__dirname, '../src/templates'), // dist: dist/ -> src/templates
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;
   }
-  throw new Error("Templates directory not found. Looked in: " + candidates.join(", "));
+  throw new Error('Templates directory not found. Looked in: ' + candidates.join(', '));
 }
 
 const WIN_AGENT_DIRS = [
-  "", // .win-agent/
-  "roles", // .win-agent/roles/
-  "attachments", // .win-agent/attachments/
-  "backups", // .win-agent/backups/
+  '', // .win-agent/
+  'roles', // .win-agent/roles/
+  'attachments', // .win-agent/attachments/
+  'backups', // .win-agent/backups/
 ];
 
 export interface InitResult {
@@ -35,8 +35,8 @@ export interface InitResult {
 }
 
 export function initWorkspace(workspace: string): InitResult {
-  const winAgentDir = path.join(workspace, ".win-agent");
-  const dbPath = path.join(winAgentDir, "win-agent.db");
+  const winAgentDir = path.join(workspace, '.win-agent');
+  const dbPath = path.join(winAgentDir, 'win-agent.db');
   const alreadyExists = fs.existsSync(dbPath);
 
   // 1. Create directory structure
@@ -49,7 +49,7 @@ export function initWorkspace(workspace: string): InitResult {
 
   // 2. Copy role prompt templates
   const templatesDir = getTemplatesDir();
-  copyTemplates(path.join(templatesDir, "roles"), path.join(winAgentDir, "roles"), ".md");
+  copyTemplates(path.join(templatesDir, 'roles'), path.join(winAgentDir, 'roles'), '.md');
 
   // 3. Initialize database
   const db = openDb(dbPath);

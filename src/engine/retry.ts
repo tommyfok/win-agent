@@ -4,9 +4,9 @@
 
 /** Error thrown when an operation is aborted via AbortSignal. */
 export class AbortError extends Error {
-  constructor(label = "operation") {
+  constructor(label = 'operation') {
     super(`${label} 已中断`);
-    this.name = "AbortError";
+    this.name = 'AbortError';
   }
 }
 
@@ -29,7 +29,13 @@ export interface RetryOptions {
  * Throws the last error if all attempts fail.
  */
 export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
-  const { maxAttempts = 3, baseDelay = 1000, backoffFactor = 2, label = "operation", signal } = opts;
+  const {
+    maxAttempts = 3,
+    baseDelay = 1000,
+    backoffFactor = 2,
+    label = 'operation',
+    signal,
+  } = opts;
 
   let lastError: unknown;
 
@@ -59,7 +65,7 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
 export async function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
-  label = "operation"
+  label = 'operation'
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
 

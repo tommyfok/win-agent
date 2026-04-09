@@ -1,4 +1,4 @@
-import { getDb } from "../db/connection.js";
+import { getDb } from '../db/connection.js';
 
 /**
  * Clean up expired role outputs (90+ days old).

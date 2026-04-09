@@ -1,6 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 // ─── Default Skills ───────────────────────────────────────────────────────────
 
@@ -10,15 +10,15 @@ export interface SkillConfig {
 }
 
 export const DEFAULT_SKILLS: SkillConfig[] = [
-  { pkg: "obra/superpowers@using-superpowers", roles: ["PM", "DEV"] },
-  { pkg: "zixun-github/aisdlc@spec-product-clarify", roles: ["PM"] },
-  { pkg: "deanpeters/product-manager-skills@user-story", roles: ["PM"] },
-  { pkg: "deanpeters/product-manager-skills@user-story-splitting", roles: ["PM"] },
+  { pkg: 'obra/superpowers@using-superpowers', roles: ['PM', 'DEV'] },
+  { pkg: 'zixun-github/aisdlc@spec-product-clarify', roles: ['PM'] },
+  { pkg: 'deanpeters/product-manager-skills@user-story', roles: ['PM'] },
+  { pkg: 'deanpeters/product-manager-skills@user-story-splitting', roles: ['PM'] },
 ];
 
 /** Extract the skill directory name from a package identifier: "owner/repo@skill-name" → "skill-name" */
 export function getSkillDirName(pkg: string): string {
-  const atIdx = pkg.lastIndexOf("@");
+  const atIdx = pkg.lastIndexOf('@');
   return atIdx >= 0 ? pkg.slice(atIdx + 1) : pkg;
 }
 
@@ -42,11 +42,11 @@ interface AgentFrontmatter {
 /** Build skill permission for roles that should not see PM-only skills */
 function buildSkillPermission(): Record<string, string> {
   const pmOnlySkills = DEFAULT_SKILLS.filter(
-    (s) => s.roles.length === 1 && s.roles[0] === "PM"
+    (s) => s.roles.length === 1 && s.roles[0] === 'PM'
   ).map((s) => getSkillDirName(s.pkg));
   const result: Record<string, string> = {};
-  for (const name of pmOnlySkills) result[name] = "deny";
-  result["*"] = "allow";
+  for (const name of pmOnlySkills) result[name] = 'deny';
+  result['*'] = 'allow';
   return result;
 }
 
@@ -57,7 +57,7 @@ function buildToolConfig(
 ): Record<string, boolean> {
   // Disable all other roles' database tools, enable only this role's
   const tools: Record<string, boolean> = {};
-  for (const r of ["PM", "DEV"]) {
+  for (const r of ['PM', 'DEV']) {
     tools[`database_${r}_query`] = r === role;
     tools[`database_${r}_insert`] = r === role;
     tools[`database_${r}_update`] = r === role;
@@ -67,9 +67,9 @@ function buildToolConfig(
 
 const AGENT_CONFIGS: Record<string, AgentFrontmatter> = {
   PM: {
-    description: "产品经理 - 需求管理、方案设计、任务拆分、进度管控、用户沟通",
-    mode: "subagent",
-    tools: buildToolConfig("PM", {
+    description: '产品经理 - 需求管理、方案设计、任务拆分、进度管控、用户沟通',
+    mode: 'subagent',
+    tools: buildToolConfig('PM', {
       read: true,
       write: true,
       edit: true,
@@ -79,20 +79,20 @@ const AGENT_CONFIGS: Record<string, AgentFrontmatter> = {
     }),
     permission: {
       write: {
-        ".win-agent/roles/*": "allow",
-        "*": "deny",
+        '.win-agent/roles/*': 'allow',
+        '*': 'deny',
       },
       edit: {
-        ".win-agent/roles/*": "allow",
-        "*": "deny",
+        '.win-agent/roles/*': 'allow',
+        '*': 'deny',
       },
-      bash: "allow",
+      bash: 'allow',
     },
   },
   DEV: {
-    description: "程序员 - 代码实现、自测、任务状态更新",
-    mode: "subagent",
-    tools: buildToolConfig("DEV", {
+    description: '程序员 - 代码实现、自测、任务状态更新',
+    mode: 'subagent',
+    tools: buildToolConfig('DEV', {
       read: true,
       write: true,
       edit: true,
@@ -101,8 +101,8 @@ const AGENT_CONFIGS: Record<string, AgentFrontmatter> = {
       grep: true,
     }),
     permission: {
-      edit: "allow",
-      bash: "allow",
+      edit: 'allow',
+      bash: 'allow',
       skill: buildSkillPermission(),
     },
   },
@@ -112,20 +112,20 @@ const AGENT_CONFIGS: Record<string, AgentFrontmatter> = {
  * Generate YAML frontmatter string from agent config.
  */
 function buildFrontmatter(config: AgentFrontmatter): string {
-  const lines: string[] = ["---"];
+  const lines: string[] = ['---'];
   lines.push(`description: "${config.description}"`);
   lines.push(`mode: ${config.mode}`);
 
   // Tools
-  lines.push("tools:");
+  lines.push('tools:');
   for (const [tool, enabled] of Object.entries(config.tools)) {
     lines.push(`  ${tool}: ${enabled}`);
   }
 
   // Permission
-  lines.push("permission:");
+  lines.push('permission:');
   for (const [key, value] of Object.entries(config.permission)) {
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       lines.push(`  ${key}: ${value}`);
     } else {
       lines.push(`  ${key}:`);
@@ -135,8 +135,8 @@ function buildFrontmatter(config: AgentFrontmatter): string {
     }
   }
 
-  lines.push("---");
-  return lines.join("\n");
+  lines.push('---');
+  return lines.join('\n');
 }
 
 /**
@@ -144,24 +144,26 @@ function buildFrontmatter(config: AgentFrontmatter): string {
  * Reads pure markdown prompts, prepends opencode frontmatter, writes to agent dir.
  */
 export function syncAgents(workspace: string): string[] {
-  const rolesDir = path.join(workspace, ".win-agent", "roles");
-  const opencodeDir = path.join(workspace, ".opencode");
-  const agentsDir = path.join(opencodeDir, "agents");
+  const rolesDir = path.join(workspace, '.win-agent', 'roles');
+  const opencodeDir = path.join(workspace, '.opencode');
+  const agentsDir = path.join(opencodeDir, 'agents');
 
   // Ensure .opencode/agents/ exists
   fs.mkdirSync(agentsDir, { recursive: true });
 
   // Ensure opencode.json has permission: allow (agents run autonomously)
-  const configFile = path.join(opencodeDir, "opencode.json");
+  const configFile = path.join(opencodeDir, 'opencode.json');
   let opencodeConfig: Record<string, unknown> = {};
   if (fs.existsSync(configFile)) {
     try {
-      opencodeConfig = JSON.parse(fs.readFileSync(configFile, "utf-8"));
-    } catch { /* empty */ }
+      opencodeConfig = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+    } catch {
+      /* empty */
+    }
   }
-  if (opencodeConfig.permission !== "allow") {
-    opencodeConfig.permission = "allow";
-    fs.writeFileSync(configFile, JSON.stringify(opencodeConfig, null, 2), "utf-8");
+  if (opencodeConfig.permission !== 'allow') {
+    opencodeConfig.permission = 'allow';
+    fs.writeFileSync(configFile, JSON.stringify(opencodeConfig, null, 2), 'utf-8');
   }
 
   const synced: string[] = [];
@@ -173,7 +175,7 @@ export function syncAgents(workspace: string): string[] {
       continue;
     }
 
-    let promptContent = fs.readFileSync(promptFile, "utf-8");
+    let promptContent = fs.readFileSync(promptFile, 'utf-8');
     // Rewrite generic tool names to per-role tool names
     promptContent = promptContent
       .replace(/database_query\b/g, `database_${role}_query`)
@@ -183,7 +185,7 @@ export function syncAgents(workspace: string): string[] {
     const agentContent = `${frontmatter}\n\n${promptContent}`;
 
     const agentFile = path.join(agentsDir, `${role}.md`);
-    fs.writeFileSync(agentFile, agentContent, "utf-8");
+    fs.writeFileSync(agentFile, agentContent, 'utf-8');
     synced.push(role);
   }
 
@@ -198,18 +200,18 @@ export function installDefaultSkills(workspace: string): string[] {
   const installed: string[] = [];
   for (const skill of DEFAULT_SKILLS) {
     process.stdout.write(`   → 安装 ${skill.pkg} ... `);
-    const result = spawnSync("npx", ["skills", "add", skill.pkg], {
+    const result = spawnSync('npx', ['skills', 'add', skill.pkg], {
       cwd: workspace,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf-8",
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf-8',
     });
     if (result.status === 0) {
-      console.log("✓");
+      console.log('✓');
       installed.push(skill.pkg);
     } else {
-      console.log("✗ 失败");
-      const errMsg = (result.stderr ?? "").trim();
-      if (errMsg) console.log(`     ${errMsg.split("\n")[0]}`);
+      console.log('✗ 失败');
+      const errMsg = (result.stderr ?? '').trim();
+      if (errMsg) console.log(`     ${errMsg.split('\n')[0]}`);
     }
   }
   return installed;
@@ -220,18 +222,18 @@ export function installDefaultSkills(workspace: string): string[] {
  * Copies the database tool template to the workspace.
  */
 export function deployTools(workspace: string): void {
-  const toolsDir = path.join(workspace, ".opencode", "tools");
+  const toolsDir = path.join(workspace, '.opencode', 'tools');
   fs.mkdirSync(toolsDir, { recursive: true });
 
   // Remove legacy shared tool file
-  const legacyFile = path.join(toolsDir, "database.ts");
+  const legacyFile = path.join(toolsDir, 'database.ts');
   if (fs.existsSync(legacyFile)) fs.unlinkSync(legacyFile);
 
   // Generate per-role database tools with hardcoded role name
   for (const role of Object.keys(AGENT_CONFIGS)) {
     const toolContent = getDatabaseToolContent(workspace, role);
     const toolFile = path.join(toolsDir, `database_${role}.ts`);
-    fs.writeFileSync(toolFile, toolContent, "utf-8");
+    fs.writeFileSync(toolFile, toolContent, 'utf-8');
   }
 }
 
@@ -239,7 +241,7 @@ export function deployTools(workspace: string): void {
  * Generate the database tool content with the correct DB path embedded.
  */
 function getDatabaseToolContent(workspace: string, role: string): string {
-  const dbRelPath = ".win-agent/win-agent.db";
+  const dbRelPath = '.win-agent/win-agent.db';
   return `// Auto-generated by win-agent — do not edit manually (role: ${role})
 import { tool } from "@opencode-ai/plugin";
 import path from "node:path";

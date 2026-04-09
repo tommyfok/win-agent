@@ -1,6 +1,6 @@
-import { getDb } from "../db/connection.js";
-import { insert } from "../db/repository.js";
-import { generateEmbedding } from "./index.js";
+import { getDb } from '../db/connection.js';
+import { insert } from '../db/repository.js';
+import { generateEmbedding } from './index.js';
 
 export interface KnowledgeData {
   title: string;
@@ -15,7 +15,7 @@ export interface KnowledgeData {
  * Writes to both `knowledge` and `knowledge_vec` tables.
  */
 export async function insertKnowledge(data: KnowledgeData): Promise<number> {
-  const { lastInsertRowid } = insert("knowledge", { ...data });
+  const { lastInsertRowid } = insert('knowledge', { ...data });
 
   // Generate embedding from title + content
   try {
@@ -24,8 +24,8 @@ export async function insertKnowledge(data: KnowledgeData): Promise<number> {
     // sqlite-vec vec0 checks sqlite3_value_type(id) == SQLITE_INTEGER at the C level.
     // JS number binds as SQLITE_FLOAT; only BigInt binds as SQLITE_INTEGER.
     // Embedding must be a Float32Array (bound as BLOB) per sqlite-vec docs.
-    const idInt = typeof lastInsertRowid === "bigint" ? lastInsertRowid : BigInt(lastInsertRowid);
-    db.prepare("INSERT INTO knowledge_vec(id, embedding) VALUES (?, ?)").run(
+    const idInt = typeof lastInsertRowid === 'bigint' ? lastInsertRowid : BigInt(lastInsertRowid);
+    db.prepare('INSERT INTO knowledge_vec(id, embedding) VALUES (?, ?)').run(
       idInt,
       new Float32Array(embedding)
     );
@@ -62,7 +62,7 @@ export async function queryRelevantKnowledge(
 
   // Use sqlite-vec KNN query to find nearest neighbors
   const vecResults = db
-    .prepare("SELECT id, distance FROM knowledge_vec WHERE embedding MATCH ? AND k = ?")
+    .prepare('SELECT id, distance FROM knowledge_vec WHERE embedding MATCH ? AND k = ?')
     .all(new Float32Array(queryEmbedding), limit * 2) as Array<{
     id: number;
     distance: number;
@@ -72,14 +72,14 @@ export async function queryRelevantKnowledge(
 
   // Fetch full knowledge entries, optionally filtering by category
   const ids = vecResults.map((r) => r.id);
-  const placeholders = ids.map(() => "?").join(", ");
+  const placeholders = ids.map(() => '?').join(', ');
 
   let sql = `SELECT id, title, content, category, tags FROM knowledge
     WHERE id IN (${placeholders}) AND status = 'active'`;
   const params: (string | number)[] = [...ids];
 
   if (category) {
-    sql += " AND category = ?";
+    sql += ' AND category = ?';
     params.push(category);
   }
 

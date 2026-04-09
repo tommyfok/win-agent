@@ -1,12 +1,12 @@
-import { execSync } from "node:child_process";
-import { checkEngineRunning, removePidFile, isProcessRunning } from "../config/index.js";
-import { removeServerInfo } from "../engine/opencode-server.js";
+import { execSync } from 'node:child_process';
+import { checkEngineRunning, removePidFile, isProcessRunning } from '../config/index.js';
+import { removeServerInfo } from '../engine/opencode-server.js';
 
 export async function stopCommand() {
   const workspace = process.cwd();
   const { running, pid } = checkEngineRunning();
   if (!running || !pid) {
-    console.log("⚠️  win-agent 未在运行");
+    console.log('⚠️  win-agent 未在运行');
     // Still clean up orphaned processes
     cleanupOrphanedProcesses(workspace);
     return;
@@ -16,12 +16,12 @@ export async function stopCommand() {
 
   // Send SIGTERM — the daemon process handles memory writes and cleanup
   try {
-    process.kill(pid, "SIGTERM");
+    process.kill(pid, 'SIGTERM');
   } catch {
     console.log(`   △ 进程 ${pid} 已不存在`);
     removePidFile();
     cleanupOrphanedProcesses(workspace);
-    console.log("   ✓ 已清理");
+    console.log('   ✓ 已清理');
     return;
   }
 
@@ -31,24 +31,24 @@ export async function stopCommand() {
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
     if (!isProcessRunning(pid)) {
-      console.log("   ✓ 引擎已停止");
+      console.log('   ✓ 引擎已停止');
       removePidFile();
       cleanupOrphanedProcesses(workspace);
-      console.log("\n✅ win-agent 已停止");
+      console.log('\n✅ win-agent 已停止');
       return;
     }
   }
 
   // Force kill if still running
-  console.log("   ⚠️  引擎未在 30s 内退出，强制终止...");
+  console.log('   ⚠️  引擎未在 30s 内退出，强制终止...');
   try {
-    process.kill(pid, "SIGKILL");
+    process.kill(pid, 'SIGKILL');
   } catch {
     // process may already be dead
   }
   removePidFile();
   cleanupOrphanedProcesses(workspace);
-  console.log("\n✅ win-agent 已停止 (强制)");
+  console.log('\n✅ win-agent 已停止 (强制)');
 }
 
 /**
@@ -59,16 +59,16 @@ function cleanupOrphanedProcesses(workspace: string): void {
   try {
     // Kill orphaned opencode servers started by win-agent
     const result = execSync("ps -eo pid,command | grep '[.]opencode serve' | grep -v grep", {
-      encoding: "utf-8",
+      encoding: 'utf-8',
       timeout: 5000,
     }).trim();
     if (result) {
-      for (const line of result.split("\n")) {
+      for (const line of result.split('\n')) {
         const pidStr = line.trim().split(/\s+/)[0];
         const opPid = parseInt(pidStr, 10);
         if (opPid && !isNaN(opPid)) {
           try {
-            process.kill(opPid, "SIGTERM");
+            process.kill(opPid, 'SIGTERM');
             console.log(`   ✓ 清理孤立 opencode 进程 (PID: ${opPid})`);
           } catch {
             /* already dead */
@@ -84,15 +84,15 @@ function cleanupOrphanedProcesses(workspace: string): void {
     // Kill orphaned win-agent engine processes for this workspace
     const result = execSync(
       `ps -eo pid,command | grep 'win-agent _engine ${workspace}' | grep -v grep`,
-      { encoding: "utf-8", timeout: 5000 }
+      { encoding: 'utf-8', timeout: 5000 }
     ).trim();
     if (result) {
-      for (const line of result.split("\n")) {
+      for (const line of result.split('\n')) {
         const pidStr = line.trim().split(/\s+/)[0];
         const opPid = parseInt(pidStr, 10);
         if (opPid && !isNaN(opPid)) {
           try {
-            process.kill(opPid, "SIGTERM");
+            process.kill(opPid, 'SIGTERM');
             console.log(`   ✓ 清理孤立引擎进程 (PID: ${opPid})`);
           } catch {
             /* already dead */

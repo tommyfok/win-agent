@@ -1,6 +1,6 @@
-import type { OpencodeClient } from "@opencode-ai/sdk";
-import type { SessionManager } from "./session-manager.js";
-import { insert } from "../db/repository.js";
+import type { OpencodeClient } from '@opencode-ai/sdk';
+import type { SessionManager } from './session-manager.js';
+import { insert } from '../db/repository.js';
 
 /**
  * Default context window size (tokens) for rotation calculation.
@@ -45,11 +45,11 @@ export async function detectModelContextLimit(client: OpencodeClient): Promise<n
       for (const provider of providers) {
         const p = provider as { models?: Record<string, unknown> };
         const models = p.models;
-        if (models && typeof models === "object") {
+        if (models && typeof models === 'object') {
           for (const model of Object.values(models)) {
             const m = model as { limit?: { context?: number } };
             const ctx = m?.limit?.context;
-            if (typeof ctx === "number" && ctx > maxCtx) {
+            if (typeof ctx === 'number' && ctx > maxCtx) {
               maxCtx = ctx;
             }
           }
@@ -138,9 +138,9 @@ export async function checkAndRotate(
     console.log(
       `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%（阈值 ${Math.round(ROTATION_THRESHOLD * 100)}%），执行 session 轮转`
     );
-    insert("logs", {
-      role: "system",
-      action: "session_rotation",
+    insert('logs', {
+      role: 'system',
+      action: 'session_rotation',
       content: `${role} 上下文使用率 ${Math.round(usage * 100)}%（限制 ${maxContext} tokens），执行 session 轮转`,
     });
     return sessionManager.rotateSession(role, sessionId, taskId);
@@ -149,9 +149,9 @@ export async function checkAndRotate(
   // Check context anxiety (only if we're past 50% usage — don't trigger too early)
   if (usage > 0.5 && detectContextAnxiety(role, outputTokens)) {
     console.log(`   🔄 ${role} 检测到 context anxiety（输出突然变短），提前执行 session 轮转`);
-    insert("logs", {
-      role: "system",
-      action: "session_rotation",
+    insert('logs', {
+      role: 'system',
+      action: 'session_rotation',
       content: `${role} context anxiety 检测触发（使用率 ${Math.round(usage * 100)}%，输出 ${outputTokens} tokens 远低于近期平均）`,
     });
     return sessionManager.rotateSession(role, sessionId, taskId);

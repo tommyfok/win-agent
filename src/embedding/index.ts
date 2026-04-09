@@ -1,6 +1,6 @@
-import { loadConfig } from "../config/index.js";
-import { createOpenAIEmbedding } from "./openai.js";
-import { createLocalEmbedding } from "./local.js";
+import { loadConfig } from '../config/index.js';
+import { createOpenAIEmbedding } from './openai.js';
+import { createLocalEmbedding } from './local.js';
 
 /**
  * Embedding provider interface.
@@ -22,7 +22,7 @@ let provider: EmbeddingProvider | null = null;
  */
 export function getEmbeddingDimension(workspace?: string): number {
   const config = loadConfig(workspace);
-  const type = config.embedding?.type ?? "local";
+  const type = config.embedding?.type ?? 'local';
   return DIMENSIONS[type] ?? 384;
 }
 
@@ -36,19 +36,19 @@ export function getEmbeddingProvider(workspace?: string): EmbeddingProvider {
   const embeddingConfig = config.embedding;
 
   // Default to local if not configured
-  const type = embeddingConfig?.type ?? "local";
+  const type = embeddingConfig?.type ?? 'local';
 
   switch (type) {
-    case "local":
+    case 'local':
       provider = createLocalEmbedding(embeddingConfig?.model);
       break;
-    case "openai": {
+    case 'openai': {
       if (!embeddingConfig?.apiKey) {
-        throw new Error("OpenAI embedding 需要配置 apiKey");
+        throw new Error('OpenAI embedding 需要配置 apiKey');
       }
       provider = createOpenAIEmbedding(
         embeddingConfig.apiKey,
-        embeddingConfig.model || "text-embedding-3-small"
+        embeddingConfig.model || 'text-embedding-3-small'
       );
       break;
     }

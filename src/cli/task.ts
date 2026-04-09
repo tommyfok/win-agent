@@ -1,14 +1,14 @@
-import { checkEngineRunning, getDbPath } from "../config/index.js";
-import { openDb, getDb } from "../db/connection.js";
+import { checkEngineRunning, getDbPath } from '../config/index.js';
+import { openDb, getDb } from '../db/connection.js';
 import {
   select as dbSelect,
   update as dbUpdate,
   insert as dbInsert,
   rawQuery,
   rawRun,
-} from "../db/repository.js";
-import { TaskStatus, MessageStatus } from "../db/types.js";
-import type { Command } from "commander";
+} from '../db/repository.js';
+import { TaskStatus, MessageStatus } from '../db/types.js';
+import type { Command } from 'commander';
 
 interface TaskRow {
   id: number;
@@ -35,19 +35,19 @@ function getStatusLabel(status: string): string {
 }
 
 const statusLabels: Record<TaskStatus, string> = {
-  [TaskStatus.PendingDev]: "待开发",
-  [TaskStatus.InDev]: "开发中",
-  [TaskStatus.Done]: "已完成",
-  [TaskStatus.Rejected]: "已打回",
-  [TaskStatus.Cancelled]: "已取消",
-  [TaskStatus.Paused]: "已暂停",
-  [TaskStatus.Blocked]: "已阻塞",
+  [TaskStatus.PendingDev]: '待开发',
+  [TaskStatus.InDev]: '开发中',
+  [TaskStatus.Done]: '已完成',
+  [TaskStatus.Rejected]: '已打回',
+  [TaskStatus.Cancelled]: '已取消',
+  [TaskStatus.Paused]: '已暂停',
+  [TaskStatus.Blocked]: '已阻塞',
 };
 
 function ensureDb() {
   const { running } = checkEngineRunning();
   if (!running) {
-    console.log("⚠️  win-agent 未运行");
+    console.log('⚠️  win-agent 未运行');
     process.exit(1);
   }
   try {
@@ -65,7 +65,7 @@ function taskList() {
   );
 
   if (tasks.length === 0) {
-    console.log("  没有进行中的任务");
+    console.log('  没有进行中的任务');
     return;
   }
 
@@ -94,7 +94,7 @@ function taskShow(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect<TaskRow>("tasks", { id });
+  const tasks = dbSelect<TaskRow>('tasks', { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
@@ -107,12 +107,12 @@ function taskShow(taskId: string) {
   console.log(`   标题: ${task.title}`);
   console.log(`   状态: ${label}`);
   console.log(`   优先级: ${task.priority}`);
-  console.log(`   负责人: ${task.assigned_to ?? "未分配"}`);
-  console.log(`   描述: ${task.description ?? "无"}`);
-  console.log(`   验收标准: ${task.acceptance_criteria ?? "无"}`);
+  console.log(`   负责人: ${task.assigned_to ?? '未分配'}`);
+  console.log(`   描述: ${task.description ?? '无'}`);
+  console.log(`   验收标准: ${task.acceptance_criteria ?? '无'}`);
 
   const events = rawQuery<TaskEventRow>(
-    "SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at",
+    'SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at',
     [id]
   );
 
@@ -137,16 +137,14 @@ function taskPause(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect<TaskRow>("tasks", { id });
+  const tasks = dbSelect<TaskRow>('tasks', { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
   }
 
   const task = tasks[0];
-  const validFrom: TaskStatus[] = [
-    TaskStatus.PendingDev, TaskStatus.InDev, TaskStatus.Rejected,
-  ];
+  const validFrom: TaskStatus[] = [TaskStatus.PendingDev, TaskStatus.InDev, TaskStatus.Rejected];
 
   if (!validFrom.includes(task.status)) {
     const label = getStatusLabel(task.status);
@@ -154,23 +152,24 @@ function taskPause(taskId: string) {
     process.exit(1);
   }
 
-  dbInsert("task_events", {
+  dbInsert('task_events', {
     task_id: id,
     from_status: task.status,
     to_status: TaskStatus.Paused,
-    changed_by: "user",
+    changed_by: 'user',
   });
 
-  dbUpdate("tasks", { id }, { status: TaskStatus.Paused, pre_suspend_status: task.status });
+  dbUpdate('tasks', { id }, { status: TaskStatus.Paused, pre_suspend_status: task.status });
 
-  rawRun(`UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`, [
-    id,
-  ]);
+  rawRun(
+    `UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`,
+    [id]
+  );
 
-  dbInsert("messages", {
-    from_role: "system",
-    to_role: "PM",
-    type: "notification",
+  dbInsert('messages', {
+    from_role: 'system',
+    to_role: 'PM',
+    type: 'notification',
     content: `任务 #${id}「${task.title}」已被用户暂停。`,
     related_task_id: id,
   });
@@ -187,7 +186,7 @@ function taskResume(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect<TaskRow>("tasks", { id });
+  const tasks = dbSelect<TaskRow>('tasks', { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
@@ -203,21 +202,21 @@ function taskResume(taskId: string) {
 
   const restoreStatus: TaskStatus = task.pre_suspend_status ?? TaskStatus.PendingDev;
 
-  dbInsert("task_events", {
+  dbInsert('task_events', {
     task_id: id,
     from_status: TaskStatus.Paused,
     to_status: restoreStatus,
-    changed_by: "user",
+    changed_by: 'user',
   });
 
-  dbUpdate("tasks", { id }, { status: restoreStatus, pre_suspend_status: null });
+  dbUpdate('tasks', { id }, { status: restoreStatus, pre_suspend_status: null });
 
   const restoreLabel = getStatusLabel(restoreStatus);
 
-  dbInsert("messages", {
-    from_role: "system",
-    to_role: "PM",
-    type: "notification",
+  dbInsert('messages', {
+    from_role: 'system',
+    to_role: 'PM',
+    type: 'notification',
     content: `任务 #${id}「${task.title}」已被用户恢复，状态恢复为「${restoreLabel}」。`,
     related_task_id: id,
   });
@@ -234,7 +233,7 @@ function taskCancel(taskId: string) {
     process.exit(1);
   }
 
-  const tasks = dbSelect<TaskRow>("tasks", { id });
+  const tasks = dbSelect<TaskRow>('tasks', { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
@@ -248,23 +247,24 @@ function taskCancel(taskId: string) {
     process.exit(1);
   }
 
-  dbInsert("task_events", {
+  dbInsert('task_events', {
     task_id: id,
     from_status: task.status,
     to_status: TaskStatus.Cancelled,
-    changed_by: "user",
+    changed_by: 'user',
   });
 
-  dbUpdate("tasks", { id }, { status: TaskStatus.Cancelled });
+  dbUpdate('tasks', { id }, { status: TaskStatus.Cancelled });
 
-  rawRun(`UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`, [
-    id,
-  ]);
+  rawRun(
+    `UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`,
+    [id]
+  );
 
-  dbInsert("messages", {
-    from_role: "system",
-    to_role: "PM",
-    type: "notification",
+  dbInsert('messages', {
+    from_role: 'system',
+    to_role: 'PM',
+    type: 'notification',
     content: `任务 #${id}「${task.title}」已被用户取消。`,
     related_task_id: id,
   });
@@ -275,10 +275,10 @@ function taskCancel(taskId: string) {
 function taskStatus() {
   ensureDb();
 
-  const allTasks = rawQuery<TaskRow>("SELECT * FROM tasks ORDER BY created_at ASC");
+  const allTasks = rawQuery<TaskRow>('SELECT * FROM tasks ORDER BY created_at ASC');
 
   if (allTasks.length === 0) {
-    console.log("  没有任何任务");
+    console.log('  没有任何任务');
     return;
   }
 
@@ -306,10 +306,12 @@ function taskStatus() {
   const done = groups.get(TaskStatus.Done)?.length ?? 0;
   const cancelled = groups.get(TaskStatus.Cancelled)?.length ?? 0;
   const active = total - done - cancelled;
-  console.log(`\n📊 任务概览: ${total} 个任务, ${active} 进行中, ${done} 已完成, ${cancelled} 已取消\n`);
+  console.log(
+    `\n📊 任务概览: ${total} 个任务, ${active} 进行中, ${done} 已完成, ${cancelled} 已取消\n`
+  );
 
   // Priority icons
-  const priorityIcon: Record<string, string> = { high: "🔴", medium: "🟡", low: "⚪" };
+  const priorityIcon: Record<string, string> = { high: '🔴', medium: '🟡', low: '⚪' };
 
   for (const status of displayOrder) {
     const tasks = groups.get(status);
@@ -323,11 +325,11 @@ function taskStatus() {
     tasks.sort((a, b) => (priorityOrder[b.priority] ?? 0) - (priorityOrder[a.priority] ?? 0));
 
     for (const task of tasks) {
-      const icon = priorityIcon[task.priority] ?? "⚪";
-      const assignee = task.assigned_to ? ` → ${task.assigned_to}` : "";
+      const icon = priorityIcon[task.priority] ?? '⚪';
+      const assignee = task.assigned_to ? ` → ${task.assigned_to}` : '';
       console.log(`    ${icon} #${task.id} ${task.title}${assignee}`);
     }
-    console.log("");
+    console.log('');
   }
 }
 
@@ -340,13 +342,13 @@ function taskReprioritize(taskId: string, priority: string) {
     process.exit(1);
   }
 
-  const validPriorities = ["high", "medium", "low"];
+  const validPriorities = ['high', 'medium', 'low'];
   if (!validPriorities.includes(priority)) {
     console.log(`⚠️  无效的优先级: ${priority}（可选值: high, medium, low）`);
     process.exit(1);
   }
 
-  const tasks = dbSelect<TaskRow>("tasks", { id });
+  const tasks = dbSelect<TaskRow>('tasks', { id });
   if (tasks.length === 0) {
     console.log(`⚠️  未找到任务 #${id}`);
     process.exit(1);
@@ -355,12 +357,12 @@ function taskReprioritize(taskId: string, priority: string) {
   const task = tasks[0];
   const oldPriority = task.priority;
 
-  dbUpdate("tasks", { id }, { priority });
+  dbUpdate('tasks', { id }, { priority });
 
-  dbInsert("messages", {
-    from_role: "system",
-    to_role: "PM",
-    type: "notification",
+  dbInsert('messages', {
+    from_role: 'system',
+    to_role: 'PM',
+    type: 'notification',
     content: `任务 #${id}「${task.title}」优先级已从 ${oldPriority} 调整为 ${priority}。`,
     related_task_id: id,
   });
@@ -369,53 +371,53 @@ function taskReprioritize(taskId: string, priority: string) {
 }
 
 export function registerTaskCommands(program: Command) {
-  const task = program.command("task").description("任务管理");
+  const task = program.command('task').description('任务管理');
 
   task
-    .command("status")
-    .description("查看所有任务状态概览")
+    .command('status')
+    .description('查看所有任务状态概览')
     .action(() => {
       taskStatus();
     });
 
   task
-    .command("list")
-    .description("列出进行中的任务")
+    .command('list')
+    .description('列出进行中的任务')
     .action(() => {
       taskList();
     });
 
   task
-    .command("show <taskId>")
-    .description("查看任务详情及事件历史")
+    .command('show <taskId>')
+    .description('查看任务详情及事件历史')
     .action((taskId: string) => {
       taskShow(taskId);
     });
 
   task
-    .command("pause <taskId>")
-    .description("暂停任务")
+    .command('pause <taskId>')
+    .description('暂停任务')
     .action((taskId: string) => {
       taskPause(taskId);
     });
 
   task
-    .command("resume <taskId>")
-    .description("恢复暂停的任务")
+    .command('resume <taskId>')
+    .description('恢复暂停的任务')
     .action((taskId: string) => {
       taskResume(taskId);
     });
 
   task
-    .command("cancel <taskId>")
-    .description("取消任务")
+    .command('cancel <taskId>')
+    .description('取消任务')
     .action((taskId: string) => {
       taskCancel(taskId);
     });
 
   task
-    .command("reprioritize <taskId> <priority>")
-    .description("调整任务优先级 (high/medium/low)")
+    .command('reprioritize <taskId> <priority>')
+    .description('调整任务优先级 (high/medium/low)')
     .action((taskId: string, priority: string) => {
       taskReprioritize(taskId, priority);
     });

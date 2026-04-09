@@ -1,13 +1,13 @@
-import fs from "node:fs";
-import path from "node:path";
-import type { OpencodeClient } from "@opencode-ai/sdk";
-import { insertMemory, buildRecallPrompt as buildVectorRecallPrompt } from "../embedding/memory.js";
-import { withRetry, withTimeout } from "./retry.js";
-import { insert as dbInsert } from "../db/repository.js";
-import { ensureWorkspaceId } from "../config/index.js";
+import fs from 'node:fs';
+import path from 'node:path';
+import type { OpencodeClient } from '@opencode-ai/sdk';
+import { insertMemory, buildRecallPrompt as buildVectorRecallPrompt } from '../embedding/memory.js';
+import { withRetry, withTimeout } from './retry.js';
+import { insert as dbInsert } from '../db/repository.js';
+import { ensureWorkspaceId } from '../config/index.js';
 
-type Role = "PM" | "DEV";
-const PERSISTENT_ROLES: Role[] = ["PM"];
+type Role = 'PM' | 'DEV';
+const PERSISTENT_ROLES: Role[] = ['PM'];
 
 /** Persisted state of an interrupted dispatch (written by engine on shutdown). */
 export interface InterruptedState {
@@ -41,11 +41,11 @@ const WRITE_MEMORY_PROMPT = `你即将被轮转到一个新的 session。请总�
  * Load the role prompt content from .win-agent/roles/{role}.md
  */
 function loadRolePrompt(workspace: string, role: string): string {
-  const promptFile = path.join(workspace, ".win-agent", "roles", `${role}.md`);
+  const promptFile = path.join(workspace, '.win-agent', 'roles', `${role}.md`);
   if (!fs.existsSync(promptFile)) {
     throw new Error(`Role prompt not found: ${promptFile}`);
   }
-  return fs.readFileSync(promptFile, "utf-8");
+  return fs.readFileSync(promptFile, 'utf-8');
 }
 
 /**
@@ -124,7 +124,7 @@ export class SessionManager {
           // Check session messages - if assistant has responded, session is ready
           const msgs = await this.client.session.messages({ path: { id: sessionId } });
           const messages = (msgs.data ?? []) as Array<{ role?: string }>;
-          const hasAssistantResponse = messages.some((m) => m.role === "assistant");
+          const hasAssistantResponse = messages.some((m) => m.role === 'assistant');
           if (!hasAssistantResponse) {
             allIdle = false;
             break;
@@ -138,7 +138,7 @@ export class SessionManager {
       await new Promise<void>((r) => setTimeout(r, pollInterval));
     }
     // Timeout — proceed anyway, sessions may work but bind might not be done
-    console.log("   ⚠️  Session 初始化等待超时，继续启动");
+    console.log('   ⚠️  Session 初始化等待超时，继续启动');
   }
 
   /**
@@ -154,18 +154,18 @@ export class SessionManager {
     for (const [key, id] of this.taskSessions) {
       data[`task:${key}`] = id;
     }
-    const file = path.join(this.workspace, ".win-agent", "sessions.json");
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf-8");
+    const file = path.join(this.workspace, '.win-agent', 'sessions.json');
+    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
   }
 
   /**
    * Load persisted session IDs from disk (for cross-process access).
    */
   static loadPersistedSessions(workspace: string): Record<string, string> | null {
-    const file = path.join(workspace, ".win-agent", "sessions.json");
+    const file = path.join(workspace, '.win-agent', 'sessions.json');
     if (!fs.existsSync(file)) return null;
     try {
-      return JSON.parse(fs.readFileSync(file, "utf-8"));
+      return JSON.parse(fs.readFileSync(file, 'utf-8'));
     } catch {
       return null;
     }
@@ -209,7 +209,7 @@ export class SessionManager {
   /**
    * Get the session ID for a persistent role (PM).
    */
-  getSession(role: "PM"): string {
+  getSession(role: 'PM'): string {
     const id = this.activeSessions.get(role);
     if (!id) {
       throw new Error(`No active session for role ${role}`);
@@ -221,7 +221,7 @@ export class SessionManager {
    * Get PM session ID (convenience method for talk command).
    */
   getPmSessionId(): string {
-    return this.getSession("PM");
+    return this.getSession('PM');
   }
 
   /**
@@ -229,7 +229,7 @@ export class SessionManager {
    * Each dispatch gets a clean context with role identity and memory recall.
    * The previous task session (if any) is released first.
    */
-  async getTaskSession(taskId: number, role: "DEV"): Promise<string> {
+  async getTaskSession(taskId: number, role: 'DEV'): Promise<string> {
     const key = `${taskId}-${role}`;
     // Release previous session for this task (if any) so DEV always starts clean
     this.taskSessions.delete(key);
@@ -261,7 +261,7 @@ export class SessionManager {
           path: { id: sessionId },
           body: {
             agent: role,
-            parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
+            parts: [{ type: 'text', text: WRITE_MEMORY_PROMPT }],
           },
         }),
         3 * 60 * 1000,
@@ -270,22 +270,22 @@ export class SessionManager {
 
       // Try to extract memory from the response — try JSON block first, then plain text fallback
       const textParts = result.data?.parts?.filter(
-        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
+        (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
       );
       if (textParts && textParts.length > 0) {
-        const text = textParts[0].text || "";
+        const text = textParts[0].text || '';
         const parsed = parseMemoryResponse(text);
         if (parsed) {
           await insertMemory({
             role,
             summary: parsed.summary,
             content: parsed.content,
-            trigger: "context_limit",
+            trigger: 'context_limit',
           });
         }
         // Persist memory-write output for traceability
         try {
-          dbInsert("role_outputs", {
+          dbInsert('role_outputs', {
             role,
             session_id: sessionId,
             input_summary: WRITE_MEMORY_PROMPT.slice(0, 500),
@@ -325,7 +325,7 @@ export class SessionManager {
       ...this.activeSessions.entries(),
       // DEV task sessions: key format is "taskId-role"
       ...Array.from(this.taskSessions.entries()).map(([key, id]) => {
-        const role = key.split("-")[1]; // e.g. "42-DEV" → "DEV"
+        const role = key.split('-')[1]; // e.g. "42-DEV" → "DEV"
         return [role, id] as [string, string];
       }),
     ];
@@ -337,7 +337,7 @@ export class SessionManager {
             path: { id: sessionId },
             body: {
               agent: role,
-              parts: [{ type: "text", text: WRITE_MEMORY_PROMPT }],
+              parts: [{ type: 'text', text: WRITE_MEMORY_PROMPT }],
             },
           }),
           3 * 60 * 1000,
@@ -345,17 +345,17 @@ export class SessionManager {
         );
 
         const textParts = result.data?.parts?.filter(
-          (p): p is Extract<typeof p, { type: "text" }> => p.type === "text"
+          (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
         );
         if (textParts && textParts.length > 0) {
-          const text = textParts[0].text || "";
+          const text = textParts[0].text || '';
           const parsed = parseMemoryResponse(text);
           if (parsed) {
             await insertMemory({ role, summary: parsed.summary, content: parsed.content, trigger });
           }
           // Persist memory-write output for traceability
           try {
-            dbInsert("role_outputs", {
+            dbInsert('role_outputs', {
               role,
               session_id: sessionId,
               input_summary: WRITE_MEMORY_PROMPT.slice(0, 500),
@@ -427,8 +427,8 @@ export class SessionManager {
             agent: role,
             parts: [
               {
-                type: "text",
-                text: parts.join("\n\n---\n\n"),
+                type: 'text',
+                text: parts.join('\n\n---\n\n'),
               },
             ],
           },
@@ -445,7 +445,7 @@ export class SessionManager {
    * Kept for API compatibility with dispatcher.
    */
   consumePendingContext(_sessionId: string): string {
-    return "";
+    return '';
   }
 
   /**
@@ -467,22 +467,30 @@ export class SessionManager {
    * @returns true if a session was resumed
    */
   async checkAndResumeInterrupted(): Promise<boolean> {
-    const interruptedFile = path.join(this.workspace, ".win-agent", "interrupted.json");
+    const interruptedFile = path.join(this.workspace, '.win-agent', 'interrupted.json');
     if (!fs.existsSync(interruptedFile)) return false;
 
     let state: InterruptedState;
     try {
-      state = JSON.parse(fs.readFileSync(interruptedFile, "utf-8"));
+      state = JSON.parse(fs.readFileSync(interruptedFile, 'utf-8'));
     } catch {
       // Corrupt file — clean up and move on
-      try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+      try {
+        fs.unlinkSync(interruptedFile);
+      } catch {
+        /* */
+      }
       return false;
     }
 
     const { role, taskId, sessionId } = state;
     if (!sessionId) {
       // No session to resume (dispatch was interrupted before session was resolved)
-      try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+      try {
+        fs.unlinkSync(interruptedFile);
+      } catch {
+        /* */
+      }
       return false;
     }
 
@@ -491,14 +499,18 @@ export class SessionManager {
       await this.client.session.get({ path: { id: sessionId } });
     } catch {
       console.log(`   ⚠️  中断的 session ${sessionId} 已不存在，跳过恢复`);
-      try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+      try {
+        fs.unlinkSync(interruptedFile);
+      } catch {
+        /* */
+      }
       return false;
     }
 
     // Re-register session in our maps
-    if (role === "PM") {
+    if (role === 'PM') {
       this.activeSessions.set(role, sessionId);
-    } else if (taskId && role === "DEV") {
+    } else if (taskId && role === 'DEV') {
       this.taskSessions.set(`${taskId}-${role}`, sessionId);
     }
     this.persistSessionIds();
@@ -506,7 +518,7 @@ export class SessionManager {
     // Send "continue" prompt to the interrupted session
     const resumePrompt =
       `你的上一次操作因引擎重启被中断。请检查当前工作目录和任务状态，然后继续完成未完成的工作。` +
-      (taskId ? `\n\n被中断的任务 ID: task#${taskId}` : "");
+      (taskId ? `\n\n被中断的任务 ID: task#${taskId}` : '');
 
     try {
       await withRetry(
@@ -515,7 +527,7 @@ export class SessionManager {
             path: { id: sessionId },
             body: {
               agent: role,
-              parts: [{ type: "text", text: resumePrompt }],
+              parts: [{ type: 'text', text: resumePrompt }],
             },
           }),
         { maxAttempts: 2, label: `${role} resume` }
@@ -526,7 +538,11 @@ export class SessionManager {
     }
 
     // Clean up interrupted file
-    try { fs.unlinkSync(interruptedFile); } catch { /* */ }
+    try {
+      fs.unlinkSync(interruptedFile);
+    } catch {
+      /* */
+    }
     return true;
   }
 }
@@ -561,7 +577,7 @@ function parseMemoryResponse(text: string): { summary: string; content: string }
   // Plain text fallback: use first line as summary, rest as content
   const trimmed = text.trim();
   if (trimmed.length > 0) {
-    const lines = trimmed.split("\n");
+    const lines = trimmed.split('\n');
     const summary = lines[0].slice(0, 200);
     return { summary, content: trimmed };
   }

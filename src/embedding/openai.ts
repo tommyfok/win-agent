@@ -1,4 +1,4 @@
-import type { EmbeddingProvider } from "./index.js";
+import type { EmbeddingProvider } from './index.js';
 
 /**
  * OpenAI embedding provider using the REST API directly.
@@ -6,17 +6,17 @@ import type { EmbeddingProvider } from "./index.js";
  */
 export function createOpenAIEmbedding(
   apiKey: string,
-  model: string = "text-embedding-3-small"
+  model: string = 'text-embedding-3-small'
 ): EmbeddingProvider {
   return {
     async generate(text: string): Promise<number[]> {
       // Truncate very long text to avoid token limits
       const truncated = text.length > 8000 ? text.slice(0, 8000) : text;
 
-      const response = await fetch("https://api.openai.com/v1/embeddings", {
-        method: "POST",
+      const response = await fetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({

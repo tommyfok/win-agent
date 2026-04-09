@@ -1,14 +1,14 @@
-import type { OpencodeClient } from "@opencode-ai/sdk";
-import type { SessionManager } from "./session-manager.js";
-import { RoleManager, ALL_ROLES } from "./role-manager.js";
-import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from "./dispatcher.js";
-import { AbortError } from "./retry.js";
-import { checkAndRotate } from "./memory-rotator.js";
-import { checkAutoTriggers, resetTriggers } from "./auto-trigger.js";
-import { checkWorkflowCompletion } from "./workflow-checker.js";
-import { select, insert, update, rawRun } from "../db/repository.js";
-import { MessageStatus } from "../db/types.js";
-import { checkAndUnblockDependencies } from "./dependency-checker.js";
+import type { OpencodeClient } from '@opencode-ai/sdk';
+import type { SessionManager } from './session-manager.js';
+import { RoleManager, ALL_ROLES } from './role-manager.js';
+import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from './dispatcher.js';
+import { AbortError } from './retry.js';
+import { checkAndRotate } from './memory-rotator.js';
+import { checkAutoTriggers, resetTriggers } from './auto-trigger.js';
+import { checkWorkflowCompletion } from './workflow-checker.js';
+import { select, insert, update, rawRun } from '../db/repository.js';
+import { MessageStatus } from '../db/types.js';
+import { checkAndUnblockDependencies } from './dependency-checker.js';
 /** Sleep helper */
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -95,7 +95,7 @@ export async function startSchedulerLoop(
   resetTriggers();
   const roleManager = new RoleManager();
 
-  console.log("   🔄 调度器主循环已启动");
+  console.log('   🔄 调度器主循环已启动');
 
   while (running) {
     try {
@@ -109,9 +109,9 @@ export async function startSchedulerLoop(
       console.error(`   ❌ 调度器异常: ${err}`);
       // Log to database for diagnostics
       try {
-        insert("logs", {
-          role: "system",
-          action: "scheduler_error",
+        insert('logs', {
+          role: 'system',
+          action: 'scheduler_error',
           content: `调度器异常: ${err instanceof Error ? err.message : String(err)}`,
         });
       } catch {
@@ -124,7 +124,7 @@ export async function startSchedulerLoop(
     await sleep(1000);
   }
 
-  console.log("   🛑 调度器主循环已停止");
+  console.log('   🛑 调度器主循环已停止');
 }
 
 /**
@@ -154,8 +154,11 @@ async function schedulerTick(
 
   // 0.5 Promote deferred trigger messages when PM is idle and has no pending unread messages.
   // This ensures auto-trigger messages are dispatched in their own batch, not mixed with role messages.
-  if (!roleManager.isBusy("PM")) {
-    const pmUnread = select<MessageRow>("messages", { to_role: "PM", status: MessageStatus.Unread });
+  if (!roleManager.isBusy('PM')) {
+    const pmUnread = select<MessageRow>('messages', {
+      to_role: 'PM',
+      status: MessageStatus.Unread,
+    });
     if (pmUnread.length === 0) {
       rawRun(
         `UPDATE messages SET status = '${MessageStatus.Unread}' WHERE status = '${MessageStatus.Deferred}' AND to_role = 'PM'`
@@ -165,20 +168,20 @@ async function schedulerTick(
 
   // 1. User message priority: if there are unread user→PM messages,
   //    dispatch them immediately (bypass PM cooldown)
-  if (!roleManager.isBusy("PM")) {
+  if (!roleManager.isBusy('PM')) {
     const userMessages = select<MessageRow>(
-      "messages",
-      { from_role: "user", to_role: "PM", status: MessageStatus.Unread },
-      { orderBy: "created_at ASC" }
+      'messages',
+      { from_role: 'user', to_role: 'PM', status: MessageStatus.Unread },
+      { orderBy: 'created_at ASC' }
     );
     if (userMessages.length > 0) {
       console.log(`   📨 调度 → PM (${userMessages.length} 条用户消息, 优先)`);
-      roleManager.setBusy("PM", true);
+      roleManager.setBusy('PM', true);
       const abortController = new AbortController();
       currentAbortController = abortController;
       const taskId = userMessages.find((m) => m.related_task_id)?.related_task_id ?? null;
       currentDispatch = {
-        role: "PM",
+        role: 'PM',
         taskId,
         sessionId: null, // will be filled by dispatch
         startedAt: new Date().toISOString(),
@@ -187,17 +190,19 @@ async function schedulerTick(
         const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
           client,
           sessionManager,
-          "PM",
+          'PM',
           userMessages,
           {
             signal: abortController.signal,
-            onSessionResolved: (sid) => { if (currentDispatch) currentDispatch.sessionId = sid; },
+            onSessionResolved: (sid) => {
+              if (currentDispatch) currentDispatch.sessionId = sid;
+            },
           }
         );
         if (sessionId) {
           await checkAndRotate(
             sessionManager,
-            "PM",
+            'PM',
             sessionId,
             inputTokens,
             outputTokens,
@@ -208,7 +213,7 @@ async function schedulerTick(
       } finally {
         currentDispatch = null;
         currentAbortController = null;
-        roleManager.setBusy("PM", false);
+        roleManager.setBusy('PM', false);
         // Don't set pmLastDispatchEnd here: user-priority messages should not trigger cooldown
       }
       // User-priority dispatch resets consecutive count (not a "normal" PM dispatch)
@@ -227,19 +232,19 @@ async function schedulerTick(
     // PM cooldown: after PM finishes a dispatch, wait before injecting
     // more role messages. This gives user messages (via opencode web UI)
     // priority over queued role messages.
-    if (role === "PM" && Date.now() - pmLastDispatchEnd < PM_COOLDOWN_MS) {
+    if (role === 'PM' && Date.now() - pmLastDispatchEnd < PM_COOLDOWN_MS) {
       continue;
     }
 
     // PM starvation protection: if PM has been dispatched too many times
     // consecutively, skip PM for this tick to let DEV get scheduled.
-    if (role === "PM" && pmConsecutiveCount >= PM_MAX_CONSECUTIVE) {
+    if (role === 'PM' && pmConsecutiveCount >= PM_MAX_CONSECUTIVE) {
       // Check if other roles have pending messages
       const othersPending = ALL_ROLES.some(
         (r) =>
-          r !== "PM" &&
+          r !== 'PM' &&
           !roleManager.isBusy(r) &&
-          (select<MessageRow>("messages", { to_role: r, status: MessageStatus.Unread })).length > 0
+          select<MessageRow>('messages', { to_role: r, status: MessageStatus.Unread }).length > 0
       );
       if (othersPending) {
         continue;
@@ -248,9 +253,9 @@ async function schedulerTick(
 
     // Query unread messages for this role
     const messages = select<MessageRow>(
-      "messages",
+      'messages',
       { to_role: role, status: MessageStatus.Unread },
-      { orderBy: "created_at ASC" }
+      { orderBy: 'created_at ASC' }
     );
 
     if (messages.length === 0) continue;
@@ -269,7 +274,7 @@ async function schedulerTick(
     };
     try {
       // DEV: group messages by task to ensure correct session & context per task
-      const dispatch = role === "DEV" ? dispatchToRoleGrouped : dispatchToRole;
+      const dispatch = role === 'DEV' ? dispatchToRoleGrouped : dispatchToRole;
       const { sessionId, inputTokens, outputTokens } = await dispatch(
         client,
         sessionManager,
@@ -277,13 +282,15 @@ async function schedulerTick(
         messages,
         {
           signal: abortController.signal,
-          onSessionResolved: (sid) => { if (currentDispatch) currentDispatch.sessionId = sid; },
+          onSessionResolved: (sid) => {
+            if (currentDispatch) currentDispatch.sessionId = sid;
+          },
         }
       );
 
       // For PM: check session rotation. DEV rotation is handled per-group
       // inside dispatchToRoleGrouped to avoid cross-task token accumulation.
-      if (role === "PM" && sessionId) {
+      if (role === 'PM' && sessionId) {
         await checkAndRotate(
           sessionManager,
           role,
@@ -300,11 +307,11 @@ async function schedulerTick(
       if (err instanceof AbortError) throw err;
       console.error(`   ❌ ${role} 调度失败，标记 ${messages.length} 条消息为已读防止重复: ${err}`);
       for (const msg of messages) {
-        update("messages", { id: msg.id }, { status: MessageStatus.Read });
+        update('messages', { id: msg.id }, { status: MessageStatus.Read });
       }
-      insert("logs", {
-        role: "system",
-        action: "dispatch_failed",
+      insert('logs', {
+        role: 'system',
+        action: 'dispatch_failed',
         content: `${role} dispatch failed, ${messages.length} messages marked read: ${String(err).slice(0, 200)}`,
         related_task_id: dispatchTaskId,
       });
@@ -312,7 +319,7 @@ async function schedulerTick(
       currentDispatch = null;
       currentAbortController = null;
       roleManager.setBusy(role, false);
-      if (role === "PM") {
+      if (role === 'PM') {
         pmLastDispatchEnd = Date.now();
         pmConsecutiveCount++;
       } else {

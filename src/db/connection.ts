@@ -1,20 +1,20 @@
-import Database from "better-sqlite3";
-import * as sqliteVec from "sqlite-vec";
+import Database from 'better-sqlite3';
+import * as sqliteVec from 'sqlite-vec';
 
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!db) {
-    throw new Error("Database not initialized. Call openDb() first.");
+    throw new Error('Database not initialized. Call openDb() first.');
   }
   return db;
 }
 
 export function openDb(dbPath: string): Database.Database {
   db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000"); // Wait up to 5s on SQLITE_BUSY
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000'); // Wait up to 5s on SQLITE_BUSY
   sqliteVec.load(db);
   return db;
 }
