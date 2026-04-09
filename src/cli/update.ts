@@ -7,7 +7,12 @@ import { select as dbSelect } from '../db/repository.js';
 import { getDbPath } from '../config/index.js';
 import { syncAgents, deployTools } from '../workspace/sync-agents.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
-import { snapshotRoleMtimes, cleanOverviewOutput } from './onboarding.js';
+import {
+  snapshotRoleMtimes,
+  cleanOverviewOutput,
+  buildDevelopmentDocPrompt,
+  buildValidationDocPrompt,
+} from './onboarding.js';
 import { detectExistingCode, detectSubProjects } from '../workspace/init.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -75,8 +80,8 @@ async function _updateCommand() {
 
   console.log('\n📦 win-agent update\n');
 
-  // ── Step 1: 更新 overview.md ──
-  await updateOverview(workspace);
+  // ── Step 1: 更新文档 (overview / development / validation) ──
+  await updateDocs(workspace);
 
   // ── Step 2: 检查角色文件中的 overview 引用 ──
   ensureOverviewReference(workspace);
@@ -96,10 +101,42 @@ async function _updateCommand() {
   console.log('   如引擎正在运行，重启后生效: npx win-agent stop && npx win-agent start');
 }
 
-// ─── Step 1: 更新 overview.md ─────────────────────────────────────────────────
+// ─── Step 1: 更新文档 ────────────────────────────────────────────────────────
 
-async function updateOverview(workspace: string) {
-  console.log('1️⃣  更新项目概览（overview.md）');
+interface DocSpec {
+  file: string;
+  label: string;
+  header: string;
+  headerNote: string;
+  buildPrompt: (subProjects: string[]) => string;
+}
+
+const DOC_SPECS: DocSpec[] = [
+  {
+    file: 'overview.md',
+    label: '项目概览',
+    header: '# 项目概览',
+    headerNote: '',
+    buildPrompt: buildWorkspaceAnalysisPrompt,
+  },
+  {
+    file: 'development.md',
+    label: '开发流程规范',
+    header: '# 开发流程规范',
+    headerNote: '，请审阅并补充标记为 TODO 的部分',
+    buildPrompt: buildDevelopmentDocPrompt,
+  },
+  {
+    file: 'validation.md',
+    label: '自测与验收规范',
+    header: '# 自测与验收规范',
+    headerNote: '，请审阅并补充标记为 TODO 的部分',
+    buildPrompt: buildValidationDocPrompt,
+  },
+];
+
+async function updateDocs(workspace: string) {
+  console.log('1️⃣  更新项目文档');
 
   const hasCode = detectExistingCode(workspace);
   if (!hasCode) {
@@ -109,58 +146,71 @@ async function updateOverview(workspace: string) {
 
   const docsDir = path.join(workspace, '.win-agent', 'docs');
   if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
-  const overviewPath = path.join(docsDir, 'overview.md');
-  const exists = fs.existsSync(overviewPath);
 
-  const doUpdate = await confirm({
-    message: exists ? '重新生成 overview.md？' : '生成 overview.md？',
-    default: !exists,
-  });
-  if (!doUpdate) {
+  // Ask which docs to regenerate
+  const toUpdate: DocSpec[] = [];
+  for (const spec of DOC_SPECS) {
+    const filePath = path.join(docsDir, spec.file);
+    const exists = fs.existsSync(filePath);
+    const doIt = await confirm({
+      message: exists ? `重新生成 ${spec.file}？` : `生成 ${spec.file}？`,
+      default: !exists,
+    });
+    if (doIt) toUpdate.push(spec);
+  }
+
+  if (toUpdate.length === 0) {
     console.log('   已跳过');
     return;
   }
 
+  const subProjects = detectSubProjects(workspace);
   let serverHandle: Awaited<ReturnType<typeof startOpencodeServer>> | null = null;
   try {
     serverHandle = await startOpencodeServer(workspace);
     const { client } = serverHandle;
 
-    const session = await client.session.create({ body: { title: 'wa-update-overview' } });
+    const session = await client.session.create({ body: { title: 'wa-update-docs' } });
     const sessionId = session.data!.id;
 
-    console.log('   → 分析中，请稍候...');
-    const result = await client.session.prompt({
-      path: { id: sessionId },
-      body: {
-        agent: 'PM',
-        parts: [{ type: 'text', text: buildWorkspaceAnalysisPrompt(detectSubProjects(workspace)) }],
-      },
-    });
+    for (const spec of toUpdate) {
+      const filePath = path.join(docsDir, spec.file);
+      console.log(`   → 生成${spec.label} (${spec.file})...`);
 
-    const textParts = result.data?.parts?.filter(
-      (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
-    );
-    const overview = cleanOverviewOutput(textParts?.map((p) => p.text).join('\n') ?? '');
+      const result = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          agent: 'PM',
+          parts: [{ type: 'text', text: spec.buildPrompt(subProjects) }],
+        },
+      });
 
-    if (exists) {
-      const backupsDir = path.join(workspace, '.win-agent', 'backups');
-      fs.mkdirSync(backupsDir, { recursive: true });
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      fs.copyFileSync(overviewPath, path.join(backupsDir, `overview.${timestamp}.md`));
+      const textParts = result.data?.parts?.filter(
+        (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
+      );
+      const content = cleanOverviewOutput(textParts?.map((p) => p.text).join('\n') ?? '');
+
+      // Backup existing file
+      if (fs.existsSync(filePath)) {
+        const backupsDir = path.join(workspace, '.win-agent', 'backups');
+        fs.mkdirSync(backupsDir, { recursive: true });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const baseName = path.basename(spec.file, '.md');
+        fs.copyFileSync(filePath, path.join(backupsDir, `${baseName}.${timestamp}.md`));
+      }
+
+      fs.writeFileSync(
+        filePath,
+        `${spec.header}\n\n_由 \`win-agent update\` 自动生成${spec.headerNote}_\n\n${content}`,
+        'utf-8'
+      );
+      console.log(`   ✓ 已写入 .win-agent/docs/${spec.file}`);
     }
-
-    fs.writeFileSync(
-      overviewPath,
-      `# 项目概览\n\n_由 \`win-agent update\` 自动生成_\n\n${overview}`,
-      'utf-8'
-    );
-    console.log('   ✓ 已写入 .win-agent/docs/overview.md');
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException)?.code === 'INSTALL_FAILED') {
       throw err;
     }
-    console.log(`   ⚠️  概览生成失败，跳过: ${err}`);
+    console.log(`   ⚠️  文档生成失败，跳过: ${err}`);
   } finally {
     if (serverHandle?.owned) {
       serverHandle.close();

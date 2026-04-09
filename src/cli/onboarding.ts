@@ -16,6 +16,16 @@ import { setEmbeddingDimension } from '../db/schema.js';
 import { getDbPath } from '../config/index.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
 
+/** Machine-detectable marker for content that needs user review */
+export const TODO_MARKER_REGEX = /⚠️ \*\*TODO\*\*/;
+
+/** Check whether a file contains TODO markers that need user attention */
+export function hasTodoMarkers(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  const content = fs.readFileSync(filePath, 'utf-8');
+  return TODO_MARKER_REGEX.test(content);
+}
+
 /**
  * Strip any preamble text before the first markdown heading in LLM output.
  * LLMs sometimes produce conversational filler like "现在我来生成文档了。" before the actual content.
@@ -87,6 +97,121 @@ ${monorepoSection}
 ${chaptersSection}
 
 严格要求：直接以 Markdown 正文开头（即以 ## 标题开头），禁止输出任何过渡性语句、思考过程或额外解释（如"现在我来生成文档"、"我已经分析完毕"等）。`;
+}
+
+export function buildDevelopmentDocPrompt(subProjects: string[]): string {
+  const isMonorepo = subProjects.length > 0;
+  const subProjectList = subProjects.map((p) => `  - ${p}`).join('\n');
+
+  const monorepoNote = isMonorepo
+    ? `\n**重要：这是一个 Monorepo 项目，包含以下子项目：**
+${subProjectList}
+你必须逐个分析每个子项目的配置。`
+    : '';
+
+  const perProjectSection = isMonorepo
+    ? `
+对每个子项目，在"构建与部署"章节下使用三级标题 ### 子项目名，分别列出其实际命令。`
+    : '';
+
+  return `请分析当前工作空间，生成一份开发流程规范文档。
+
+使用 glob 和 read 工具扫描项目，重点读取：
+1. ESLint / Prettier / EditorConfig / Biome 等代码规范配置文件
+2. package.json 中的 scripts（构建、lint、测试等命令）
+3. Git hooks 配置（husky、lint-staged、commitlint 等）
+4. CI/CD 配置文件（.github/workflows/、Jenkinsfile、.gitlab-ci.yml 等）
+5. Dockerfile / docker-compose / 部署相关配置
+6. tsconfig.json / jsconfig.json 等编译配置
+${monorepoNote}
+
+请直接输出 Markdown 格式文档，必须包含以下章节：
+
+## 编码规范
+  基于实际扫描到的配置文件内容填写。例如：使用了哪些 ESLint 插件/规则集、Prettier 配置要点、TypeScript 严格模式是否开启等。
+  如果没有找到相关配置文件，标记 TODO。
+
+## 分支策略
+  如果能从 CI/CD 配置、README、CONTRIBUTING.md 等文件推断出分支策略则填写，否则标记 TODO。
+
+## 提交规范
+  如果项目配置了 commitlint、husky 等则基于实际配置填写，否则标记 TODO。
+
+## 构建与部署
+  必须基于 package.json / Makefile 等实际确认的命令填写。包括：
+  - 安装依赖命令
+  - 构建命令
+  - 开发模式启动命令
+  - Lint / 格式化命令
+  - 部署方式（如果能从配置推断）
+${perProjectSection}
+
+## 重要规则：TODO 标记
+对于无法从项目中确定、需要用户补充的内容，必须使用以下格式标记：
+
+> ⚠️ **TODO**: 请补充具体说明（这里写上你认为用户应该补充什么）
+
+例如：
+> ⚠️ **TODO**: 请补充分支命名规范和主要分支的用途说明
+
+严格要求：直接以 ## 标题开头，禁止输出任何过渡性语句、思考过程或额外解释。`;
+}
+
+export function buildValidationDocPrompt(subProjects: string[]): string {
+  const isMonorepo = subProjects.length > 0;
+  const subProjectList = subProjects.map((p) => `  - ${p}`).join('\n');
+
+  const monorepoNote = isMonorepo
+    ? `\n**重要：这是一个 Monorepo 项目，包含以下子项目：**
+${subProjectList}
+你必须逐个分析每个子项目的测试配置。`
+    : '';
+
+  const perProjectSection = isMonorepo
+    ? `
+对每个子项目，在相应章节下使用三级标题 ### 子项目名，分别列出其测试情况。`
+    : '';
+
+  return `请分析当前工作空间，生成一份自测与验收规范文档。
+
+使用 glob 和 read 工具扫描项目，重点读取：
+1. 测试框架配置（jest.config、vitest.config、mocha、pytest 等）
+2. package.json 中的测试相关 scripts
+3. 测试目录结构（__tests__、test/、tests/、spec/ 等）
+4. E2E 测试配置（Playwright、Cypress、Selenium 等）
+5. 测试覆盖率配置（c8、istanbul、nyc 等）
+6. CI 中的测试步骤
+${monorepoNote}
+
+请直接输出 Markdown 格式文档，必须包含以下章节：
+
+## 自测要求
+  基于实际扫描到的测试框架和配置填写：
+  - 使用的测试框架及版本
+  - 运行单元测试的命令
+  - 测试覆盖率要求（如果配置中有）
+  - 测试文件的命名和放置规范（基于现有测试文件的模式推断）
+  如果项目没有测试框架，明确指出并标记 TODO。
+${perProjectSection}
+
+## E2E 验证
+  如果项目配置了 E2E 测试框架则填写配置详情和运行命令，否则标记 TODO。
+
+## 回归测试
+  如果能从 CI 配置推断出回归测试策略则填写，否则标记 TODO。
+
+## 验收标准
+  标记 TODO（验收标准通常需要用户自行定义）。
+
+## 重要规则：TODO 标记
+对于无法从项目中确定、需要用户补充的内容，必须使用以下格式标记：
+
+> ⚠️ **TODO**: 请补充具体说明（这里写上你认为用户应该补充什么）
+
+例如：
+> ⚠️ **TODO**: 请补充单元测试覆盖率的最低要求
+
+严格要求：直接以 ## 标题开头，禁止输出任何过渡性语句、思考过程或额外解释。`;
 }
 
 export async function onboardingCommand() {
@@ -198,29 +323,53 @@ async function _onboardingCommand() {
       const session = await client.session.create({ body: { title: 'wa-onboarding-analyst' } });
       const sessionId = session.data!.id;
 
-      console.log('   → 分析中，请稍候...');
-      const result = await client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          agent: 'PM',
-          parts: [{ type: 'text', text: buildWorkspaceAnalysisPrompt(subProjects) }],
-        },
-      });
-
-      const textParts = result.data?.parts?.filter(
-        (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
-      );
-      overview = cleanOverviewOutput(textParts?.map((p) => p.text).join('\n') ?? '');
-
       const docsDir = path.join(workspace, '.win-agent', 'docs');
       if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
-      const overviewPath = path.join(docsDir, 'overview.md');
+
+      // Helper: send prompt and extract text
+      const generateDoc = async (prompt: string): Promise<string> => {
+        const result = await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            agent: 'PM',
+            parts: [{ type: 'text', text: prompt }],
+          },
+        });
+        const textParts = result.data?.parts?.filter(
+          (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
+        );
+        return cleanOverviewOutput(textParts?.map((p) => p.text).join('\n') ?? '');
+      };
+
+      // 7a. overview.md
+      console.log('   → 生成项目概览 (overview.md)...');
+      overview = await generateDoc(buildWorkspaceAnalysisPrompt(subProjects));
       fs.writeFileSync(
-        overviewPath,
+        path.join(docsDir, 'overview.md'),
         `# 项目概览\n\n_由 \`win-agent onboard\` 自动生成_\n\n${overview}`,
         'utf-8'
       );
       console.log('   ✓ 已写入 .win-agent/docs/overview.md');
+
+      // 7b. development.md
+      console.log('   → 生成开发流程规范 (development.md)...');
+      const devContent = await generateDoc(buildDevelopmentDocPrompt(subProjects));
+      fs.writeFileSync(
+        path.join(docsDir, 'development.md'),
+        `# 开发流程规范\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${devContent}`,
+        'utf-8'
+      );
+      console.log('   ✓ 已写入 .win-agent/docs/development.md');
+
+      // 7c. validation.md
+      console.log('   → 生成自测与验收规范 (validation.md)...');
+      const valContent = await generateDoc(buildValidationDocPrompt(subProjects));
+      fs.writeFileSync(
+        path.join(docsDir, 'validation.md'),
+        `# 自测与验收规范\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${valContent}`,
+        'utf-8'
+      );
+      console.log('   ✓ 已写入 .win-agent/docs/validation.md');
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException)?.code === 'INSTALL_FAILED') {
         throw err;
@@ -412,7 +561,11 @@ function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
 
 #### 编码规范
 
+> ⚠️ **TODO**: 请补充 ${p} 的编码规范
+
 #### 构建与部署
+
+> ⚠️ **TODO**: 请补充 ${p} 的构建与部署命令
 `
         )
         .join('\n')
@@ -426,7 +579,11 @@ function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
 
 #### 自测要求
 
+> ⚠️ **TODO**: 请补充 ${p} 的自测要求
+
 #### E2E 验证
+
+> ⚠️ **TODO**: 请补充 ${p} 的 E2E 验证要求
 `
         )
         .join('\n')
@@ -435,27 +592,43 @@ function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
   return {
     'development.md': `# 开发流程规范
 
-> 请根据项目实际情况补充以下章节内容。${isMonorepo ? '\n> 这是一个 Monorepo 项目，请为每个子项目补充对应章节。' : ''}
+_AI 分析未能运行，以下为模板骨架，请补充标记为 TODO 的部分_
 
 ## 编码规范
 
+> ⚠️ **TODO**: 请补充项目的编码规范（ESLint 规则、Prettier 配置等）
+
 ## 分支策略
+
+> ⚠️ **TODO**: 请补充分支命名规范和主要分支的用途说明
 
 ## 提交规范
 
+> ⚠️ **TODO**: 请补充 Git 提交信息规范
+
 ## 构建与部署
+
+> ⚠️ **TODO**: 请补充构建、开发、部署相关命令
 ${perProjectDev}`,
     'validation.md': `# 自测与验收规范
 
-> 请根据项目实际情况补充以下章节内容。${isMonorepo ? '\n> 这是一个 Monorepo 项目，请为每个子项目补充对应章节。' : ''}
+_AI 分析未能运行，以下为模板骨架，请补充标记为 TODO 的部分_
 
 ## 自测要求
 
+> ⚠️ **TODO**: 请补充单元测试框架、运行命令和覆盖率要求
+
 ## E2E 验证
+
+> ⚠️ **TODO**: 请补充 E2E 测试框架和运行命令
 
 ## 回归测试
 
+> ⚠️ **TODO**: 请补充回归测试策略
+
 ## 验收标准
+
+> ⚠️ **TODO**: 请补充功能验收标准
 ${perProjectVal}`,
   };
 }

@@ -9,6 +9,7 @@ import { select as dbSelect, insert as dbInsert } from '../db/repository.js';
 import { syncAgents, deployTools } from '../workspace/sync-agents.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
+import { hasTodoMarkers } from './onboarding.js';
 
 // Re-export for stop command compatibility
 export { getServerHandle, getSessionManager } from './engine.js';
@@ -202,17 +203,43 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
     }
   }
 
-  if (unmodified.length === 0 && !overviewUnmodified && docsUnmodified.length === 0) return;
+  // Check for TODO markers in docs files (even if mtime changed, TODOs mean incomplete)
+  const docsWithTodos: string[] = [];
+  const docsDir = path.join(workspace, '.win-agent', 'docs');
+  for (const file of ['development.md', 'validation.md']) {
+    const filePath = path.join(docsDir, file);
+    if (docsUnmodified.includes(file)) continue; // already flagged as unmodified
+    if (hasTodoMarkers(filePath)) docsWithTodos.push(file);
+  }
 
-  console.log('\n❌ 以下文件自 onboard 后未经修改，请根据项目实际情况修改后再启动：');
-  for (const file of unmodified) {
-    console.log(`   • .win-agent/roles/${file}`);
+  if (
+    unmodified.length === 0 &&
+    !overviewUnmodified &&
+    docsUnmodified.length === 0 &&
+    docsWithTodos.length === 0
+  )
+    return;
+
+  const hasUnmodified = unmodified.length > 0 || overviewUnmodified || docsUnmodified.length > 0;
+  if (hasUnmodified) {
+    console.log('\n❌ 以下文件自 onboard 后未经修改，请根据项目实际情况修改后再启动：');
+    for (const file of unmodified) {
+      console.log(`   • .win-agent/roles/${file}`);
+    }
+    if (overviewUnmodified) {
+      console.log('   • .win-agent/docs/overview.md');
+    }
+    for (const file of docsUnmodified) {
+      console.log(`   • .win-agent/docs/${file}`);
+    }
   }
-  if (overviewUnmodified) {
-    console.log('   • .win-agent/docs/overview.md');
-  }
-  for (const file of docsUnmodified) {
-    console.log(`   • .win-agent/docs/${file}`);
+  if (docsWithTodos.length > 0) {
+    console.log(
+      `\n❌ 以下文件仍包含待补充的 TODO 标记（⚠️ TODO），请补充完整后再启动：`
+    );
+    for (const file of docsWithTodos) {
+      console.log(`   • .win-agent/docs/${file}`);
+    }
   }
   console.log('\n   根据项目实际情况审核并调整以上文件，完成后重新执行 npx win-agent start');
   removePidFile();
