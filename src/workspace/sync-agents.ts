@@ -279,7 +279,7 @@ async function getDb(directory: string) {
 
 const TABLES = [
   "messages", "tasks", "task_dependencies", "knowledge", "logs",
-  "memory", "workflow_instances", "iterations", "proposals", "project_config",
+  "memory", "iterations", "proposals", "project_config",
   "role_outputs", "task_events", "role_permissions",
 ] as const;
 

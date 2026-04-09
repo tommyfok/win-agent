@@ -87,22 +87,22 @@ export async function engineCommand(workspace: string) {
   const contextLimit = await detectModelContextLimit(serverHandle.client);
   console.log(`✓ 模型 context 上限: ${contextLimit.toLocaleString()} tokens`);
 
-  // Check memories and active workflows
+  // Check memories and active iterations
   const memoryCount = rawQuery('SELECT COUNT(*) as cnt FROM memory')[0].cnt;
   if (memoryCount ?? 0 > 0) {
     console.log(`✓ 已回忆 ${memoryCount} 条近期记忆`);
   }
 
-  const activeWorkflows = dbSelect('workflow_instances', { status: 'active' });
-  if (activeWorkflows.length > 0) {
+  const activeIterations = dbSelect('iterations', { status: 'active' });
+  if (activeIterations.length > 0) {
     dbInsert('messages', {
       from_role: 'system',
       to_role: 'PM',
       type: 'system',
-      content: `引擎已重启恢复，有 ${activeWorkflows.length} 个工作流继续执行。`,
+      content: `引擎已重启恢复，有 ${activeIterations.length} 个活跃迭代继续执行。`,
       status: MessageStatus.Unread,
     });
-    console.log(`△ 发现 ${activeWorkflows.length} 个活跃工作流，已通知 PM`);
+    console.log(`△ 发现 ${activeIterations.length} 个活跃迭代，已通知 PM`);
   }
 
   // Log engine start

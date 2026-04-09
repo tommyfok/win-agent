@@ -26,22 +26,21 @@ export async function statusCommand() {
   console.log(`\n🔄 win-agent 运行中 (PID: ${pid})`);
   console.log(`   工作空间: ${workspace}`);
 
-  // 2. Active workflow instances
-  const workflows = dbSelect<{
+  // 2. Active iterations
+  const iterations = dbSelect<{
     id: number;
-    template: string;
-    phase: string;
+    name: string | null;
     status: string;
     created_at: string;
-  }>('workflow_instances', { status: 'active' }, { orderBy: 'created_at DESC' });
-  console.log('\n📋 工作流实例:');
-  if (workflows.length === 0) {
-    console.log('   无活跃工作流');
+  }>('iterations', { status: 'active' }, { orderBy: 'created_at DESC' });
+  console.log('\n📋 迭代:');
+  if (iterations.length === 0) {
+    console.log('   无活跃迭代');
   } else {
-    for (const wf of workflows) {
-      const elapsed = formatElapsed(wf.created_at);
-      console.log(`   #${wf.id} [${wf.template}] 阶段: ${wf.phase}`);
-      console.log(`      状态: ${wf.status} | 已进行: ${elapsed}`);
+    for (const iter of iterations) {
+      const elapsed = formatElapsed(iter.created_at);
+      const name = iter.name ? ` ${iter.name}` : '';
+      console.log(`   #${iter.id}${name} | 状态: ${iter.status} | 已进行: ${elapsed}`);
     }
   }
 
@@ -115,28 +114,28 @@ export async function statusCommand() {
     }
     console.log(`   合计: ${formatTokens(grandTotal)} tokens`);
 
-    // Per-workflow cost (active workflows only)
-    const wfCosts = rawQuery<{
+    // Per-iteration cost (active iterations only)
+    const iterCosts = rawQuery<{
       id: number;
-      template: string;
-      phase: string;
+      name: string | null;
       total_tokens: number;
       dispatch_count: number;
     }>(`
-      SELECT w.id, w.template, w.phase,
+      SELECT i.id, i.name,
              SUM(r.input_tokens + r.output_tokens) as total_tokens,
              COUNT(r.id) as dispatch_count
-      FROM workflow_instances w
-      JOIN role_outputs r ON r.related_workflow_id = w.id
-      WHERE w.status = 'active'
-      GROUP BY w.id
+      FROM iterations i
+      JOIN role_outputs r ON r.related_iteration_id = i.id
+      WHERE i.status = 'active'
+      GROUP BY i.id
       ORDER BY total_tokens DESC
     `);
-    if (wfCosts.length > 0) {
-      console.log('   按工作流:');
-      for (const wc of wfCosts) {
+    if (iterCosts.length > 0) {
+      console.log('   按迭代:');
+      for (const ic of iterCosts) {
+        const name = ic.name ? ` ${ic.name}` : '';
         console.log(
-          `     #${wc.id} [${wc.template}]: ${formatTokens(wc.total_tokens ?? 0)} tokens (${wc.dispatch_count} 次调度)`
+          `     #${ic.id}${name}: ${formatTokens(ic.total_tokens ?? 0)} tokens (${ic.dispatch_count} 次调度)`
         );
       }
     }
@@ -166,8 +165,6 @@ export async function statusCommand() {
 
   console.log('');
 }
-
-// formatTokens imported from ../utils/format.js
 
 function formatElapsed(createdAt: string): string {
   const created = new Date(createdAt);

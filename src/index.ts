@@ -32,12 +32,12 @@ program.command('talk').description('Open PM conversation in browser').action(ta
 
 program
   .command('status')
-  .description('Show engine status and workflow progress')
+  .description('Show engine status and iteration progress')
   .action(statusCommand);
 
 program
-  .command('cancel <workflow_id>')
-  .description('Cancel a workflow instance')
+  .command('cancel <iteration_id>')
+  .description('Cancel an iteration')
   .action(cancelCommand);
 
 program.command('stop').description('Stop the engine').action(stopCommand);

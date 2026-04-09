@@ -5,7 +5,7 @@ import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from './dispat
 import { AbortError } from './retry.js';
 import { checkAndRotate } from './memory-rotator.js';
 import { checkAutoTriggers, resetTriggers } from './auto-trigger.js';
-import { checkWorkflowCompletion } from './workflow-checker.js';
+import { checkIterationReview } from './iteration-checker.js';
 import { select, insert, update, rawRun } from '../db/repository.js';
 import { MessageStatus } from '../db/types.js';
 import { checkAndUnblockDependencies } from './dependency-checker.js';
@@ -82,7 +82,7 @@ let pmConsecutiveCount = 0;
  * - Each cycle iterates through ALL_ROLES
  * - PM has priority (checked first)
  * - Only one role is dispatched per cycle
- * - After dispatch, check auto-triggers and workflow completion
+ * - After dispatch, check auto-triggers and iteration review
  * - Sleep 1s between cycles to avoid tight polling
  */
 export async function startSchedulerLoop(
@@ -142,7 +142,7 @@ export function stopSchedulerLoop(): void {
  * 3. Iterate roles (PM first), find one with unread messages
  * 4. Dispatch messages to that role
  * 5. Check session rotation
- * 6. Check auto-triggers and workflow completion
+ * 6. Check auto-triggers and iteration review
  */
 async function schedulerTick(
   client: OpencodeClient,
@@ -220,7 +220,7 @@ async function schedulerTick(
       pmConsecutiveCount = 0;
       // After user message dispatch, check triggers and return
       checkAutoTriggers();
-      checkWorkflowCompletion(sessionManager);
+      checkIterationReview(sessionManager);
       return;
     }
   }
@@ -333,5 +333,5 @@ async function schedulerTick(
   // Always check triggers and completion, even if nothing was dispatched
   // (tasks may have been updated by a previous dispatch's tool calls)
   checkAutoTriggers();
-  checkWorkflowCompletion(sessionManager);
+  checkIterationReview(sessionManager);
 }

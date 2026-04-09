@@ -77,7 +77,7 @@ export interface MessageRow {
   content: string;
   status: string;
   related_task_id: number | null;
-  related_workflow_id: number | null;
+  related_iteration_id: number | null;
   attachments: string | null;
   created_at: string;
 }
@@ -219,7 +219,7 @@ export async function dispatchToRole(
         input_tokens: inputTokens,
         output_tokens: outputTokens,
         related_task_id: messages[0]?.related_task_id ?? null,
-        related_workflow_id: messages[0]?.related_workflow_id ?? null,
+        related_iteration_id: messages[0]?.related_iteration_id ?? null,
       });
     }
   } catch {

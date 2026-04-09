@@ -10,7 +10,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       content     TEXT NOT NULL,
       status      TEXT NOT NULL DEFAULT 'unread',
       related_task_id INTEGER REFERENCES tasks(id),
-      related_workflow_id INTEGER REFERENCES workflow_instances(id),
+      related_iteration_id INTEGER REFERENCES iterations(id),
       attachments  TEXT,
       created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
@@ -28,8 +28,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       implementation_notes TEXT,
       rejection_reason    TEXT,
       pre_suspend_status  TEXT,
-      workflow_id     INTEGER REFERENCES workflow_instances(id),
-      iteration       INTEGER NOT NULL DEFAULT 0,
+      iteration_id    INTEGER REFERENCES iterations(id),
       created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
@@ -74,23 +73,15 @@ const TABLE_SCHEMAS: Record<string, string> = {
       created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
 
-  workflow_instances: `
-    CREATE TABLE IF NOT EXISTS workflow_instances (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      template        TEXT NOT NULL,
-      phase           TEXT NOT NULL,
-      status          TEXT NOT NULL DEFAULT 'active',
-      context         TEXT,
-      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-
   iterations: `
     CREATE TABLE IF NOT EXISTS iterations (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT,
+      description  TEXT,
       status       TEXT NOT NULL DEFAULT 'active',
       created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      completed_at DATETIME
+      completed_at DATETIME,
+      reviewed_at  DATETIME
     )`,
 
   role_permissions: `
@@ -112,7 +103,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       status      TEXT NOT NULL DEFAULT 'pending',
       resolution  TEXT,
       related_task_id     INTEGER REFERENCES tasks(id),
-      related_workflow_id INTEGER REFERENCES workflow_instances(id),
+      related_iteration_id INTEGER REFERENCES iterations(id),
       created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
@@ -134,7 +125,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       input_tokens        INTEGER DEFAULT 0,
       output_tokens       INTEGER DEFAULT 0,
       related_task_id     INTEGER REFERENCES tasks(id),
-      related_workflow_id INTEGER REFERENCES workflow_instances(id),
+      related_iteration_id INTEGER REFERENCES iterations(id),
       created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
 
@@ -177,28 +168,26 @@ function getVectorTableSQL(): string[] {
 /** Indexes for scheduler polling and common queries */
 const INDEX_STATEMENTS: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_messages_dispatch ON messages(to_role, status)',
-  'CREATE INDEX IF NOT EXISTS idx_messages_workflow ON messages(related_workflow_id)',
-  'CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id)',
+  'CREATE INDEX IF NOT EXISTS idx_messages_iteration ON messages(related_iteration_id)',
   'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, assigned_to)',
-  'CREATE INDEX IF NOT EXISTS idx_tasks_iteration ON tasks(iteration)',
+  'CREATE INDEX IF NOT EXISTS idx_tasks_iteration ON tasks(iteration_id)',
   'CREATE INDEX IF NOT EXISTS idx_memory_role ON memory(role, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, submitted_by)',
   'CREATE INDEX IF NOT EXISTS idx_role_outputs_role ON role_outputs(role, created_at)',
-  'CREATE INDEX IF NOT EXISTS idx_role_outputs_workflow ON role_outputs(related_workflow_id)',
+  'CREATE INDEX IF NOT EXISTS idx_role_outputs_iteration ON role_outputs(related_iteration_id)',
   'CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)',
 ];
 
 // Table creation order matters due to foreign key references
 const CREATE_ORDER = [
-  'workflow_instances',
+  'iterations',
   'tasks',
   'task_dependencies',
   'messages',
   'knowledge',
   'logs',
   'memory',
-  'iterations',
   'proposals',
   'role_permissions',
   'project_config',
