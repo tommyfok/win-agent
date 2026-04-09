@@ -1,6 +1,71 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+
+// ─── Required MCP Servers ────────────────────────────────────────────────────
+
+export interface McpConfig {
+  name: string;
+  config: {
+    type: 'local' | 'remote';
+    command?: string[];
+    url?: string;
+    headers?: Record<string, string>;
+    environment?: Record<string, string>;
+  };
+}
+
+/** MCP servers that must be present in opencode config. Add new entries here. */
+export const REQUIRED_MCPS: McpConfig[] = [
+  {
+    name: 'playwright',
+    config: {
+      type: 'local',
+      command: ['npx', '-y', '@playwright/mcp'],
+    },
+  },
+];
+
+/**
+ * Check opencode global config for required MCP servers.
+ * Missing ones are written directly into the config file.
+ * Returns { installed: names added, alreadyExists: names already present }.
+ */
+export function ensureRequiredMcps(): { installed: string[]; alreadyExists: string[] } {
+  const configPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
+
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    } catch {
+      /* corrupted config — will be overwritten */
+    }
+  } else {
+    // Ensure directory exists
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  }
+
+  const mcp = (config.mcp ?? {}) as Record<string, unknown>;
+  const installed: string[] = [];
+  const alreadyExists: string[] = [];
+
+  for (const required of REQUIRED_MCPS) {
+    if (mcp[required.name]) {
+      alreadyExists.push(required.name);
+    } else {
+      mcp[required.name] = required.config;
+      installed.push(required.name);
+    }
+  }
+
+  if (installed.length > 0) {
+    config.mcp = mcp;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 4), 'utf-8');
+  }
+
+  return { installed, alreadyExists };
+}
 
 // ─── Default Skills ───────────────────────────────────────────────────────────
 
@@ -190,31 +255,6 @@ export function syncAgents(workspace: string): string[] {
   }
 
   return synced;
-}
-
-/**
- * Install default skills into the workspace via `npx skills add`.
- * Returns the list of successfully installed package identifiers.
- */
-export function installDefaultSkills(workspace: string): string[] {
-  const installed: string[] = [];
-  for (const skill of DEFAULT_SKILLS) {
-    process.stdout.write(`   → 安装 ${skill.pkg} ... `);
-    const result = spawnSync('npx', ['skills', 'add', skill.pkg], {
-      cwd: workspace,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    if (result.status === 0) {
-      console.log('✓');
-      installed.push(skill.pkg);
-    } else {
-      console.log('✗ 失败');
-      const errMsg = (result.stderr ?? '').trim();
-      if (errMsg) console.log(`     ${errMsg.split('\n')[0]}`);
-    }
-  }
-  return installed;
 }
 
 /**

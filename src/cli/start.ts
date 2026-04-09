@@ -204,7 +204,7 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
 
   if (unmodified.length === 0 && !overviewUnmodified && docsUnmodified.length === 0) return;
 
-  console.log('\n❌ 以下文件自 onboard 后未经修改，请审核后再启动：');
+  console.log('\n❌ 以下文件自 onboard 后未经修改，请根据项目实际情况修改后再启动：');
   for (const file of unmodified) {
     console.log(`   • .win-agent/roles/${file}`);
   }

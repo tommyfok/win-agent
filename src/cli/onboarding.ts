@@ -8,9 +8,7 @@ import { select as dbSelect, insert as dbInsert, update as dbUpdate } from '../d
 import {
   syncAgents,
   deployTools,
-  installDefaultSkills,
-  DEFAULT_SKILLS,
-  getSkillDirName,
+  ensureRequiredMcps,
 } from '../workspace/sync-agents.js';
 import { insertKnowledge } from '../embedding/knowledge.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
@@ -113,17 +111,14 @@ async function _onboardingCommand() {
   deployTools(workspace);
   console.log('   ✓ 完成');
 
-  // ── 6.5 安装默认 Skill ──
-  console.log('\n   安装默认 Skill');
-  for (const s of DEFAULT_SKILLS) {
-    const roles = s.roles.join(', ');
-    console.log(`   · ${getSkillDirName(s.pkg)}  (${roles})`);
+  // ── 6.5 检查必要的 MCP 服务 ──
+  console.log('\n   检查 MCP 服务');
+  const mcpResult = ensureRequiredMcps();
+  for (const name of mcpResult.alreadyExists) {
+    console.log(`   ✓ ${name} 已就绪`);
   }
-  const installSkills = await confirm({ message: '   安装以上 skill？', default: true });
-  if (installSkills) {
-    installDefaultSkills(workspace);
-  } else {
-    console.log('   已跳过');
+  for (const name of mcpResult.installed) {
+    console.log(`   + ${name} 已自动添加到 opencode 配置`);
   }
 
   // ── 7️⃣ 工作空间分析 ──
@@ -196,7 +191,7 @@ async function _onboardingCommand() {
   console.log(`   项目: ${projectName}`);
   if (overview) console.log('   概览: .win-agent/overview.md');
   console.log('   角色: .win-agent/roles/  （可直接编辑，重启后对 PM 生效）');
-  console.log('\n提示：需要 MCP 工具请在下次启动前配置好，Agent 运行时无法自行安装');
+  console.log('\n提示：如需额外 MCP 工具，请在启动前通过 opencode mcp add 配置');
   console.log('就绪后执行：npx win-agent start');
 }
 
