@@ -25,20 +25,11 @@ const WORKSPACE_ANALYSIS_PROMPT = `请分析当前工作空间，生成一份项
 2. 目录结构和关键文件
 3. 主要模块/功能划分
 4. 依赖和配置情况
-5. 开发工作流程：构建、lint、测试命令（必须实际读取 package.json / Makefile 等确认真实命令）
 
 请直接输出 Markdown 格式的概览文档，必须包含以下章节：
 ## 技术栈
 ## 目录结构（关键路径）
 ## 主要模块
-## 开发人员工作流程
-  该章节必须包含以下内容（根据项目实际情况填写，没有的标注"无"）：
-  - 构建命令（如 npm run build）
-  - Lint 命令（如 npm run lint）
-  - 单元测试命令（如 npm test）
-  - 集成测试（如有）
-  - E2E 测试
-  - 其他开发相关命令
 
 只输出文档内容，不需要额外解释。`;
 
@@ -188,9 +179,13 @@ async function _onboardingCommand() {
   syncAgents(workspace); // re-sync after injection
   console.log('   ✓ 完成');
 
+  // ── 9️⃣ 确保 docs 规则文件存在 ──
+  ensureDocsFiles(workspace);
+
   // ── 完成 ──
   // Snapshot role file mtimes so `start` can detect user edits
   snapshotRoleMtimes(workspace);
+  snapshotDocsMtimes(workspace);
 
   if (alreadyDone.length === 0) {
     dbInsert('project_config', { key: 'onboarding_completed', value: 'true' });
@@ -363,6 +358,73 @@ export function snapshotRoleMtimes(workspace: string): void {
     } else {
       dbInsert('project_config', { key: 'overview_mtime_snapshot', value: mtime });
     }
+  }
+}
+
+// ─── Docs 规则文件 ───────────────────────────────────────────────────────────
+
+const DOCS_SKELETON: Record<string, string> = {
+  'development.md': `# 开发流程规范
+
+> 请根据项目实际情况补充以下章节内容。
+
+## 编码规范
+
+## 分支策略
+
+## 提交规范
+
+## 构建与部署
+`,
+  'validation.md': `# 自测与验收规范
+
+> 请根据项目实际情况补充以下章节内容。
+
+## 自测要求
+
+## E2E 验证
+
+## 回归测试
+
+## 验收标准
+`,
+};
+
+function ensureDocsFiles(workspace: string): void {
+  const docsDir = path.join(workspace, '.win-agent', 'docs');
+  if (!fs.existsSync(docsDir)) {
+    fs.mkdirSync(docsDir, { recursive: true });
+  }
+  for (const [filename, skeleton] of Object.entries(DOCS_SKELETON)) {
+    const filePath = path.join(docsDir, filename);
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, skeleton, 'utf-8');
+      console.log(`   ✓ 已创建 .win-agent/docs/${filename}`);
+    }
+  }
+}
+
+export function snapshotDocsMtimes(workspace: string): void {
+  const docsDir = path.join(workspace, '.win-agent', 'docs');
+  if (!fs.existsSync(docsDir)) return;
+
+  const targets = ['development.md', 'validation.md'];
+  const snapshot: Record<string, number> = {};
+  for (const file of targets) {
+    const filePath = path.join(docsDir, file);
+    if (fs.existsSync(filePath)) {
+      snapshot[file] = fs.statSync(filePath).mtimeMs;
+    }
+  }
+  if (Object.keys(snapshot).length === 0) return;
+
+  const existing = dbSelect<{ key: string; value: string }>('project_config', {
+    key: 'docs_mtimes_snapshot',
+  });
+  if (existing.length > 0) {
+    dbUpdate('project_config', { key: 'docs_mtimes_snapshot' }, { value: JSON.stringify(snapshot) });
+  } else {
+    dbInsert('project_config', { key: 'docs_mtimes_snapshot', value: JSON.stringify(snapshot) });
   }
 }
 

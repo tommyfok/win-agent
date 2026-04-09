@@ -186,7 +186,23 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
     }
   }
 
-  if (unmodified.length === 0 && !overviewUnmodified) return;
+  // Check docs rule files (development.md, validation.md)
+  const docsUnmodified: string[] = [];
+  const docsSnapshotRow = dbSelect<{ key: string; value: string }>('project_config', {
+    key: 'docs_mtimes_snapshot',
+  });
+  if (docsSnapshotRow.length > 0) {
+    const docsSnapshot: Record<string, number> = JSON.parse(docsSnapshotRow[0].value);
+    const docsDir = path.join(workspace, '.win-agent', 'docs');
+    for (const [file, snapshotMtime] of Object.entries(docsSnapshot)) {
+      const filePath = path.join(docsDir, file);
+      if (!fs.existsSync(filePath)) continue;
+      const currentMtime = fs.statSync(filePath).mtimeMs;
+      if (currentMtime === snapshotMtime) docsUnmodified.push(file);
+    }
+  }
+
+  if (unmodified.length === 0 && !overviewUnmodified && docsUnmodified.length === 0) return;
 
   console.log('\n❌ 以下文件自 onboard 后未经修改，请审核后再启动：');
   for (const file of unmodified) {
@@ -194,6 +210,9 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
   }
   if (overviewUnmodified) {
     console.log('   • .win-agent/overview.md');
+  }
+  for (const file of docsUnmodified) {
+    console.log(`   • .win-agent/docs/${file}`);
   }
   console.log('\n   根据项目实际情况审核并调整以上文件，完成后重新执行 npx win-agent start');
   removePidFile();
