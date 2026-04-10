@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { input, confirm } from '@inquirer/prompts';
+import { input, confirm, select } from '@inquirer/prompts';
 import { runEnvCheck } from './check.js';
 import { initWorkspace, detectExistingCode, detectSubProjects } from '../workspace/init.js';
 import { openDb, closeDb, getDb } from '../db/connection.js';
@@ -37,6 +37,22 @@ export function cleanOverviewOutput(raw: string): string {
     return raw.slice(match.index! + match[1].length);
   }
   return raw;
+}
+
+/**
+ * Check whether a docs file is a skeleton/placeholder (not yet filled with real content).
+ * Skeleton files contain TODO markers, or greenfield placeholder text like "待脚手架任务完成后补充".
+ */
+function isSkeletonOrPlaceholder(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return true;
+  const content = fs.readFileSync(filePath, 'utf-8');
+  // Greenfield placeholder
+  if (content.includes('待脚手架任务完成后补充')) return true;
+  // Skeleton with TODO markers
+  if (TODO_MARKER_REGEX.test(content)) return true;
+  // AI analysis failure skeleton
+  if (content.includes('以下为模板骨架')) return true;
+  return false;
 }
 
 export function buildWorkspaceAnalysisPrompt(subProjects: string[]): string {
@@ -312,6 +328,30 @@ async function _onboardingCommand() {
   }
   console.log('   ✓ 已保存');
 
+  // ── 4.5 项目模式检测 ──
+  const hasCode = detectExistingCode(workspace);
+  let isGreenfield = false;
+  if (!hasCode) {
+    console.log('\n   检测到空目录');
+    const projectMode = await select({
+      message: '选择项目模式',
+      choices: [
+        { name: '从零开始（0-to-1）—— 我要创建一个新项目', value: 'greenfield' },
+        { name: '已有代码 —— 我会把代码放进来', value: 'existing' },
+      ],
+    });
+    isGreenfield = projectMode === 'greenfield';
+    const existingMode = dbSelect<{ key: string; value: string }>('project_config', {
+      key: 'project_mode',
+    });
+    if (existingMode.length > 0) {
+      dbUpdate('project_config', { key: 'project_mode' }, { value: projectMode });
+    } else {
+      dbInsert('project_config', { key: 'project_mode', value: projectMode });
+    }
+    console.log(`   ✓ 项目模式: ${isGreenfield ? '从零开始' : '已有代码'}`);
+  }
+
   // ── 5️⃣ 项目上下文导入 ──
   await importProjectContext(workspace);
 
@@ -340,7 +380,17 @@ async function _onboardingCommand() {
   }
   let overview = '';
   let serverHandle: Awaited<ReturnType<typeof startOpencodeServer>> | null = null;
-  if (!detectExistingCode(workspace)) {
+  if (isGreenfield) {
+    console.log('   0-to-1 模式，跳过 AI 分析，生成占位文档');
+    const docsDir = path.join(workspace, '.win-agent', 'docs');
+    if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+    const greenfieldDocs = buildGreenfieldDocs();
+    for (const [filename, content] of Object.entries(greenfieldDocs)) {
+      const filePath = path.join(docsDir, filename);
+      fs.writeFileSync(filePath, content, 'utf-8');
+      console.log(`   ✓ 已创建 .win-agent/docs/${filename}（待脚手架任务后更新）`);
+    }
+  } else if (!detectExistingCode(workspace)) {
     console.log('   空目录，跳过');
   } else
     try {
@@ -379,24 +429,48 @@ async function _onboardingCommand() {
       console.log('   ✓ 已写入 .win-agent/docs/overview.md');
 
       // 7b. development.md
-      console.log('   → 生成开发指南 (development.md)...');
-      const devContent = await generateDoc(buildDevelopmentDocPrompt(subProjects));
-      fs.writeFileSync(
-        path.join(docsDir, 'development.md'),
-        `# 开发指南\n\n_由 \`win-agent init\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${devContent}`,
-        'utf-8'
-      );
-      console.log('   ✓ 已写入 .win-agent/docs/development.md');
+      const devPath = path.join(docsDir, 'development.md');
+      let skipDev = false;
+      if (fs.existsSync(devPath) && !isSkeletonOrPlaceholder(devPath)) {
+        skipDev = !(await confirm({
+          message: 'development.md 已包含实际内容（可能由 DEV 更新），是否覆盖？',
+          default: false,
+        }));
+      }
+      if (!skipDev) {
+        console.log('   → 生成开发指南 (development.md)...');
+        const devContent = await generateDoc(buildDevelopmentDocPrompt(subProjects));
+        fs.writeFileSync(
+          devPath,
+          `# 开发指南\n\n_由 \`win-agent init\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${devContent}`,
+          'utf-8'
+        );
+        console.log('   ✓ 已写入 .win-agent/docs/development.md');
+      } else {
+        console.log('   ⏭ 保留已有 development.md');
+      }
 
       // 7c. validation.md
-      console.log('   → 生成验收规范 (validation.md)...');
-      const valContent = await generateDoc(buildValidationDocPrompt(subProjects));
-      fs.writeFileSync(
-        path.join(docsDir, 'validation.md'),
-        `# 验收规范\n\n_由 \`win-agent init\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${valContent}`,
-        'utf-8'
-      );
-      console.log('   ✓ 已写入 .win-agent/docs/validation.md');
+      const valPath = path.join(docsDir, 'validation.md');
+      let skipVal = false;
+      if (fs.existsSync(valPath) && !isSkeletonOrPlaceholder(valPath)) {
+        skipVal = !(await confirm({
+          message: 'validation.md 已包含实际内容（可能由 DEV 更新），是否覆盖？',
+          default: false,
+        }));
+      }
+      if (!skipVal) {
+        console.log('   → 生成验收规范 (validation.md)...');
+        const valContent = await generateDoc(buildValidationDocPrompt(subProjects));
+        fs.writeFileSync(
+          valPath,
+          `# 验收规范\n\n_由 \`win-agent init\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${valContent}`,
+          'utf-8'
+        );
+        console.log('   ✓ 已写入 .win-agent/docs/validation.md');
+      } else {
+        console.log('   ⏭ 保留已有 validation.md');
+      }
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException)?.code === 'INSTALL_FAILED') {
         throw err;
@@ -576,6 +650,34 @@ export function snapshotRoleMtimes(workspace: string): void {
 }
 
 // ─── Docs 规则文件 ───────────────────────────────────────────────────────────
+
+function buildGreenfieldDocs(): Record<string, string> {
+  return {
+    'development.md': `# 开发指南
+
+_项目尚未创建，本文件将在脚手架搭建完成后由 DEV 自动更新。_
+
+## 环境准备
+待脚手架任务完成后补充。
+
+## 开发命令
+待脚手架任务完成后补充。
+
+## 编码要求
+待脚手架任务完成后补充。
+`,
+    'validation.md': `# 验收规范
+
+_项目尚未创建，本文件将在脚手架搭建完成后由 DEV 自动更新。_
+
+## 代码检查
+待脚手架任务完成后补充。
+
+## E2E 验收
+待脚手架任务完成后补充。
+`,
+  };
+}
 
 function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
   const isMonorepo = subProjects.length > 0;

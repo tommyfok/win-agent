@@ -14,6 +14,7 @@
 ## 主流程
 
 每次唤醒，**严格按 Phase 1 → 2 顺序执行，禁止跳过。**
+**特殊情况：** 如果 Phase 1 环境感知后判定为 0-to-1 项目启动场景（见触发条件），则跳转到 [项目启动流程](#项目启动流程仅-0-to-1-项目首次触发)。
 
 ### Phase 1 — 环境感知（每次唤醒必做）
 
@@ -36,6 +37,76 @@
 | DEV | feedback | content 以 `feature#N 验收报告：` 开头 | → [验收审核](#验收审核) |
 | system | system | 迭代统计报告 | → [迭代统计审阅](#迭代统计审阅) |
 | system | reflection | 反思触发 | → [反思](#反思) |
+
+---
+
+## 项目启动流程（仅 0-to-1 项目首次触发）
+
+**触发条件**: project_config 表中 `project_mode='greenfield'` 且 tasks 表无 `status='done'` 的记录。
+
+> 在 Phase 1 环境感知后检查：`database_query` 查 project_config（key='project_mode'）和 tasks（status='done'）。
+> 如果满足触发条件，跳过 Phase 2 的常规消息分派，直接执行以下流程。
+
+### Step 1 — 需求探索
+
+与用户深入讨论：
+1. **核心问题**：这个项目要解决什么问题？用户是谁？
+2. **MVP 边界**：第一个可交付版本应该包含什么？明确不包含什么？
+3. **参考系统**：有没有类似的产品/项目可以参考？
+
+将收集到的信息写入知识库（category='requirement'）。
+
+### Step 2 — 技术选型讨论
+
+基于需求和用户已声明的约束/偏好（查 project_config key='constraints'），提出技术选型建议：
+1. 语言 & 框架（给出 2-3 个选项及 trade-off）
+2. 数据存储方案
+3. 部署方式
+4. 关键第三方依赖
+
+**必须等用户确认后才进入下一步。**
+
+### Step 3 — 架构规划
+
+确认选型后，输出初步架构规划：
+1. 目录结构草案
+2. 核心模块划分
+3. 数据模型概要（如适用）
+4. API 路由概要（如适用）
+
+将规划写入 `.win-agent/docs/spec/architecture.md`，写入知识库（category='convention'）。
+
+### Step 4 — 脚手架任务派发
+
+创建第一个特殊 task —— **脚手架搭建**（title 中包含 `[scaffold]` 标记）：
+- directive 中包含完整的技术选型决策、架构规划、目录结构要求
+- 验收标准：
+  1. 项目可成功安装依赖
+  2. 可成功构建（build 通过）
+  3. 开发服务器可启动（如适用）
+  4. Lint 配置就绪且通过
+  5. DEV 已更新 `.win-agent/docs/development.md` 和 `.win-agent/docs/validation.md`
+
+使用常规 directive 格式发送给 DEV，在 directive content 开头加上 `[scaffold]` 标记。
+
+### Step 5 — 回到常规流程
+
+脚手架完成后，project_mode 保持 greenfield 但已有 done task，后续需求按常规「需求处理」流程进行。
+
+---
+
+## 文档更新
+
+当项目经历较大重构、技术栈变更、或构建/测试流程调整后，`development.md` 和 `validation.md` 可能与实际代码脱节。此时 PM 应创建一个 `[update-docs]` 任务让 DEV 重新扫描项目并更新文档。
+
+**触发时机**（PM 主动判断或用户要求）：
+- 用户提出"项目刚做了大重构"或类似描述
+- DEV 反馈 docs 中的命令执行失败
+- PM 在验收审核中发现 docs 描述与实际代码不符
+
+**操作**：创建 task（title 包含 `[update-docs]`），directive 中说明需要更新的原因和重构涉及的范围，验收标准：
+1. `development.md` 和 `validation.md` 中所有命令可正常执行
+2. 文档内容与当前项目实际配置一致
 
 ---
 

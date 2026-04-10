@@ -2,6 +2,11 @@ import { select, insert, rawQuery, rawRun } from '../db/repository.js';
 import { MessageStatus } from '../db/types.js';
 import { formatTokens } from '../utils/format.js';
 
+interface ProjectConfigRow {
+  key: string;
+  value: string;
+}
+
 /**
  * 记录本次引擎生命周期内已触发过的自动触发条件，防止重复触发。
  *
@@ -17,6 +22,7 @@ const firedTriggers: Set<string> = new Set();
  * 2. 当前迭代打回率 > 30% → 生成统计报告 → 通知 PM 提前复盘
  */
 export function checkAutoTriggers(): void {
+  checkScaffoldDone();
   checkAllTasksDone();
   checkRejectionRate();
 }
@@ -35,6 +41,53 @@ export function resetTriggers(): void {
   for (const row of rows) {
     firedTriggers.add(row.content);
   }
+}
+
+/**
+ * 检查脚手架任务是否已完成（0-to-1 项目）。
+ * 脚手架完成后，通知 PM 执行工作空间分析生成 overview.md。
+ */
+function checkScaffoldDone(): void {
+  const key = 'scaffold_done';
+  if (firedTriggers.has(key)) return;
+
+  // 仅在 greenfield 模式下检查
+  const modeRow = select<ProjectConfigRow>('project_config', { key: 'project_mode' });
+  if (modeRow.length === 0 || modeRow[0].value !== 'greenfield') return;
+
+  // 查找已完成的脚手架任务（title 包含 [scaffold]）
+  const scaffoldDone = rawQuery<{ id: number }>(
+    "SELECT id FROM tasks WHERE title LIKE '%[scaffold]%' AND status = 'done' LIMIT 1",
+    []
+  );
+  if (scaffoldDone.length === 0) return;
+
+  firedTriggers.add(key);
+
+  // 通知 PM 执行工作空间分析
+  insert('messages', {
+    from_role: 'system',
+    to_role: 'PM',
+    type: 'system',
+    content: `🏗️ 脚手架任务已完成。请执行以下操作：
+
+1. **生成项目概览**：扫描当前工作空间，分析项目结构和技术栈，生成概览文档并写入 \`.win-agent/docs/overview.md\`。
+   - 概览应包含：项目定位、技术栈、核心模块、架构要点
+   - 直接以 Markdown 正文输出，以 ## 标题开头
+
+2. **审阅 docs 文件**：检查 DEV 更新的 \`.win-agent/docs/development.md\` 和 \`.win-agent/docs/validation.md\` 是否完整准确。
+
+3. 向用户汇报脚手架搭建完成情况，询问是否可以开始功能需求开发。`,
+    status: MessageStatus.Deferred,
+  });
+
+  insert('logs', {
+    role: 'system',
+    action: 'auto_trigger',
+    content: '脚手架任务完成，已通知 PM 生成 overview.md',
+  });
+
+  console.log('   🏗️ 自动触发: 脚手架完成，通知 PM 生成项目概览');
 }
 
 /**
