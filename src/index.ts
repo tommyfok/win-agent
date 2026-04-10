@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { checkCommand } from './cli/check.js';
-import { onboardingCommand } from './cli/onboarding.js';
+import { initCommand } from './cli/init.js';
 import { startCommand } from './cli/start.js';
 import { engineCommand } from './cli/engine.js';
 import { talkCommand } from './cli/talk.js';
@@ -22,9 +22,9 @@ program
   .action(checkCommand);
 
 program
-  .command('onboard')
+  .command('init')
   .description('One-time project setup: configure, scan workspace, inject context into role files')
-  .action(onboardingCommand);
+  .action(initCommand);
 
 program.command('start').description('Start the engine').action(startCommand);
 

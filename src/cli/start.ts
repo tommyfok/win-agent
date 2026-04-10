@@ -9,7 +9,7 @@ import { select as dbSelect, insert as dbInsert } from '../db/repository.js';
 import { syncAgents, deployTools } from '../workspace/sync-agents.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
-import { hasTodoMarkers } from './onboarding.js';
+import { hasTodoMarkers } from './init.js';
 import { checkRecommendedSkills, printSkillRecommendations } from './skills.js';
 
 // Re-export for stop command compatibility
@@ -87,8 +87,8 @@ async function _startCommand() {
     key: 'onboarding_completed',
   });
   if (onboardDone.length === 0) {
-    console.log('\n❌ 请先执行 onboard 命令完成项目初始化：');
-    console.log('   npx win-agent onboard');
+    console.log('\n❌ 请先执行 init 命令完成项目初始化：');
+    console.log('   npx win-agent init');
     removePidFile();
     process.exit(1);
   }
@@ -167,7 +167,7 @@ async function _startCommand() {
 
 /**
  * On first start, compare current role file mtimes against the snapshot saved by
- * `onboard`. Files that haven't changed since onboard = not yet reviewed by user.
+ * `init`. Files that haven't changed since init = not yet reviewed by user.
  * Warns and requires confirmation before proceeding.
  */
 async function checkRoleFilesReviewed(workspace: string): Promise<void> {
@@ -180,7 +180,7 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
   const snapshotRow = dbSelect<{ key: string; value: string }>('project_config', {
     key: 'role_mtimes_snapshot',
   });
-  if (snapshotRow.length === 0) return; // no snapshot (onboard not run), skip
+  if (snapshotRow.length === 0) return; // no snapshot (init not run), skip
 
   const snapshot: Record<string, number> = JSON.parse(snapshotRow[0].value);
   const rolesDir = path.join(workspace, '.win-agent', 'roles');
@@ -243,7 +243,7 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
 
   const hasUnmodified = unmodified.length > 0 || overviewUnmodified || docsUnmodified.length > 0;
   if (hasUnmodified) {
-    console.log('\n❌ 以下文件自 onboard 后未经修改，请根据项目实际情况修改后再启动：');
+    console.log('\n❌ 以下文件自 init 后未经修改，请根据项目实际情况修改后再启动：');
     for (const file of unmodified) {
       console.log(`   • .win-agent/roles/${file}`);
     }

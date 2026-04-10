@@ -231,7 +231,7 @@ pnpm test
 直接以 ## 开头，禁止输出过渡性语句。`;
 }
 
-export async function onboardingCommand() {
+export async function initCommand() {
   try {
     await _onboardingCommand();
   } catch (err: unknown) {
@@ -273,7 +273,7 @@ async function _onboardingCommand() {
     key: 'onboarding_completed',
   });
   if (alreadyDone.length > 0) {
-    const rerun = await confirm({ message: 'Onboarding 已完成过，是否重新运行？', default: false });
+    const rerun = await confirm({ message: '初始化已完成过，是否重新运行？', default: false });
     if (!rerun) {
       console.log('   已跳过');
       closeDb();
@@ -363,7 +363,7 @@ async function _onboardingCommand() {
       overview = await generateDoc(buildWorkspaceAnalysisPrompt(subProjects));
       fs.writeFileSync(
         path.join(docsDir, 'overview.md'),
-        `# 项目概览\n\n_由 \`win-agent onboard\` 自动生成_\n\n${overview}`,
+        `# 项目概览\n\n_由 \`win-agent init\` 自动生成_\n\n${overview}`,
         'utf-8'
       );
       console.log('   ✓ 已写入 .win-agent/docs/overview.md');
@@ -373,7 +373,7 @@ async function _onboardingCommand() {
       const devContent = await generateDoc(buildDevelopmentDocPrompt(subProjects));
       fs.writeFileSync(
         path.join(docsDir, 'development.md'),
-        `# 开发指南\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${devContent}`,
+        `# 开发指南\n\n_由 \`win-agent init\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${devContent}`,
         'utf-8'
       );
       console.log('   ✓ 已写入 .win-agent/docs/development.md');
@@ -383,7 +383,7 @@ async function _onboardingCommand() {
       const valContent = await generateDoc(buildValidationDocPrompt(subProjects));
       fs.writeFileSync(
         path.join(docsDir, 'validation.md'),
-        `# 验收规范\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${valContent}`,
+        `# 验收规范\n\n_由 \`win-agent init\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${valContent}`,
         'utf-8'
       );
       console.log('   ✓ 已写入 .win-agent/docs/validation.md');
@@ -418,7 +418,7 @@ async function _onboardingCommand() {
   }
   closeDb();
 
-  console.log('\n✅ Onboarding 完成');
+  console.log('\n✅ 初始化完成');
   console.log(`   项目: ${projectName}`);
   if (overview) console.log('   概览: .win-agent/docs/overview.md');
   console.log('   角色: .win-agent/roles/  （可直接编辑，重启后对 PM 生效）');

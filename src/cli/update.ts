@@ -12,7 +12,7 @@ import {
   cleanOverviewOutput,
   buildDevelopmentDocPrompt,
   buildValidationDocPrompt,
-} from './onboarding.js';
+} from './init.js';
 import { detectExistingCode, detectSubProjects } from '../workspace/init.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,7 +33,7 @@ function getTemplatesDir(): string {
   throw new Error('找不到包内模板目录，已尝试:\n' + candidates.map((c) => `  ${c}`).join('\n'));
 }
 
-import { buildWorkspaceAnalysisPrompt } from './onboarding.js';
+import { buildWorkspaceAnalysisPrompt } from './init.js';
 
 const PROJECT_CONTEXT_SENTINEL =
   /<!-- win-agent:project-context -->[\s\S]*?<!-- \/win-agent:project-context -->\n?/;
@@ -58,7 +58,7 @@ async function _updateCommand() {
   const rolesDir = path.join(workspace, '.win-agent', 'roles');
 
   if (!fs.existsSync(rolesDir)) {
-    console.log('⚠️  工作空间未初始化，请先执行: npx win-agent onboard');
+    console.log('⚠️  工作空间未初始化，请先执行: npx win-agent init');
     process.exit(1);
   }
 
