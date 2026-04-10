@@ -124,105 +124,59 @@ export function buildDevelopmentDocPrompt(subProjects: string[]): string {
   const subProjectList = subProjects.map((p) => `  - ${p}`).join('\n');
 
   const monorepoNote = isMonorepo
-    ? `\n**重要：这是一个 Monorepo 项目，包含以下子项目：**
+    ? `\n**Monorepo 项目，子项目：**
 ${subProjectList}
-你必须逐个分析每个子项目的配置，在相关章节下使用三级标题 ### 子项目名 分别说明。`
+在每个章节下使用 ### 子项目名 分别说明。`
     : '';
 
-  return `请分析当前工作空间，生成一份面向 AI 开发 Agent 的开发指南文档。
+  return `分析当前工作空间，生成面向 AI Agent 的开发指南。内容必须简洁、可直接执行。
 
-**核心目标**：这份文档将被 AI Agent 在执行开发任务时参考，因此内容必须是明确、可执行的步骤和命令，而非描述性的规范说明。
-
-按以下步骤扫描项目（严格使用给定的 glob 模式，禁止扫描 \`.\` 开头的目录）：
-
-Step 1 — 定位配置文件：
+扫描步骤（禁止扫描 \`.\` 开头的目录）：
   glob("[!.]**/package.json")
-  glob("[!.]**/tsconfig.json")
-  glob("[!.]**/jsconfig.json")
-  glob("[!.]**/.eslintrc*")
-  glob("[!.]**/prettier.config*")
-  glob("[!.]**/biome.json")
-  glob("[!.]**/Dockerfile")
-  glob("[!.]**/docker-compose*")
   glob("[!.]**/go.mod")
   glob("[!.]**/Cargo.toml")
   glob("[!.]**/pyproject.toml")
   glob("[!.]**/pom.xml")
-  也读取根目录的 README.md、CONTRIBUTING.md（如果存在）
-
-Step 2 — read 读取 Step 1 中找到的文件，提取依赖、脚本命令、规范配置等信息
+  glob("[!.]**/.eslintrc*")
+  glob("[!.]**/biome.json")
+  也读取根目录 README.md（如果存在）
+  read 上述找到的文件
 ${monorepoNote}
 
-请直接输出 Markdown 格式文档，包含以下章节：
+输出以下章节：
 
-## 技术栈
+## 环境准备
 
-用一个简短的列表列出项目的核心技术栈（语言、框架、运行时、包管理器等）。例如：
-- 语言：TypeScript
-- 运行时：Node.js 20
-- 框架：NestJS
-- 包管理器：pnpm
+列出从零开始到可以开发需要的命令，例如：
+\`\`\`bash
+pnpm install
+\`\`\`
+如有环境变量、数据库、Docker 等前置依赖也列出。
 
 ## 开发命令
 
-这是最重要的章节。必须基于 package.json / Makefile 等实际确认的命令，列出开发过程中需要用到的所有命令。格式为直接可执行的命令行，例如：
-
+基于 package.json / Makefile 等实际命令，列出开发、构建、lint、测试等命令：
 \`\`\`bash
-# 安装依赖
-pnpm install
-
-# 开发模式启动
-pnpm dev
-
-# 构建
-pnpm build
-
-# Lint 检查
-pnpm lint
-
-# 运行测试
-pnpm test
+pnpm dev      # 开发
+pnpm build    # 构建
+pnpm lint     # 代码检查
+pnpm test     # 测试
 \`\`\`
+注意：优先检查是否有docker-compose.dev相关的配置，如果有，则直接使用docker-compose.dev启动开发环境，如果没有，则使用其他命令启动开发环境。
 
-如果有多个子项目，分别列出各子项目的命令。
+## 编码要求
 
-## 开发流程
-
-用**编号步骤**描述 Agent 拿到一个开发任务后应该遵循的标准流程。例如：
-1. 阅读需求，理解要实现的功能
-2. 确认相关的代码模块和文件位置
-3. 编写代码实现功能
-4. 运行 lint 检查并修复问题
-5. 运行测试确认无回归
-6. ...
-
-根据项目实际情况调整步骤。如果项目配置了 pre-commit hooks / lint-staged 等，在相关步骤中提及。
-
-## 技术栈最佳实践
-
-根据检测到的技术栈，给出针对性的开发最佳实践要点。这些是 Agent 编码时应该遵循的原则。
-
-**要求**：根据项目实际使用的技术栈来写，不同技术栈侧重点不同。例如：
-- **TypeScript 项目**：类型安全要求、避免 any、使用严格模式等
-- **React 项目**：组件设计模式、hooks 使用规范、状态管理方式等
-- **Vue 项目**：组合式 API vs 选项式 API、组件通信方式等
-- **NestJS 项目**：模块组织、依赖注入、DTO 验证等
-- **Node.js 服务端**：错误处理、日志规范、中间件模式等
-- **Go 项目**：错误处理模式、并发模式、项目布局等
-- **Python 项目**：类型提示、虚拟环境、代码风格等
-
-每条最佳实践应该简短明确（1-2 句话），列出 5-10 条最重要的即可，不要面面俱到。
-
-## 分支与提交规范
-
-简要说明分支策略和提交规范。如果项目有 commitlint 等配置则基于实际配置写，否则标记 TODO。此章节尽量简短，3-5 行即可。
+根据项目实际技术栈，给出 Agent 编码时必须遵循的要求。每条 1 句话，只列最重要的 5-8 条。
+包括但不限于：
+1. 检测到的技术栈的最佳实践/skill，直接基于 npx skills find xxx 找到对应的skill并综合分析最佳的一个写入文档，如果找到了直接要求写代码时使用该skill，如果没有找到，就上网搜下相关最佳实践并写入文档
+2. 代码规范（eslint/prettier/biome 配置要求）
+3. 项目特有的模式和约定等(可选)
 
 ## 重要规则：TODO 标记
-对于无法从项目中确定、需要用户补充的内容，必须使用以下格式标记：
+无法确定的内容用此格式标记：
+> ⚠️ **TODO**: 说明需要补充什么
 
-> ⚠️ **TODO**: 请补充具体说明（这里写上你认为用户应该补充什么）
-
-严格要求：直接以 ## 标题开头，禁止输出任何过渡性语句、思考过程或额外解释。`;
+直接以 ## 开头，禁止输出过渡性语句。`;
 }
 
 export function buildValidationDocPrompt(subProjects: string[]): string {
@@ -230,72 +184,51 @@ export function buildValidationDocPrompt(subProjects: string[]): string {
   const subProjectList = subProjects.map((p) => `  - ${p}`).join('\n');
 
   const monorepoNote = isMonorepo
-    ? `\n**重要：这是一个 Monorepo 项目，包含以下子项目：**
+    ? `\n**Monorepo 项目，子项目：**
 ${subProjectList}
-你必须逐个分析每个子项目的测试配置。`
+在每个章节下使用 ### 子项目名 分别说明。`
     : '';
 
-  const perProjectSection = isMonorepo
-    ? `
-对每个子项目，在相应章节下使用三级标题 ### 子项目名，分别列出其测试情况。`
-    : '';
+  return `分析当前工作空间，生成面向 AI Agent 的验收规范文档。内容必须简洁、可直接执行。
 
-  return `请分析当前工作空间，生成一份自测与验收规范文档。
-
-按以下步骤扫描项目（严格使用给定的 glob 模式，禁止扫描 \`.\` 开头的目录）：
-
-Step 1 — 定位测试相关配置文件：
+扫描步骤（禁止扫描 \`.\` 开头的目录）：
   glob("[!.]**/jest.config*")
   glob("[!.]**/vitest.config*")
   glob("[!.]**/playwright.config*")
   glob("[!.]**/cypress.config*")
-  glob("[!.]**/.nycrc*")
   glob("[!.]**/pytest.ini")
-  glob("[!.]**/setup.cfg")
   glob("[!.]**/package.json")
-
-Step 2 — 定位测试目录和 CI 配置：
-  glob("[!.]**/__tests__/**/*")
-  glob("[!.]**/test/**/*")
-  glob("[!.]**/tests/**/*")
-  glob("[!.]**/spec/**/*")
-  glob("[!.]**/e2e/**/*")
-  glob("[!.]**/.github/workflows/*")
-  glob("[!.]**/Jenkinsfile")
-  glob("[!.]**/.gitlab-ci.yml")
-
-Step 3 — read 读取 Step 1-2 中找到的配置文件，提取测试框架、命令、覆盖率要求等信息
+  read 上述找到的配置文件
 ${monorepoNote}
 
-请直接输出 Markdown 格式文档，必须包含以下章节：
+输出以下章节：
 
-## 自测要求
-  基于实际扫描到的测试框架和配置填写：
-  - 使用的测试框架及版本
-  - 运行单元测试的命令
-  - 测试覆盖率要求（如果配置中有）
-  - 测试文件的命名和放置规范（基于现有测试文件的模式推断）
-  如果项目没有测试框架，明确指出并标记 TODO。
-${perProjectSection}
+## 代码检查
 
-## E2E 验证
-  如果项目配置了 E2E 测试框架则填写配置详情和运行命令，否则标记 TODO。
+列出 Agent 提交代码前必须通过的检查命令，根据项目实际情况调查并列出，比如：
+\`\`\`bash
+pnpm lint
+pnpm build
+pnpm test
+\`\`\`
+注意，必须经过有现实依据的调查，给出实际、真实的命令。
 
-## 回归测试
-  如果能从 CI 配置推断出回归测试策略则填写，否则标记 TODO。
+## E2E 验收
 
-## 验收标准
-  标记 TODO（验收标准通常需要用户自行定义）。
+根据项目类型，说明 Agent 完成功能开发后如何进行端到端验收：
+
+- **Web 前端/全栈项目**：使用 Playwright 访问页面，验证核心功能可用。列出启动命令和验收步骤。
+- **API/后端服务**：使用 curl 调用关键接口，验证返回正确。列出启动命令和示例请求。
+- **小程序项目**：使用 miniapp-mcp 等工具进行端到端测试。
+- **CLI/库项目**：执行主要命令或导入模块，验证核心功能。
+
+只写与本项目匹配的类型，给出具体的验收步骤和命令。如果项目已配置 E2E 测试框架（Playwright/Cypress 等），直接列出运行命令。
 
 ## 重要规则：TODO 标记
-对于无法从项目中确定、需要用户补充的内容，必须使用以下格式标记：
+无法确定的内容用此格式标记：
+> ⚠️ **TODO**: 说明需要补充什么
 
-> ⚠️ **TODO**: 请补充具体说明（这里写上你认为用户应该补充什么）
-
-例如：
-> ⚠️ **TODO**: 请补充单元测试覆盖率的最低要求
-
-严格要求：直接以 ## 标题开头，禁止输出任何过渡性语句、思考过程或额外解释。`;
+直接以 ## 开头，禁止输出过渡性语句。`;
 }
 
 export async function onboardingCommand() {
@@ -436,21 +369,21 @@ async function _onboardingCommand() {
       console.log('   ✓ 已写入 .win-agent/docs/overview.md');
 
       // 7b. development.md
-      console.log('   → 生成开发流程规范 (development.md)...');
+      console.log('   → 生成开发指南 (development.md)...');
       const devContent = await generateDoc(buildDevelopmentDocPrompt(subProjects));
       fs.writeFileSync(
         path.join(docsDir, 'development.md'),
-        `# 开发流程规范\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${devContent}`,
+        `# 开发指南\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${devContent}`,
         'utf-8'
       );
       console.log('   ✓ 已写入 .win-agent/docs/development.md');
 
       // 7c. validation.md
-      console.log('   → 生成自测与验收规范 (validation.md)...');
+      console.log('   → 生成验收规范 (validation.md)...');
       const valContent = await generateDoc(buildValidationDocPrompt(subProjects));
       fs.writeFileSync(
         path.join(docsDir, 'validation.md'),
-        `# 自测与验收规范\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${valContent}`,
+        `# 验收规范\n\n_由 \`win-agent onboard\` 自动生成，请审阅并补充标记为 TODO 的部分_\n\n${valContent}`,
         'utf-8'
       );
       console.log('   ✓ 已写入 .win-agent/docs/validation.md');
@@ -643,7 +576,7 @@ function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
         .map(
           (p) => `### ${p}
 
-> ⚠️ **TODO**: 请补充 ${p} 的开发命令和技术栈最佳实践
+> ⚠️ **TODO**: 请补充 ${p} 的环境准备和开发命令
 `
         )
         .join('\n')
@@ -655,62 +588,40 @@ function buildDocsSkeleton(subProjects: string[]): Record<string, string> {
         .map(
           (p) => `### ${p}
 
-#### 自测要求
-
-> ⚠️ **TODO**: 请补充 ${p} 的自测要求
-
-#### E2E 验证
-
-> ⚠️ **TODO**: 请补充 ${p} 的 E2E 验证要求
+> ⚠️ **TODO**: 请补充 ${p} 的检查命令和 E2E 验收方式
 `
         )
         .join('\n')
     : '';
 
   return {
-    'development.md': `# 开发流程规范
+    'development.md': `# 开发指南
 
 _AI 分析未能运行，以下为模板骨架，请补充标记为 TODO 的部分_
 
-## 技术栈
+## 环境准备
 
-> ⚠️ **TODO**: 请补充项目的核心技术栈（语言、框架、运行时、包管理器等）
+> ⚠️ **TODO**: 请补充安装依赖和环境准备命令
 
 ## 开发命令
 
-> ⚠️ **TODO**: 请补充安装依赖、开发启动、构建、lint、测试等命令
+> ⚠️ **TODO**: 请补充开发、构建、lint、测试等命令
 
-## 开发流程
+## 编码要求
 
-> ⚠️ **TODO**: 请补充开发任务的标准执行步骤
-
-## 技术栈最佳实践
-
-> ⚠️ **TODO**: 请补充基于项目技术栈的开发最佳实践要点
-
-## 分支与提交规范
-
-> ⚠️ **TODO**: 请简要补充分支策略和提交规范
+> ⚠️ **TODO**: 请补充代码规范和技术栈最佳实践要点
 ${perProjectDev}`,
-    'validation.md': `# 自测与验收规范
+    'validation.md': `# 验收规范
 
 _AI 分析未能运行，以下为模板骨架，请补充标记为 TODO 的部分_
 
-## 自测要求
+## 代码检查
 
-> ⚠️ **TODO**: 请补充单元测试框架、运行命令和覆盖率要求
+> ⚠️ **TODO**: 请补充 lint、build、test 等检查命令
 
-## E2E 验证
+## E2E 验收
 
-> ⚠️ **TODO**: 请补充 E2E 测试框架和运行命令
-
-## 回归测试
-
-> ⚠️ **TODO**: 请补充回归测试策略
-
-## 验收标准
-
-> ⚠️ **TODO**: 请补充功能验收标准
+> ⚠️ **TODO**: 请补充端到端验收方式和命令
 ${perProjectVal}`,
   };
 }

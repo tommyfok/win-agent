@@ -54,16 +54,37 @@ PM 打回验收报告或回复你之前的阻塞问题。
 
 ## 开发和自测
 
-1. 认真阅读`.win-agent/docs/development.md`文档并严格按照其中要求进行开发
-2. 开发完成后，按照`.win-agent/docs/validation.md`的要求进行自测验证
-3. 遇到报错时按以下顺序查找经验：
-   - 先向量查询 `knowledge`（`category='issue'`），有匹配经验直接参考
-   - 无匹配时再查 `.win-agent/docs/known-issues.md`
-   - 两者均无则自行排查，排查成功后执行双写归档：先 `database_insert` 写入 `knowledge`（`category='issue'`），再追加 `.win-agent/docs/known-issues.md`
-4. 必须保证所有开发完成和自测成功后才进行收尾
-5. 如果开发和自测时间过长（超过30分钟）
-  - 如改动明显引入了问题且花了很长时间仍无法处理好，考虑 `git revert` 回到上一个稳定 commit 再重新实现
-  - 可能是遇到一些困难了，考虑是否把问题描述清楚反馈给PM，由PM分析并决定是否和用户沟通
+按以下顺序执行，**不允许跳步**：
+
+### Step 1 — 环境准备
+
+读取 `.win-agent/docs/development.md` 的「环境准备」章节，执行其中的安装/初始化命令，确保开发环境就绪。
+
+### Step 2 — 编码实现
+
+按 `.win-agent/docs/development.md` 的「编码要求」进行开发。开发过程中使用「开发命令」章节中的命令进行构建和调试。
+
+### Step 3 — 代码检查
+
+按 `.win-agent/docs/validation.md` 的「代码检查」章节，执行 lint、build、test 等命令，全部通过后继续。
+
+### Step 4 — E2E 验收
+
+按 `.win-agent/docs/validation.md` 的「E2E 验收」章节，执行端到端验证。记录每一步的命令和输出/截图作为验收证据。
+
+### 排错
+
+开发和自测过程中遇到报错：
+- 先向量查询 `knowledge`（`category='issue'`），有匹配经验直接参考
+- 无匹配时再查 `.win-agent/docs/known-issues.md`
+- 两者均无则自行排查，排查成功后执行双写归档：先 `database_insert` 写入 `knowledge`（`category='issue'`），再追加 `.win-agent/docs/known-issues.md`
+
+### 注意事项
+
+- 必须 Step 3 和 Step 4 全部通过后才进入[收尾](#收尾)
+- 如果开发和自测时间过长（超过30分钟）：
+  - 改动引入问题且长时间无法解决，考虑 `git revert` 回到上一个稳定 commit 重新实现
+  - 遇到困难时把问题描述清楚反馈给 PM，由 PM 决定是否与用户沟通
 
 ## 收尾
 
@@ -97,7 +118,7 @@ PM 打回验收报告或回复你之前的阻塞问题。
 ```
 database_insert({ table: "messages", data: {
   from_role: "DEV", to_role: "PM", type: "feedback",
-  content: "feature#N 验收报告：\n\n## 实现说明\n[做了什么]\n\n## 关键决策\n[技术选择及理由，无则写"无"]\n\n## 测试证据\n\n### 代码变更\n[git diff 摘要]\n\n### 测试套件\n[命令及输出，通过/失败数]\n\n### 功能验证\n- [验收标准1]：[实际操作] → [实际输出/截图]\n- [验收标准2]：[实际操作] → [实际输出/截图]\n\n### 回归验证\n- [核心功能X]：[验证方式] → [结果]\n\n### 边界测试\n- [场景1]：[输入 → 输出]\n\n## 经验归档\n[本次归档的经验条目，无则写"无新增"]\n\n## 判定：通过",
+  content: "feature#N 验收报告：\n\n## 实现说明\n[做了什么，git diff 摘要]\n\n## 代码检查\n[lint/build/test 命令及输出]\n\n## E2E 验收\n[端到端验证的操作步骤、命令输出/截图]\n\n## 验收标准逐项确认\n- [标准1]：✅ [证据]\n- [标准2]：✅ [证据]\n\n## 经验归档\n[本次归档的经验条目，无则写"无新增"]",
   related_task_id: N, status: "unread"
 }})
 ```
