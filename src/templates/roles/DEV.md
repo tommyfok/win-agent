@@ -36,14 +36,15 @@
 
 ### Phase 3 — 开发和自测（禁止跳步）
 
-**按 Step 1 → 2 → 3 → 4 严格顺序执行，全部通过后才能进入 Phase 4。**
+**按 Step 1 → 2 → 3 → 4 → 5 严格顺序执行，全部通过后才能进入 Phase 4。**
 
 | Step | 做什么 | 依据 |
 |------|--------|------|
 | **Step 1 — 环境准备** | 执行安装/初始化命令，确保开发环境就绪 | `.win-agent/docs/development.md`「环境准备」 |
-| **Step 2 — 编码实现** | 按编码要求开发，使用开发命令构建和调试 | `.win-agent/docs/development.md`「编码要求」+「开发命令」 |
-| **Step 3 — 代码检查** | 执行 lint、build、test 等命令，全部通过 | `.win-agent/docs/validation.md`「代码检查」 |
-| **Step 4 — E2E 验收** | 执行端到端验证，**记录每一步的命令输出/截图作为验收证据** | `.win-agent/docs/validation.md`「E2E 验收」 |
+| **Step 2 — 基线验证** | 在修改任何代码前，执行代码检查命令，记录当前通过/失败状态。目的：区分已有问题和自己引入的问题。如发现已有失败，记录后继续（不阻塞开发），但后续 Step 4 中只需对自己引入的失败负责 | `.win-agent/docs/validation.md`「代码检查」 |
+| **Step 3 — 编码实现** | 按编码要求开发，使用开发命令构建和调试 | `.win-agent/docs/development.md`「编码要求」+「开发命令」 |
+| **Step 4 — 代码检查** | 执行 lint、build、test 等命令，全部通过。如 Step 2 记录了已有失败，这些已有失败可豁免，但不得引入新失败 | `.win-agent/docs/validation.md`「代码检查」 |
+| **Step 5 — E2E 验收** | 执行端到端验证，**记录每一步的命令输出/截图作为验收证据** | `.win-agent/docs/validation.md`「E2E 验收」 |
 
 **遇到报错时：**
 1. 先 `database_query` 向量查询 `knowledge`（`category='issue'`），有匹配经验直接参考
@@ -110,3 +111,13 @@ database_insert({ table: "messages", data: {
 ### Proposal
 
 发现不紧急但有价值的事项（更优实现、技术债务、测试盲区等），写入 proposals 表（submitted_by: "DEV"）。
+
+### docs 速查
+
+| 文件 | 何时阅读 |
+|------|----------|
+| `.win-agent/docs/development.md` | Phase 3 Step 1（环境准备）、Step 3（编码实现） |
+| `.win-agent/docs/validation.md` | Phase 3 Step 2（基线验证）、Step 4（代码检查）、Step 5（E2E 验收） |
+| `.win-agent/docs/known-issues.md` | 遇到报错时，排查前先查阅 |
+| `.win-agent/docs/dev-notes.md` | 涉及对应子项目时，了解项目特有经验 |
+| `.win-agent/docs/efficiency-and-skills.md` | 收尾归档时参考，避免重复记录 |
