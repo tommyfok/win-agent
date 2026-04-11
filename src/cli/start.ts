@@ -10,7 +10,8 @@ import { syncAgents, deployTools } from '../workspace/sync-agents.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
 import { hasTodoMarkers } from './init.js';
-import { checkRecommendedSkills, printSkillRecommendations } from './skills.js';
+import { checkAndInstallSkills } from './skills.js';
+import { startOpencodeServer } from '../engine/opencode-server.js';
 
 // Re-export for stop command compatibility
 export { getServerHandle, getSessionManager } from './engine.js';
@@ -96,22 +97,16 @@ async function _startCommand() {
 
   // ── Skills 推荐检查 ──
   console.log('\n   Skills 检查...');
-  const skillResult = checkRecommendedSkills(workspace);
-  if (printSkillRecommendations(skillResult)) {
-    const { confirm } = await import('@inquirer/prompts');
-    const skipSkills = await confirm({
-      message: '是否跳过 Skills 安装，继续启动？',
-      default: true,
-    });
-    if (!skipSkills) {
-      console.log('\n   请安装上述 Skills 后重新启动：npx win-agent start');
-      removePidFile();
-      process.exit(0);
+  {
+    let skillHandle;
+    try {
+      skillHandle = await startOpencodeServer(workspace);
+      await checkAndInstallSkills(workspace, skillHandle.client);
+    } catch {
+      console.log('   ⚠️  Skills 推荐检查跳过');
+    } finally {
+      try { skillHandle?.close(); } catch { /* ignore */ }
     }
-  } else if (skillResult.detectedTechs.length > 0) {
-    console.log(
-      `   ✓ 技术栈: ${skillResult.detectedTechs.map((t) => t.label).join(', ')}`
-    );
   }
 
   // ── 5️⃣ 启动后台引擎 ──

@@ -1,9 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { confirm } from '@inquirer/prompts';
-import { loadConfig } from '../config/index.js';
+import { loadConfig, checkEngineRunning, removePidFile, isProcessRunning } from '../config/index.js';
 import { DEFAULT_SKILLS, getSkillDirName } from '../workspace/sync-agents.js';
-import { startOpencodeServer, type OpencodeServerHandle } from '../engine/opencode-server.js';
+import {
+  startOpencodeServer,
+  removeServerInfo,
+  loadServerPid,
+  killProcessTree,
+  type OpencodeServerHandle,
+} from '../engine/opencode-server.js';
 
 export async function cleanCommand() {
   try {
@@ -27,6 +34,21 @@ async function _cleanCommand() {
   if (!fs.existsSync(winAgentDir)) {
     console.log('当前目录下没有 .win-agent 目录，无需清理。');
     return;
+  }
+
+  // ── Check if engine is running ──
+  const { running, pid } = checkEngineRunning(cwd);
+  if (running && pid) {
+    console.log(`\n⚠️  win-agent 引擎正在运行中 (PID: ${pid})`);
+    const forceClean = await confirm({
+      message: '清理将停止引擎并删除所有 win-agent 数据，确认继续？',
+      default: false,
+    });
+    if (!forceClean) {
+      console.log('已取消。');
+      return;
+    }
+    await stopEngine(cwd, pid);
   }
 
   // Read workspace ID before deleting config
@@ -138,6 +160,92 @@ function cleanOpencodeFiles(opencodeDir: string): void {
 function removeIfEmpty(dir: string): void {
   if (!fs.existsSync(dir)) return;
   if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+}
+
+/**
+ * Stop the running engine and clean up all associated processes.
+ */
+async function stopEngine(workspace: string, pid: number): Promise<void> {
+  console.log(`\n🛑 正在停止引擎 (PID: ${pid})...`);
+
+  // Send SIGTERM
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    console.log(`   △ 进程 ${pid} 已不存在`);
+    removePidFile(workspace);
+    cleanupOrphanedProcesses(workspace);
+    return;
+  }
+
+  // Wait up to 15s for graceful exit
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (!isProcessRunning(pid)) {
+      console.log('   ✓ 引擎已停止');
+      removePidFile(workspace);
+      cleanupOrphanedProcesses(workspace);
+      return;
+    }
+  }
+
+  // Force kill
+  console.log('   ⚠️  引擎未及时退出，强制终止...');
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    /* already dead */
+  }
+  removePidFile(workspace);
+  cleanupOrphanedProcesses(workspace);
+  console.log('   ✓ 引擎已停止 (强制)');
+}
+
+/**
+ * Kill orphaned opencode server and engine processes.
+ */
+function cleanupOrphanedProcesses(workspace: string): void {
+  const serverPid = loadServerPid(workspace);
+  if (serverPid) {
+    try {
+      killProcessTree(serverPid);
+    } catch {
+      /* already dead */
+    }
+  }
+
+  try {
+    const result = execSync("ps -eo pid,command | grep '[.]opencode serve' | grep -v grep", {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+    for (const line of result.split('\n')) {
+      const opPid = parseInt(line.trim().split(/\s+/)[0], 10);
+      if (opPid && !isNaN(opPid)) {
+        try { process.kill(opPid, 'SIGTERM'); } catch { /* already dead */ }
+      }
+    }
+  } catch {
+    /* no orphaned processes */
+  }
+
+  try {
+    const result = execSync(
+      `ps -eo pid,command | grep 'win-agent _engine ${workspace}' | grep -v grep`,
+      { encoding: 'utf-8', timeout: 5000 },
+    ).trim();
+    for (const line of result.split('\n')) {
+      const opPid = parseInt(line.trim().split(/\s+/)[0], 10);
+      if (opPid && !isNaN(opPid)) {
+        try { process.kill(opPid, 'SIGTERM'); } catch { /* already dead */ }
+      }
+    }
+  } catch {
+    /* no orphaned processes */
+  }
+
+  removeServerInfo(workspace);
 }
 
 /**
