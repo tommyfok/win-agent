@@ -10,7 +10,12 @@ interface PermissionRow {
 const DEFAULT_PERMISSIONS: PermissionRow[] = [
   // PM permissions
   { role: 'PM', table_name: 'messages', operation: 'select', conditions: null },
-  { role: 'PM', table_name: 'messages', operation: 'insert', conditions: null },
+  {
+    role: 'PM',
+    table_name: 'messages',
+    operation: 'insert',
+    conditions: JSON.stringify({ from_role: 'PM' }),
+  },
   { role: 'PM', table_name: 'messages', operation: 'update', conditions: null },
   { role: 'PM', table_name: 'tasks', operation: 'select', conditions: null },
   { role: 'PM', table_name: 'tasks', operation: 'insert', conditions: null },

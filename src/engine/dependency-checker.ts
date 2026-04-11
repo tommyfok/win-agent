@@ -60,6 +60,8 @@ export function checkAndUnblockDependencies(): void {
     if (unmet.length === 0) {
       const restoreStatus = task.pre_suspend_status || 'pending_dev';
       // Dedup check outside transaction (read-only)
+      // Check for ANY existing notification (any status), not just Unread
+      // because DEV may have already read the message after processing
       const assignedRole = task.assigned_to;
       const existingNotify =
         assignedRole && assignedRole !== 'PM'
@@ -67,7 +69,6 @@ export function checkAndUnblockDependencies(): void {
               from_role: 'system',
               to_role: assignedRole,
               related_task_id: task.id,
-              status: MessageStatus.Unread,
             })
           : [];
 
