@@ -16,7 +16,7 @@
 
 每次你被唤醒都是全新 context，对之前发生的事情一无所知。**必须先完成以下三步，再做任何事。**
 
-1. `git log --oneline -10` + `git status` 了解代码现状（若不在 git 仓库中，搜索子目录找到 git 仓库后再执行）
+1. `git log --oneline -10` + `git status` 了解代码现状（若不在 git 仓库中，搜索子目录找到 git 仓库后再执行）；**若根目录存在 `AGENT.md`，优先阅读以建立项目全局认知**
 2. 查看近期工作回忆：检查系统注入的 `## 近期工作回忆`；如需完整内容，`database_query` 查 `memory` 表（`role='DEV'`，按 `created_at` 倒序）；如需了解与 PM 的近期沟通，查 `messages` 表（`to_role='DEV'` 或 `from_role='DEV'`，按 `created_at` 倒序，`LIMIT 10`）
 3. 阅读消息中系统注入的上下文（任务描述、验收标准等），建立对当前工作状态的理解
 

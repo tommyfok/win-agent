@@ -367,7 +367,7 @@ export function buildDispatchPrompt(
 
   // 4. DEV pending queue (PM only) — dedup guard so PM doesn't resend
   //    directives that are already queued and waiting to be dispatched.
-  //    Includes both PM and system messages so PM is aware of system notifications.
+  //    Scoped to current task for relevance; other tasks shown as count summary.
   if (role === 'PM') {
     const pendingDevMsgs = select<MessageRow>(
       'messages',
@@ -376,14 +376,34 @@ export function buildDispatchPrompt(
     );
 
     if (pendingDevMsgs.length > 0) {
+      // Identify current task from the messages being dispatched
+      const currentTaskIds = new Set(
+        messages.filter((m) => m.related_task_id).map((m) => m.related_task_id)
+      );
+
+      const currentTaskMsgs = pendingDevMsgs.filter(
+        (m) => m.related_task_id && currentTaskIds.has(m.related_task_id)
+      );
+      const otherCount = pendingDevMsgs.length - currentTaskMsgs.length;
+
       const lines: string[] = [];
-      lines.push(`DEV 待处理队列（${pendingDevMsgs.length} 条未读，无需重发）：`);
-      for (const m of pendingDevMsgs) {
-        const ref = m.related_task_id ? ` (task#${m.related_task_id})` : '';
-        lines.push(
-          `  - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, ' ')}…`
-        );
+      lines.push(`DEV 待处理队列（共 ${pendingDevMsgs.length} 条未读）：`);
+
+      if (currentTaskMsgs.length > 0) {
+        const taskRefs = [...currentTaskIds].filter(Boolean).map((id) => `task#${id}`).join(', ');
+        lines.push(`  当前 ${taskRefs} 相关（${currentTaskMsgs.length} 条）：`);
+        for (const m of currentTaskMsgs) {
+          const ref = m.related_task_id ? ` (task#${m.related_task_id})` : '';
+          lines.push(
+            `    - [msg#${m.id}] from:${m.from_role}${ref} ${m.content.slice(0, 80).replace(/\n/g, ' ')}…`
+          );
+        }
       }
+
+      if (otherCount > 0) {
+        lines.push(`  其他 task 共 ${otherCount} 条，无需关注`);
+      }
+
       parts.push(`## 已排队消息（勿重复发送）\n${lines.join('\n')}`);
     }
   }

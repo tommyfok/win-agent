@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   loadConfig,
   saveConfig,
@@ -282,7 +284,111 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
   );
   console.log(`   Embedding: ${config.embedding?.type} / ${config.embedding?.model}`);
 
+  // P1: docs/knowledge DB consistency lint
+  runConsistencyLint(workspace);
+
+  // P4: display effective context rotation thresholds
+  displayRotationThresholds(config);
+
   return { config, workspace };
+}
+
+/**
+ * P1: Check consistency between knowledge DB entries and docs MD files.
+ * Reports entries that exist only in DB or only in MD file.
+ */
+function runConsistencyLint(workspace: string): void {
+  const winAgentDir = path.join(workspace, '.win-agent');
+  const dbPath = path.join(winAgentDir, 'win-agent.db');
+  if (!fs.existsSync(dbPath)) return;
+
+  console.log('\n📋 双写一致性检查');
+
+  const checks: Array<{ category: string; mdFile: string; label: string }> = [
+    { category: 'issue', mdFile: 'known-issues.md', label: '已知问题' },
+    { category: 'dev_note', mdFile: 'dev-notes.md', label: '开发笔记' },
+    { category: 'efficiency', mdFile: 'efficiency-and-skills.md', label: '效率优化' },
+  ];
+
+  // Lazy-import repository to avoid DB init issues when DB doesn't exist
+  let dbSelect: typeof import('../db/repository.js').select;
+  try {
+    // DB should already be open from env check flow; use sync require-style import
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const repo = require('../db/repository.js') as typeof import('../db/repository.js');
+    dbSelect = repo.select;
+  } catch {
+    console.log('   ⚠️  数据库未初始化，跳过');
+    return;
+  }
+
+  let hasIssues = false;
+
+  for (const check of checks) {
+    const mdPath = path.join(winAgentDir, 'docs', check.mdFile);
+    const mdContent = fs.existsSync(mdPath) ? fs.readFileSync(mdPath, 'utf-8') : '';
+
+    interface KnowledgeRow {
+      id: number;
+      title: string;
+      content: string;
+    }
+    let dbEntries: KnowledgeRow[];
+    try {
+      dbEntries = dbSelect<KnowledgeRow>('knowledge', { category: check.category });
+    } catch {
+      continue; // Table doesn't exist yet
+    }
+
+    const onlyInDb: string[] = [];
+    const onlyInMd: string[] = [];
+
+    // Check DB entries missing from MD
+    for (const entry of dbEntries) {
+      if (!mdContent.includes(entry.title)) {
+        onlyInDb.push(entry.title);
+      }
+    }
+
+    // Check MD headings missing from DB (heuristic: ### headings as entries)
+    const mdHeadings = mdContent.match(/^###\s+(.+)$/gm);
+    if (mdHeadings) {
+      const dbTitles = new Set(dbEntries.map((e) => e.title));
+      for (const heading of mdHeadings) {
+        const title = heading.replace(/^###\s+/, '').trim();
+        if (!dbTitles.has(title)) {
+          onlyInMd.push(title);
+        }
+      }
+    }
+
+    if (onlyInDb.length > 0 || onlyInMd.length > 0) {
+      hasIssues = true;
+      console.log(`   ⚠️  ${check.label} (${check.mdFile}):`);
+      for (const title of onlyInDb) {
+        console.log(`      仅在 DB: ${title}`);
+      }
+      for (const title of onlyInMd) {
+        console.log(`      仅在文件: ${title}`);
+      }
+    }
+  }
+
+  if (!hasIssues) {
+    console.log('   ✓ 一致');
+  }
+}
+
+/**
+ * P4: Display effective context rotation thresholds.
+ */
+function displayRotationThresholds(config: WinAgentConfig): void {
+  const inputThreshold = config.contextRotation?.inputThreshold ?? 0.8;
+  const anxietyDropRatio = config.contextRotation?.anxietyDropRatio ?? 0.3;
+
+  console.log('\n🔄 上下文轮转配置');
+  console.log(`   输入阈值: ${Math.round(inputThreshold * 100)}%${config.contextRotation?.inputThreshold ? '' : ' (默认)'}`);
+  console.log(`   焦虑检测: ${Math.round(anxietyDropRatio * 100)}%${config.contextRotation?.anxietyDropRatio ? '' : ' (默认)'}`);
 }
 
 export async function checkCommand() {

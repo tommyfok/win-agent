@@ -69,11 +69,10 @@ const PM_COOLDOWN_MS = 3000;
 let pmLastDispatchEnd = 0;
 
 /**
- * DEV starvation protection: after N consecutive PM-only dispatches,
- * skip PM for one tick to let DEV get scheduled.
+ * Round-robin fairness: track the last dispatched role so the other
+ * role gets priority on the next tick (when both have pending messages).
  */
-const PM_MAX_CONSECUTIVE = 3;
-let pmConsecutiveCount = 0;
+let lastDispatchedRole: string | null = null;
 
 /**
  * Start the scheduler main loop.
@@ -91,7 +90,7 @@ export async function startSchedulerLoop(
 ): Promise<void> {
   running = true;
   storedClient = client;
-  pmConsecutiveCount = 0;
+  lastDispatchedRole = null;
   resetTriggers();
   const roleManager = new RoleManager();
 
@@ -216,8 +215,8 @@ async function schedulerTick(
         roleManager.setBusy('PM', false);
         // Don't set pmLastDispatchEnd here: user-priority messages should not trigger cooldown
       }
-      // User-priority dispatch resets consecutive count (not a "normal" PM dispatch)
-      pmConsecutiveCount = 0;
+      // User-priority dispatch resets round-robin (not a "normal" PM dispatch)
+      lastDispatchedRole = null;
       // After user message dispatch, check triggers and return
       checkAutoTriggers();
       checkIterationReview(sessionManager);
@@ -225,8 +224,14 @@ async function schedulerTick(
     }
   }
 
-  // 2. Normal role dispatch: V1 serial, at most one role per tick
-  for (const role of ALL_ROLES) {
+  // 2. Normal role dispatch: V1 serial, at most one role per tick.
+  //    Round-robin: if lastDispatchedRole is set, try the other role first.
+  const roleOrder =
+    lastDispatchedRole && ALL_ROLES.includes(lastDispatchedRole as (typeof ALL_ROLES)[number])
+      ? [...ALL_ROLES].sort((a, b) => (a === lastDispatchedRole ? 1 : b === lastDispatchedRole ? -1 : 0))
+      : [...ALL_ROLES];
+
+  for (const role of roleOrder) {
     if (roleManager.isBusy(role)) continue;
 
     // PM cooldown: after PM finishes a dispatch, wait before injecting
@@ -234,21 +239,6 @@ async function schedulerTick(
     // priority over queued role messages.
     if (role === 'PM' && Date.now() - pmLastDispatchEnd < PM_COOLDOWN_MS) {
       continue;
-    }
-
-    // DEV starvation protection: if PM has been dispatched too many times
-    // consecutively, skip PM for this tick to let DEV get scheduled.
-    if (role === 'PM' && pmConsecutiveCount >= PM_MAX_CONSECUTIVE) {
-      // Check if other roles have pending messages
-      const othersPending = ALL_ROLES.some(
-        (r) =>
-          r !== 'PM' &&
-          !roleManager.isBusy(r) &&
-          select<MessageRow>('messages', { to_role: r, status: MessageStatus.Unread }).length > 0
-      );
-      if (othersPending) {
-        continue;
-      }
     }
 
     // Query unread messages for this role
@@ -319,11 +309,9 @@ async function schedulerTick(
       currentDispatch = null;
       currentAbortController = null;
       roleManager.setBusy(role, false);
+      lastDispatchedRole = role;
       if (role === 'PM') {
         pmLastDispatchEnd = Date.now();
-        pmConsecutiveCount++;
-      } else {
-        pmConsecutiveCount = 0;
       }
     }
 

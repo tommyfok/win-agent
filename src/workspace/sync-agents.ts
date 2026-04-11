@@ -75,10 +75,11 @@ export interface SkillConfig {
 }
 
 export const DEFAULT_SKILLS: SkillConfig[] = [
-  { pkg: 'obra/superpowers@using-superpowers', roles: ['PM', 'DEV'] },
-  { pkg: 'zixun-github/aisdlc@spec-product-clarify', roles: ['PM'] },
-  { pkg: 'deanpeters/product-manager-skills@user-story', roles: ['PM'] },
-  { pkg: 'deanpeters/product-manager-skills@user-story-splitting', roles: ['PM'] },
+  // 暂时不需要注入defaultSkills
+  // { pkg: 'obra/superpowers@using-superpowers', roles: ['PM', 'DEV'] },
+  // { pkg: 'zixun-github/aisdlc@spec-product-clarify', roles: ['PM'] },
+  // { pkg: 'deanpeters/product-manager-skills@user-story', roles: ['PM'] },
+  // { pkg: 'deanpeters/product-manager-skills@user-story-splitting', roles: ['PM'] },
 ];
 
 /** Extract the skill directory name from a package identifier: "owner/repo@skill-name" → "skill-name" */
@@ -561,6 +562,21 @@ export const insert = tool({
       }
     }
 
+    // Enum validation: auto-correct invalid message status to 'unread'
+    if (args.table === "messages" && data.status) {
+      const VALID_MSG_STATUS = ["unread", "read", "deferred"];
+      if (!VALID_MSG_STATUS.includes(data.status)) {
+        data.status = "unread";
+      }
+    }
+    // Enum validation: reject invalid task status
+    if (args.table === "tasks" && data.status) {
+      const VALID_TASK_STATUS = ["pending_dev", "in_dev", "done", "rejected", "cancelled", "paused", "blocked"];
+      if (!VALID_TASK_STATUS.includes(data.status)) {
+        return JSON.stringify({ error: \`无效的任务状态: \${data.status}，有效值: \${VALID_TASK_STATUS.join(", ")}\` });
+      }
+    }
+
     const keys = Object.keys(data);
     validateColumns(db, args.table, keys);
     const placeholders = keys.map(() => "?").join(", ");
@@ -588,6 +604,21 @@ export const update = tool({
 
     const permErr = checkPermission(db, ROLE, args.table, "update", data);
     if (permErr) return JSON.stringify({ error: permErr });
+
+    // Enum validation: auto-correct invalid message status to 'unread'
+    if (args.table === "messages" && data.status) {
+      const VALID_MSG_STATUS = ["unread", "read", "deferred"];
+      if (!VALID_MSG_STATUS.includes(data.status)) {
+        data.status = "unread";
+      }
+    }
+    // Enum validation: reject invalid task status
+    if (args.table === "tasks" && data.status) {
+      const VALID_TASK_STATUS = ["pending_dev", "in_dev", "done", "rejected", "cancelled", "paused", "blocked"];
+      if (!VALID_TASK_STATUS.includes(data.status)) {
+        return JSON.stringify({ error: \`无效的任务状态: \${data.status}，有效值: \${VALID_TASK_STATUS.join(", ")}\` });
+      }
+    }
 
     validateColumns(db, args.table, Object.keys(data));
     validateColumns(db, args.table, Object.keys(where));

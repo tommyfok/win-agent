@@ -244,36 +244,37 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
     }
   }
 
-  if (
-    unmodified.length === 0 &&
-    !overviewUnmodified &&
-    docsUnmodified.length === 0 &&
-    docsWithTodos.length === 0
-  )
-    return;
-
-  const hasUnmodified = unmodified.length > 0 || overviewUnmodified || docsUnmodified.length > 0;
-  if (hasUnmodified) {
-    console.log('\n❌ 以下文件自 init 后未经修改，请根据项目实际情况修改后再启动：');
+  // Non-essential files (roles, overview): suggest but don't block
+  const hasSuggestions = unmodified.length > 0 || overviewUnmodified;
+  if (hasSuggestions) {
+    console.log('\n💡 以下文件自 init 后未经修改，建议根据项目实际情况审阅（不影响启动）：');
     for (const file of unmodified) {
       console.log(`   • .win-agent/roles/${file}`);
     }
     if (overviewUnmodified) {
       console.log('   • .win-agent/docs/overview.md');
     }
-    for (const file of docsUnmodified) {
-      console.log(`   • .win-agent/docs/${file}`);
-    }
   }
-  if (docsWithTodos.length > 0) {
-    console.log(
-      `\n❌ 以下文件仍包含待补充的 TODO 标记（⚠️ TODO），请补充完整后再启动：`
-    );
-    for (const file of docsWithTodos) {
-      console.log(`   • .win-agent/docs/${file}`);
+
+  // Essential files (development.md, validation.md): block startup
+  const hasBlockers = docsUnmodified.length > 0 || docsWithTodos.length > 0;
+  if (hasBlockers) {
+    if (docsUnmodified.length > 0) {
+      console.log('\n❌ 以下文件自 init 后未经修改，请根据项目实际情况修改后再启动：');
+      for (const file of docsUnmodified) {
+        console.log(`   • .win-agent/docs/${file}`);
+      }
     }
+    if (docsWithTodos.length > 0) {
+      console.log(
+        `\n❌ 以下文件仍包含待补充的 TODO 标记（⚠️ TODO），请补充完整后再启动：`
+      );
+      for (const file of docsWithTodos) {
+        console.log(`   • .win-agent/docs/${file}`);
+      }
+    }
+    console.log('\n   根据项目实际情况审核并调整以上文件，完成后重新执行 npx win-agent start');
+    removePidFile();
+    process.exit(1);
   }
-  console.log('\n   根据项目实际情况审核并调整以上文件，完成后重新执行 npx win-agent start');
-  removePidFile();
-  process.exit(1);
 }

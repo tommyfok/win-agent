@@ -443,6 +443,12 @@ async function _onboardingCommand() {
       );
       console.log('   ✓ 已写入 .win-agent/docs/overview.md');
 
+      // 7a-2. Generate root AGENT.md for DEV cold-start context
+      console.log('   → 生成项目概览 (AGENT.md)...');
+      const agentMdContent = buildAgentMd(projectName, projectDescription, overview);
+      fs.writeFileSync(path.join(workspace, 'AGENT.md'), agentMdContent, 'utf-8');
+      console.log('   ✓ 已写入 AGENT.md（根目录，DEV 冷启动参考）');
+
       // 7b. development.md
       const devPath = path.join(docsDir, 'development.md');
       let skipDev = false;
@@ -860,6 +866,28 @@ export function snapshotDocsMtimes(workspace: string): void {
   } else {
     dbInsert('project_config', { key: 'docs_mtimes_snapshot', value: JSON.stringify(snapshot) });
   }
+}
+
+// ─── AGENT.md 生成 ──────────────────────────────────────────────────────────
+
+/**
+ * Build root AGENT.md content from overview + project info.
+ * This file gives DEV a stable cold-start context without relying on
+ * git log or vector search.
+ */
+export function buildAgentMd(
+  projectName: string,
+  projectDescription: string,
+  overviewContent: string
+): string {
+  return `# ${projectName}
+
+> ${projectDescription}
+
+_此文件由 \`win-agent init\` 自动生成，供 AI Agent 冷启动时快速了解项目全貌。_
+
+${overviewContent}
+`;
 }
 
 // ─── 角色文件上下文注入 ────────────────────────────────────────────────────────

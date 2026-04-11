@@ -17,11 +17,19 @@ export interface EmbeddingConfig {
   model: string;
 }
 
+export interface ContextRotationConfig {
+  /** Rotate when input tokens exceed this fraction of max context (default: 0.8) */
+  inputThreshold?: number;
+  /** Context anxiety: output drop ratio triggering early rotation (default: 0.3) */
+  anxietyDropRatio?: number;
+}
+
 export interface WinAgentConfig {
   workspaceId?: string;
   provider?: ProviderConfig;
   embedding?: EmbeddingConfig;
   serverPassword?: string;
+  contextRotation?: ContextRotationConfig;
 }
 
 /** A named provider+embedding preset stored globally. */

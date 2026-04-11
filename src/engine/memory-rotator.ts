@@ -1,6 +1,7 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
 import { insert } from '../db/repository.js';
+import { loadConfig } from '../config/index.js';
 
 /**
  * Default context window size (tokens) for rotation calculation.
@@ -9,20 +10,37 @@ import { insert } from '../db/repository.js';
 const DEFAULT_MAX_CONTEXT = 200_000;
 
 /**
- * Rotation threshold — rotate when input tokens exceed this fraction of max context.
- * Raised from 0.6 to 0.8 based on Anthropic's finding that Opus can run
- * extended sessions without degradation up to ~80% context usage.
+ * Default rotation threshold — rotate when input tokens exceed this fraction of max context.
+ * Can be overridden via config.contextRotation.inputThreshold.
  */
-const ROTATION_THRESHOLD = 0.8;
+const DEFAULT_ROTATION_THRESHOLD = 0.8;
 
 /**
- * Context anxiety: if a role's output token count drops below this fraction
- * of its recent average (last 3 dispatches), and the task is not yet done,
- * trigger an early rotation. This detects the model "going quiet" due to
- * context pressure before it actually hits the hard threshold.
+ * Default context anxiety drop ratio.
+ * Can be overridden via config.contextRotation.anxietyDropRatio.
  */
-const ANXIETY_DROP_RATIO = 0.3;
+const DEFAULT_ANXIETY_DROP_RATIO = 0.3;
 const ANXIETY_HISTORY_SIZE = 3;
+
+/** Read effective rotation threshold from config, falling back to defaults. */
+function getRotationThreshold(): number {
+  try {
+    const config = loadConfig();
+    return config.contextRotation?.inputThreshold ?? DEFAULT_ROTATION_THRESHOLD;
+  } catch {
+    return DEFAULT_ROTATION_THRESHOLD;
+  }
+}
+
+/** Read effective anxiety drop ratio from config, falling back to defaults. */
+function getAnxietyDropRatio(): number {
+  try {
+    const config = loadConfig();
+    return config.contextRotation?.anxietyDropRatio ?? DEFAULT_ANXIETY_DROP_RATIO;
+  } catch {
+    return DEFAULT_ANXIETY_DROP_RATIO;
+  }
+}
 
 /** Dynamically detected model context limit (set once at engine startup). */
 let dynamicMaxContext: number | null = null;
@@ -105,7 +123,7 @@ function detectContextAnxiety(role: string, outputTokens: number): boolean {
   const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
   if (avg === 0) return false;
 
-  return outputTokens < avg * ANXIETY_DROP_RATIO;
+  return outputTokens < avg * getAnxietyDropRatio();
 }
 
 /**
@@ -134,9 +152,10 @@ export async function checkAndRotate(
   recordOutputTokens(role, outputTokens);
 
   // Check hard threshold
-  if (usage > ROTATION_THRESHOLD) {
+  const rotationThreshold = getRotationThreshold();
+  if (usage > rotationThreshold) {
     console.log(
-      `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%（阈值 ${Math.round(ROTATION_THRESHOLD * 100)}%），执行 session 轮转`
+      `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%（阈值 ${Math.round(rotationThreshold * 100)}%），执行 session 轮转`
     );
     insert('logs', {
       role: 'system',
