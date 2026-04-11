@@ -15,6 +15,7 @@ import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
 import { getDbPath } from '../config/index.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
+import { checkAndInstallSkills } from './skills.js';
 
 /** Machine-detectable marker for content that needs user review */
 export const TODO_MARKER_REGEX = /⚠️ \*\*TODO\*\*/;
@@ -497,12 +498,8 @@ async function _onboardingCommand() {
         throw err;
       }
       console.log(`   ⚠️  工作空间分析失败，跳过: ${err}`);
-    } finally {
-      if (serverHandle?.owned) {
-        serverHandle.close();
-        removeServerInfo(workspace);
-      }
     }
+    // NOTE: serverHandle is kept alive for skills check below, closed after init completes
 
   // ── 9️⃣ 注入项目上下文到角色文件 ──
   console.log('\n9️⃣  更新角色文件');
@@ -525,6 +522,21 @@ async function _onboardingCommand() {
     dbInsert('project_config', { key: 'onboarding_completed', value: 'true' });
   }
   closeDb();
+
+  // ── Skills 推荐 ──
+  if (serverHandle) {
+    console.log('\n   Skills 推荐...');
+    try {
+      await checkAndInstallSkills(workspace, serverHandle.client);
+    } catch {
+      console.log('   ⚠️  Skills 推荐跳过');
+    } finally {
+      if (serverHandle.owned) {
+        serverHandle.close();
+        removeServerInfo(workspace);
+      }
+    }
+  }
 
   console.log('\n✅ 初始化完成');
   console.log(`   项目: ${projectName}`);

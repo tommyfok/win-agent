@@ -10,8 +10,6 @@ import { syncAgents, deployTools } from '../workspace/sync-agents.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
 import { hasTodoMarkers } from './init.js';
-import { checkAndInstallSkills } from './skills.js';
-import { startOpencodeServer } from '../engine/opencode-server.js';
 
 // Re-export for stop command compatibility
 export { getServerHandle, getSessionManager } from './engine.js';
@@ -94,20 +92,6 @@ async function _startCommand() {
     process.exit(1);
   }
   await checkRoleFilesReviewed(workspace);
-
-  // ── Skills 推荐检查 ──
-  console.log('\n   Skills 检查...');
-  {
-    let skillHandle;
-    try {
-      skillHandle = await startOpencodeServer(workspace);
-      await checkAndInstallSkills(workspace, skillHandle.client);
-    } catch {
-      console.log('   ⚠️  Skills 推荐检查跳过');
-    } finally {
-      try { skillHandle?.close(); } catch { /* ignore */ }
-    }
-  }
 
   // ── 5️⃣ 启动后台引擎 ──
   console.log('\n5️⃣  启动后台引擎');

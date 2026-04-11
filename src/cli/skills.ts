@@ -4,6 +4,8 @@ import { exec, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import { detectSubProjects } from '../workspace/init.js';
+import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
+import { runEnvCheck } from './check.js';
 
 const execAsync = promisify(exec);
 
@@ -40,7 +42,7 @@ function parseSkillsFindOutput(raw: string, keyword: string): SkillCandidate[] {
     if (!m) continue;
     let installs = parseFloat(m[2]);
     if (m[3] === 'K') installs *= 1000;
-    if (installs >= 2_000) {
+    if (installs >= 1_000) {
       results.push({ source: m[1], installs, keyword });
     }
   }
@@ -232,8 +234,9 @@ ${candidateList}
 ## 要求
 1. 推荐所有与项目技术栈相关的 Skills（不限数量，宁多勿少——用户可以自己选择安装哪些）
 2. 排除明显不相关的（如项目不用某技术就别推荐该技术的 skill）
-3. 按推荐度从高到低排序
-4. 返回 JSON 数组格式，不要包含其他内容：
+3. 同类 skill（功能相似的）只保留安装量最高的1到2个，避免重复推荐
+4. 按推荐度从高到低排序
+5. 返回 JSON 数组格式，不要包含其他内容：
 [{"source": "完整的source字符串", "reason": "推荐理由（一句话）"}]`;
 
   const text = await promptSession(client, sessionId, prompt);
@@ -390,4 +393,28 @@ export async function checkAndInstallSkills(
 
   installSkills(selected);
   console.log('\n   ✓ Skills 安装完成');
+}
+
+// ─── Standalone CLI command ─────────────────────────────────────────────────
+
+/**
+ * `npx win-agent skills` — standalone skills recommendation & install.
+ * Spins up a temporary opencode server, runs the full flow, then shuts down.
+ */
+export async function skillsCommand(): Promise<void> {
+  const { workspace } = await runEnvCheck();
+
+  console.log('\n🔍 Skills 推荐\n');
+  let serverHandle;
+  try {
+    serverHandle = await startOpencodeServer(workspace);
+    await checkAndInstallSkills(workspace, serverHandle.client);
+  } catch (err) {
+    console.log(`   ❌ Skills 推荐失败: ${err}`);
+  } finally {
+    if (serverHandle?.owned) {
+      serverHandle.close();
+      removeServerInfo(workspace);
+    }
+  }
 }
