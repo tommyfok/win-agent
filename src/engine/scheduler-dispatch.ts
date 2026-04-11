@@ -1,6 +1,7 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
-import { RoleManager, ALL_ROLES } from './role-manager.js';
+import type { RoleManager } from './role-manager.js';
+import { ALL_ROLES } from './role-manager.js';
 import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from './dispatcher.js';
 import { AbortError } from './retry.js';
 import { checkAndRotate } from './memory-rotator.js';
@@ -27,7 +28,11 @@ let storedClient: OpencodeClient | null = null;
 
 /** Read PM cooldown from config, falling back to 3000ms. */
 function getPmCooldownMs(): number {
-  try { return loadConfig().engine?.pmCooldownMs ?? 3000; } catch { return 3000; }
+  try {
+    return loadConfig().engine?.pmCooldownMs ?? 3000;
+  } catch {
+    return 3000;
+  }
 }
 export let pmLastDispatchEnd = 0;
 export let lastDispatchedRole: string | null = null;
@@ -41,16 +46,22 @@ function loadDispatchState(): void {
   try {
     const rows = select<{ key: string; value: string }>('project_config', {});
     const m = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-    if (m['engine.lastDispatchedRole'] !== undefined) lastDispatchedRole = m['engine.lastDispatchedRole'] || null;
-    if (m['engine.pmLastDispatchEnd'] !== undefined) pmLastDispatchEnd = parseInt(m['engine.pmLastDispatchEnd'], 10) || 0;
-  } catch { /* non-fatal */ }
+    if (m['engine.lastDispatchedRole'] !== undefined)
+      lastDispatchedRole = m['engine.lastDispatchedRole'] || null;
+    if (m['engine.pmLastDispatchEnd'] !== undefined)
+      pmLastDispatchEnd = parseInt(m['engine.pmLastDispatchEnd'], 10) || 0;
+  } catch {
+    /* non-fatal */
+  }
 }
 
 function saveDispatchState(): void {
   try {
     upsertProjectConfig('engine.lastDispatchedRole', lastDispatchedRole ?? '');
     upsertProjectConfig('engine.pmLastDispatchEnd', String(pmLastDispatchEnd));
-  } catch { /* non-fatal */ }
+  } catch {
+    /* non-fatal */
+  }
 }
 
 export function setLastDispatchedRole(role: string): void {
@@ -147,7 +158,14 @@ export async function tryDispatchUserMessages(
       }
     );
     if (sessionId) {
-      await checkAndRotate(sessionManager, 'PM', sessionId, inputTokens, outputTokens, taskId ?? undefined);
+      await checkAndRotate(
+        sessionManager,
+        'PM',
+        sessionId,
+        inputTokens,
+        outputTokens,
+        taskId ?? undefined
+      );
       engineBus.emit(EngineEvents.DISPATCH_COMPLETE, { role: 'PM', inputTokens, outputTokens });
     }
     logger.info({ role: 'PM' }, 'dispatch done (user priority)');
@@ -198,7 +216,12 @@ export async function tryDispatchNormalRole(
     const abortController = new AbortController();
     currentAbortController = abortController;
     const dispatchTaskId = messages.find((m) => m.related_task_id)?.related_task_id ?? null;
-    currentDispatch = { role, taskId: dispatchTaskId, sessionId: null, startedAt: new Date().toISOString() };
+    currentDispatch = {
+      role,
+      taskId: dispatchTaskId,
+      sessionId: null,
+      startedAt: new Date().toISOString(),
+    };
 
     try {
       const dispatch = role === 'DEV' ? dispatchToRoleGrouped : dispatchToRole;
@@ -215,7 +238,14 @@ export async function tryDispatchNormalRole(
         }
       );
       if (role === 'PM' && sessionId) {
-        await checkAndRotate(sessionManager, role, sessionId, inputTokens, outputTokens, dispatchTaskId ?? undefined);
+        await checkAndRotate(
+          sessionManager,
+          role,
+          sessionId,
+          inputTokens,
+          outputTokens,
+          dispatchTaskId ?? undefined
+        );
       }
       if (sessionId) {
         engineBus.emit(EngineEvents.DISPATCH_COMPLETE, { role, inputTokens, outputTokens });
@@ -223,7 +253,10 @@ export async function tryDispatchNormalRole(
       logger.info({ role }, 'dispatch done');
     } catch (err) {
       if (err instanceof AbortError) throw err;
-      logger.error({ role, messageCount: messages.length, err }, 'dispatch failed — messages marked read to prevent replay');
+      logger.error(
+        { role, messageCount: messages.length, err },
+        'dispatch failed — messages marked read to prevent replay'
+      );
       for (const msg of messages) {
         update('messages', { id: msg.id }, { status: MessageStatus.Read });
       }

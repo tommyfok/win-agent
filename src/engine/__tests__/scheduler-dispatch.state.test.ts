@@ -58,7 +58,7 @@ describe('initDispatchState — state restoration from project_config', () => {
 
 describe('saveDispatchState — written to project_config after dispatch', () => {
   it('persists lastDispatchedRole and pmLastDispatchEnd after setters are called', async () => {
-    const { upsertProjectConfig, select } = await import('../../db/repository.js');
+    const { upsertProjectConfig } = await import('../../db/repository.js');
     upsertProjectConfig('engine.lastDispatchedRole', '');
     upsertProjectConfig('engine.pmLastDispatchEnd', '0');
 

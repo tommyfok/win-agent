@@ -285,7 +285,7 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
   console.log(`   Embedding: ${config.embedding?.type} / ${config.embedding?.model}`);
 
   // P1: docs/knowledge DB consistency lint
-  runConsistencyLint(workspace);
+  await runConsistencyLint(workspace);
 
   // P4: display effective context rotation thresholds
   displayRotationThresholds(config);
@@ -297,7 +297,7 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
  * P1: Check consistency between knowledge DB entries and docs MD files.
  * Reports entries that exist only in DB or only in MD file.
  */
-function runConsistencyLint(workspace: string): void {
+async function runConsistencyLint(workspace: string): Promise<void> {
   const winAgentDir = path.join(workspace, '.win-agent');
   const dbPath = path.join(winAgentDir, 'win-agent.db');
   if (!fs.existsSync(dbPath)) return;
@@ -310,13 +310,15 @@ function runConsistencyLint(workspace: string): void {
     { category: 'efficiency', mdFile: 'efficiency-and-skills.md', label: '效率优化' },
   ];
 
-  // Lazy-import repository to avoid DB init issues when DB doesn't exist
-  let dbSelect: typeof import('../db/repository.js').select;
+  type SelectFunction = <T>(
+    table: string,
+    where?: Record<string, unknown>,
+    options?: unknown
+  ) => T[];
+  let dbSelect: SelectFunction;
   try {
-    // DB should already be open from env check flow; use sync require-style import
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const repo = require('../db/repository.js') as typeof import('../db/repository.js');
-    dbSelect = repo.select;
+    const repo = await import('../db/repository.js');
+    dbSelect = repo.select as SelectFunction;
   } catch {
     console.log('   ⚠️  数据库未初始化，跳过');
     return;
@@ -387,8 +389,12 @@ function displayRotationThresholds(config: WinAgentConfig): void {
   const anxietyDropRatio = config.contextRotation?.anxietyDropRatio ?? 0.3;
 
   console.log('\n🔄 上下文轮转配置');
-  console.log(`   输入阈值: ${Math.round(inputThreshold * 100)}%${config.contextRotation?.inputThreshold ? '' : ' (默认)'}`);
-  console.log(`   焦虑检测: ${Math.round(anxietyDropRatio * 100)}%${config.contextRotation?.anxietyDropRatio ? '' : ' (默认)'}`);
+  console.log(
+    `   输入阈值: ${Math.round(inputThreshold * 100)}%${config.contextRotation?.inputThreshold ? '' : ' (默认)'}`
+  );
+  console.log(
+    `   焦虑检测: ${Math.round(anxietyDropRatio * 100)}%${config.contextRotation?.anxietyDropRatio ? '' : ' (默认)'}`
+  );
 }
 
 export async function checkCommand() {

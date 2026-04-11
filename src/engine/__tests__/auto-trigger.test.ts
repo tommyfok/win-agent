@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { setupTestDb } from '../../db/__tests__/test-helpers.js';
-import { select, insert, rawRun } from '../../db/repository.js';
+import { select, insert } from '../../db/repository.js';
 import { checkAutoTriggers, resetTriggers } from '../auto-trigger.js';
 
 beforeEach(() => {
@@ -13,11 +13,7 @@ function createIteration(status = 'active'): number {
   return lastInsertRowid as number;
 }
 
-function createTask(
-  iterationId: number,
-  status: string,
-  title = 'Task'
-): number {
+function createTask(iterationId: number, status: string, title = 'Task'): number {
   const { lastInsertRowid } = insert('tasks', { title, status, iteration_id: iterationId });
   return lastInsertRowid as number;
 }
