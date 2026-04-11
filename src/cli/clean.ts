@@ -36,9 +36,13 @@ async function _cleanCommand() {
 
   const opencodeDir = path.join(cwd, '.opencode');
 
+  const agentMdPath = path.join(cwd, 'AGENT.md');
+  const hasAgentMd = fs.existsSync(agentMdPath);
+
   const skillNames = DEFAULT_SKILLS.map((s) => getSkillDirName(s.pkg)).join(', ');
   console.log('\n将清理以下内容：');
   console.log(`  - ${winAgentDir}/`);
+  if (hasAgentMd) console.log('  - AGENT.md（根目录）');
   console.log(`  - .opencode/agents/{PM,DEV}.md`);
   console.log(`  - .opencode/tools/database_{PM,DEV}.ts`);
   console.log(`  - .opencode/skills/{${skillNames}}`);
@@ -61,6 +65,12 @@ async function _cleanCommand() {
   // Delete .win-agent directory
   fs.rmSync(winAgentDir, { recursive: true, force: true });
   console.log('  ✓ 已删除 .win-agent/');
+
+  // Delete root AGENT.md
+  if (hasAgentMd) {
+    fs.unlinkSync(agentMdPath);
+    console.log('  ✓ 已删除 AGENT.md');
+  }
 
   // Clean only win-agent-managed files in .opencode/
   cleanOpencodeFiles(opencodeDir);
