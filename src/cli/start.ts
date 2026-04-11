@@ -182,6 +182,13 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
   });
   if (snapshotRow.length === 0) return; // no snapshot (init not run), skip
 
+  // Detect project mode: greenfield/pending only check role files, skip docs
+  const modeRow = dbSelect<{ key: string; value: string }>('project_config', {
+    key: 'project_mode',
+  });
+  const projectMode = modeRow.length > 0 ? modeRow[0].value : 'existing';
+  const skipDocsCheck = projectMode === 'greenfield' || projectMode === 'pending';
+
   const snapshot: Record<string, number> = JSON.parse(snapshotRow[0].value);
   const rolesDir = path.join(workspace, '.win-agent', 'roles');
   const unmodified: string[] = [];
@@ -193,44 +200,48 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
     if (currentMtime === snapshotMtime) unmodified.push(file);
   }
 
-  // Check overview.md
+  // Check overview.md (skip for greenfield/pending — it's a placeholder)
   let overviewUnmodified = false;
-  const overviewSnapshotRow = dbSelect<{ key: string; value: string }>('project_config', {
-    key: 'overview_mtime_snapshot',
-  });
-  if (overviewSnapshotRow.length > 0) {
-    const overviewPath = path.join(workspace, '.win-agent', 'docs', 'overview.md');
-    if (fs.existsSync(overviewPath)) {
-      const currentMtime = fs.statSync(overviewPath).mtimeMs;
-      if (currentMtime === Number(overviewSnapshotRow[0].value)) {
-        overviewUnmodified = true;
+  if (!skipDocsCheck) {
+    const overviewSnapshotRow = dbSelect<{ key: string; value: string }>('project_config', {
+      key: 'overview_mtime_snapshot',
+    });
+    if (overviewSnapshotRow.length > 0) {
+      const overviewPath = path.join(workspace, '.win-agent', 'docs', 'overview.md');
+      if (fs.existsSync(overviewPath)) {
+        const currentMtime = fs.statSync(overviewPath).mtimeMs;
+        if (currentMtime === Number(overviewSnapshotRow[0].value)) {
+          overviewUnmodified = true;
+        }
       }
     }
   }
 
-  // Check docs rule files (development.md, validation.md)
+  // Check docs rule files (skip for greenfield/pending — they are placeholders)
   const docsUnmodified: string[] = [];
-  const docsSnapshotRow = dbSelect<{ key: string; value: string }>('project_config', {
-    key: 'docs_mtimes_snapshot',
-  });
-  if (docsSnapshotRow.length > 0) {
-    const docsSnapshot: Record<string, number> = JSON.parse(docsSnapshotRow[0].value);
-    const docsDir = path.join(workspace, '.win-agent', 'docs');
-    for (const [file, snapshotMtime] of Object.entries(docsSnapshot)) {
-      const filePath = path.join(docsDir, file);
-      if (!fs.existsSync(filePath)) continue;
-      const currentMtime = fs.statSync(filePath).mtimeMs;
-      if (currentMtime === snapshotMtime) docsUnmodified.push(file);
-    }
-  }
-
-  // Check for TODO markers in docs files (even if mtime changed, TODOs mean incomplete)
   const docsWithTodos: string[] = [];
-  const docsDir = path.join(workspace, '.win-agent', 'docs');
-  for (const file of ['development.md', 'validation.md']) {
-    const filePath = path.join(docsDir, file);
-    if (docsUnmodified.includes(file)) continue; // already flagged as unmodified
-    if (hasTodoMarkers(filePath)) docsWithTodos.push(file);
+  if (!skipDocsCheck) {
+    const docsSnapshotRow = dbSelect<{ key: string; value: string }>('project_config', {
+      key: 'docs_mtimes_snapshot',
+    });
+    if (docsSnapshotRow.length > 0) {
+      const docsSnapshot: Record<string, number> = JSON.parse(docsSnapshotRow[0].value);
+      const docsDir = path.join(workspace, '.win-agent', 'docs');
+      for (const [file, snapshotMtime] of Object.entries(docsSnapshot)) {
+        const filePath = path.join(docsDir, file);
+        if (!fs.existsSync(filePath)) continue;
+        const currentMtime = fs.statSync(filePath).mtimeMs;
+        if (currentMtime === snapshotMtime) docsUnmodified.push(file);
+      }
+    }
+
+    // Check for TODO markers in docs files (even if mtime changed, TODOs mean incomplete)
+    const docsDir = path.join(workspace, '.win-agent', 'docs');
+    for (const file of ['development.md', 'validation.md']) {
+      const filePath = path.join(docsDir, file);
+      if (docsUnmodified.includes(file)) continue; // already flagged as unmodified
+      if (hasTodoMarkers(filePath)) docsWithTodos.push(file);
+    }
   }
 
   if (

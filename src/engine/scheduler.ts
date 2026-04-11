@@ -69,7 +69,7 @@ const PM_COOLDOWN_MS = 3000;
 let pmLastDispatchEnd = 0;
 
 /**
- * PM starvation protection: after N consecutive PM-only dispatches,
+ * DEV starvation protection: after N consecutive PM-only dispatches,
  * skip PM for one tick to let DEV get scheduled.
  */
 const PM_MAX_CONSECUTIVE = 3;
@@ -236,7 +236,7 @@ async function schedulerTick(
       continue;
     }
 
-    // PM starvation protection: if PM has been dispatched too many times
+    // DEV starvation protection: if PM has been dispatched too many times
     // consecutively, skip PM for this tick to let DEV get scheduled.
     if (role === 'PM' && pmConsecutiveCount >= PM_MAX_CONSECUTIVE) {
       // Check if other roles have pending messages

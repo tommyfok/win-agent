@@ -243,6 +243,7 @@ function ensureOverviewReference(workspace: string) {
   let fixed = 0;
   for (const file of fs.readdirSync(rolesDir)) {
     if (!file.endsWith('.md')) continue;
+    if (/^(PM|DEV)-/i.test(file)) continue; // role auxiliary files don't need project context
     const filePath = path.join(rolesDir, file);
     const content = fs.readFileSync(filePath, 'utf-8');
 
@@ -308,6 +309,13 @@ async function mergeRoleTemplates(workspace: string, templatesDir: string) {
     const templatePath = path.join(templatesDir, file);
     const workspacePath = path.join(rolesDir, file);
     const templateContent = fs.readFileSync(templatePath, 'utf-8');
+
+    // Role auxiliary files (PM-xxx.md, DEV-xxx.md) are not user-editable — always overwrite
+    if (/^(PM|DEV)-/i.test(file)) {
+      fs.copyFileSync(templatePath, workspacePath);
+      upToDate.push(file);
+      continue;
+    }
 
     if (!fs.existsSync(workspacePath)) {
       // New role file — just copy it
