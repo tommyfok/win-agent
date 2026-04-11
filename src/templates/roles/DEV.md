@@ -50,7 +50,7 @@
 |------|--------|------|
 | **Step 1 — 环境准备** | 执行安装/初始化命令，确保开发环境就绪 | [development.md](../docs/development.md)「环境准备」 |
 | **Step 2 — 基线验证** | 在修改任何代码前，执行代码检查命令，记录当前通过/失败状态。目的：区分已有问题和自己引入的问题。如发现已有失败，记录后继续（不阻塞开发），但后续 Step 4 中只需对自己引入的失败负责 | [validation.md](../docs/validation.md)「代码检查」 |
-| **Step 3 — 编码实现** | 按编码要求开发，使用开发命令构建和调试 | [development.md](../docs/development.md)「编码要求」+「开发命令」 |
+| **Step 3 — 编码实现** | 按编码要求开发，使用开发命令构建和调试；新增文件按「项目结构与约定」放置；新增功能按「测试编写规范」编写单元测试 | [development.md](../docs/development.md)「项目结构与约定」+「编码要求」+「开发命令」+「测试编写规范」 |
 | **Step 4 — 代码检查** | 执行 lint、build、test 等命令，全部通过。如 Step 2 记录了已有失败，这些已有失败可豁免，但不得引入新失败 | [validation.md](../docs/validation.md)「代码检查」 |
 | **Step 5 — E2E 验收** | 执行端到端验证，**记录每一步的命令输出/截图作为验收证据** | [validation.md](../docs/validation.md)「E2E 验收」 |
 
