@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import { LRUCache } from 'lru-cache';
 import { loadConfig } from '../config/index.js';
 import { createOpenAIEmbedding } from './openai.js';
 import { createLocalEmbedding } from './local.js';
@@ -16,6 +18,13 @@ const DIMENSIONS: Record<string, number> = {
 };
 
 let provider: EmbeddingProvider | null = null;
+
+// LRU cache keyed by SHA-256 prefix of the text; max 500 entries (~2MB for 1536-dim float32)
+const embedCache = new LRUCache<string, number[]>({ max: 500 });
+
+function hashText(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
 
 /**
  * Get the embedding dimension for the configured provider.
@@ -61,10 +70,16 @@ export function getEmbeddingProvider(workspace?: string): EmbeddingProvider {
 
 /**
  * Generate an embedding vector for the given text.
+ * Results are cached in-memory (LRU, max 500 entries) for the lifetime of the process.
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
+  const key = hashText(text);
+  const cached = embedCache.get(key);
+  if (cached) return cached;
   const p = getEmbeddingProvider();
-  return p.generate(text);
+  const vector = await p.generate(text);
+  embedCache.set(key, vector);
+  return vector;
 }
 
 /**
@@ -72,4 +87,5 @@ export async function generateEmbedding(text: string): Promise<number[]> {
  */
 export function resetEmbeddingProvider(): void {
   provider = null;
+  embedCache.clear();
 }

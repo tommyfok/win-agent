@@ -1,6 +1,8 @@
-import { select, insert, rawQuery, rawRun } from '../db/repository.js';
+import { select, insert, rawQuery, rawRun, withTransaction } from '../db/repository.js';
 import { MessageStatus } from '../db/types.js';
-import { formatTokens } from '../utils/format.js';
+import { generateIterationStats } from './iteration-stats.js';
+import { engineBus, EngineEvents } from './event-bus.js';
+import { loadConfig } from '../config/index.js';
 
 interface ProjectConfigRow {
   key: string;
@@ -64,12 +66,12 @@ function checkScaffoldDone(): void {
 
   firedTriggers.add(key);
 
-  // 通知 PM 执行工作空间分析
-  insert('messages', {
-    from_role: 'system',
-    to_role: 'PM',
-    type: 'system',
-    content: `🏗️ 脚手架任务已完成。请执行以下操作：
+  withTransaction(() => {
+    insert('messages', {
+      from_role: 'system',
+      to_role: 'PM',
+      type: 'system',
+      content: `🏗️ 脚手架任务已完成。请执行以下操作：
 
 1. **生成项目概览**：扫描当前工作空间，分析项目结构和技术栈，生成概览文档并写入 \`.win-agent/docs/overview.md\`。
    - 概览应包含：项目定位、技术栈、核心模块、架构要点
@@ -78,13 +80,13 @@ function checkScaffoldDone(): void {
 2. **审阅 docs 文件**：检查 DEV 更新的 \`.win-agent/docs/development.md\` 和 \`.win-agent/docs/validation.md\` 是否完整准确。
 
 3. 向用户汇报脚手架搭建完成情况，询问是否可以开始功能需求开发。`,
-    status: MessageStatus.Deferred,
-  });
-
-  insert('logs', {
-    role: 'system',
-    action: 'auto_trigger',
-    content: '脚手架任务完成，已通知 PM 生成 overview.md',
+      status: MessageStatus.Deferred,
+    });
+    insert('logs', {
+      role: 'system',
+      action: 'auto_trigger',
+      content: '脚手架任务完成，已通知 PM 生成 overview.md',
+    });
   });
 
   console.log('   🏗️ 自动触发: 脚手架完成，通知 PM 生成项目概览');
@@ -112,29 +114,27 @@ function checkAllTasksDone(): void {
 
     firedTriggers.add(key);
 
-    // Mark iteration as completed
-    rawRun(
-      "UPDATE iterations SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [iter.id]
-    );
-
-    // 引擎直接生成统计报告，无需调用 LLM
+    // 统计报告在事务外生成（只读查询）
     const statsReport = generateIterationStats(iter.id);
 
-    // 将引擎生成的统计报告通知 PM，由 PM 回顾后标记为 reviewed
-    insert('messages', {
-      from_role: 'system',
-      to_role: 'PM',
-      type: 'system',
-      content: `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。\n\n${statsReport}\n\n请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。\n审阅完成后，将回顾摘要写入 memory 表，然后通过 database_update 将迭代 #${iter.id} 的 status 更新为 'reviewed'。`,
-      status: MessageStatus.Deferred,
-      related_iteration_id: iter.id,
-    });
-
-    insert('logs', {
-      role: 'system',
-      action: 'auto_trigger',
-      content: `迭代 #${iter.id} 全部任务完成，已生成统计报告并通知 PM`,
+    withTransaction(() => {
+      rawRun(
+        "UPDATE iterations SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [iter.id]
+      );
+      insert('messages', {
+        from_role: 'system',
+        to_role: 'PM',
+        type: 'system',
+        content: `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。\n\n${statsReport}\n\n请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。\n审阅完成后，将回顾摘要写入 memory 表，然后通过 database_update 将迭代 #${iter.id} 的 status 更新为 'reviewed'。`,
+        status: MessageStatus.Deferred,
+        related_iteration_id: iter.id,
+      });
+      insert('logs', {
+        role: 'system',
+        action: 'auto_trigger',
+        content: `迭代 #${iter.id} 全部任务完成，已生成统计报告并通知 PM`,
+      });
     });
 
     console.log(`   🔄 自动触发: 迭代 #${iter.id} 回顾`);
@@ -161,122 +161,39 @@ function checkRejectionRate(): void {
       [iter.id]
     )[0];
 
-    if (stats.total < 3) continue; // 任务数不足时打回率无统计意义
+    const engineCfg = loadConfig().engine ?? {};
+    const minTasks = engineCfg.minTasksForRejectionStats ?? 3;
+    const rateThreshold = engineCfg.rejectionRateThreshold ?? 0.3;
+    if (stats.total < minTasks) continue; // 任务数不足时打回率无统计意义
     const rate = stats.rejected / stats.total;
-    if (rate <= 0.3) continue;
+    if (rate <= rateThreshold) continue;
 
     firedTriggers.add(key);
-    // 持久化到日志，引擎重启后仍可恢复，避免对同一活跃迭代重复触发
-    insert('logs', { role: 'system', action: 'trigger_fired', content: key });
 
+    // 统计报告在事务外生成（只读查询）
     const statsReport = generateIterationStats(iter.id);
 
-    insert('messages', {
-      from_role: 'system',
-      to_role: 'PM',
-      type: 'system',
-      content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 30%，需要关注。\n\n${statsReport}\n\n请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。`,
-      status: MessageStatus.Deferred,
-      related_iteration_id: iter.id,
+    withTransaction(() => {
+      // 持久化到日志，引擎重启后仍可恢复，避免对同一活跃迭代重复触发
+      insert('logs', { role: 'system', action: 'trigger_fired', content: key });
+      insert('messages', {
+        from_role: 'system',
+        to_role: 'PM',
+        type: 'system',
+        content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 ${Math.round(rateThreshold * 100)}%，需要关注。\n\n${statsReport}\n\n请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。`,
+        status: MessageStatus.Deferred,
+        related_iteration_id: iter.id,
+      });
+      insert('logs', {
+        role: 'system',
+        action: 'auto_trigger',
+        content: `迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超阈值，已通知 PM`,
+      });
     });
 
-    insert('logs', {
-      role: 'system',
-      action: 'auto_trigger',
-      content: `迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超阈值，已通知 PM`,
-    });
-
-    console.log(
-      `   ⚠️ 自动触发: 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}%`
-    );
+    console.log(`   ⚠️ 自动触发: 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}%`);
   }
 }
 
-/**
- * 通过 SQL 聚合生成迭代统计报告。
- * 由引擎直接计算，零 LLM 成本。
- */
-function generateIterationStats(iterationId: number): string {
-  const lines: string[] = [`## 迭代 #${iterationId} 统计报告`];
-
-  // 任务概况
-  const taskStats = rawQuery<{ status: string; cnt: number }>(
-    `SELECT status, COUNT(*) as cnt FROM tasks WHERE iteration_id = ? GROUP BY status ORDER BY status`,
-    [iterationId]
-  );
-  const totalTasks = taskStats.reduce((s, r) => s + r.cnt, 0);
-  lines.push(`\n### 任务概况 (共 ${totalTasks} 个)`);
-  for (const row of taskStats) {
-    lines.push(`- ${row.status}: ${row.cnt}`);
-  }
-
-  // 从 task_events 统计打回次数（比直接看当前状态更准确）
-  const rejections = rawQuery<{ cnt: number }>(
-    `SELECT COUNT(*) as cnt FROM task_events te
-     JOIN tasks t ON te.task_id = t.id
-     WHERE t.iteration_id = ? AND te.to_status = 'rejected'`,
-    [iterationId]
-  );
-  const rejectionCount = rejections[0]?.cnt ?? 0;
-  const rejectionRate = totalTasks > 0 ? Math.round((rejectionCount / totalTasks) * 100) : 0;
-  lines.push(`\n### 质量指标`);
-  lines.push(`- 累计打回次数: ${rejectionCount}`);
-  lines.push(`- 打回率: ${rejectionRate}%`);
-
-  // 阻塞统计
-  const blockedEvents = rawQuery<{ cnt: number }>(
-    `SELECT COUNT(DISTINCT te.task_id) as cnt FROM task_events te
-     JOIN tasks t ON te.task_id = t.id
-     WHERE t.iteration_id = ? AND te.to_status = 'blocked'`,
-    [iterationId]
-  );
-  lines.push(`- 曾被阻塞的任务数: ${blockedEvents[0]?.cnt ?? 0}`);
-
-  // Token 消耗统计
-  const tokenStats = rawQuery<{
-    role: string;
-    dispatches: number;
-    input_total: number;
-    output_total: number;
-    total: number;
-  }>(
-    `SELECT role,
-            COUNT(*) as dispatches,
-            SUM(input_tokens) as input_total,
-            SUM(output_tokens) as output_total,
-            SUM(input_tokens + output_tokens) as total
-     FROM role_outputs
-     WHERE related_iteration_id = ?
-     GROUP BY role ORDER BY total DESC`,
-    [iterationId]
-  );
-  if (tokenStats.length > 0) {
-    lines.push(`\n### Token 消耗`);
-    let grandTotal = 0;
-    for (const row of tokenStats) {
-      const total = row.total ?? 0;
-      grandTotal += total;
-      lines.push(`- ${row.role}: ${formatTokens(total)} tokens (${row.dispatches} 次调度)`);
-    }
-    lines.push(`- 合计: ${formatTokens(grandTotal)} tokens`);
-  }
-
-  // 打回次数最多的任务
-  const topRejected = rawQuery<{ id: number; title: string; reject_count: number }>(
-    `SELECT t.id, t.title, COUNT(*) as reject_count
-     FROM task_events te
-     JOIN tasks t ON te.task_id = t.id
-     WHERE t.iteration_id = ? AND te.to_status = 'rejected'
-     GROUP BY te.task_id
-     ORDER BY reject_count DESC LIMIT 5`,
-    [iterationId]
-  );
-  if (topRejected.length > 0) {
-    lines.push(`\n### 打回次数最多的任务`);
-    for (const row of topRejected) {
-      lines.push(`- task#${row.id}「${row.title}」: 打回 ${row.reject_count} 次`);
-    }
-  }
-
-  return lines.join('\n');
-}
+// Subscribe to dispatch events — auto-triggers are evaluated after every successful dispatch.
+engineBus.on(EngineEvents.DISPATCH_COMPLETE, () => checkAutoTriggers());

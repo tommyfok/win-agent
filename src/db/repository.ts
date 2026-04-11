@@ -146,3 +146,22 @@ export function rawRun(
     lastInsertRowid: Number(result.lastInsertRowid),
   };
 }
+
+/**
+ * Upsert a key-value pair in project_config (INSERT OR REPLACE).
+ */
+export function upsertProjectConfig(key: string, value: string): void {
+  rawRun(
+    `INSERT OR REPLACE INTO project_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+    [key, value]
+  );
+}
+
+/**
+ * Execute a function inside a SQLite transaction.
+ * Uses better-sqlite3's synchronous transaction API — the callback must be synchronous.
+ * On success, commits and returns the result. On exception, rolls back and rethrows.
+ */
+export function withTransaction<T>(fn: () => T): T {
+  return getDb().transaction(fn)();
+}

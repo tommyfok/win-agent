@@ -25,8 +25,10 @@ import {
   stopSchedulerLoop,
   abortCurrentDispatch,
 } from '../engine/scheduler.js';
-import { detectModelContextLimit } from '../engine/memory-rotator.js';
+import { detectModelContextLimit, loadOutputHistory } from '../engine/memory-rotator.js';
 import { setSimilarityThreshold } from '../embedding/memory.js';
+import { resetTriggers } from '../engine/auto-trigger.js';
+import { initIterationChecker } from '../engine/iteration-checker.js';
 
 let serverHandle: OpencodeServerHandle | null = null;
 let sessionManager: SessionManager | null = null;
@@ -84,9 +86,12 @@ export async function engineCommand(workspace: string) {
     process.exit(1);
   }
 
-  // ── Detect model context limit ──
+  // ── Detect model context limit and restore runtime state ──
   const contextLimit = await detectModelContextLimit(serverHandle.client);
   console.log(`✓ 模型 context 上限: ${contextLimit.toLocaleString()} tokens`);
+  loadOutputHistory();
+  resetTriggers();
+  initIterationChecker(sessionManager);
 
   // Check memories and active iterations
   const memoryCount = rawQuery('SELECT COUNT(*) as cnt FROM memory')[0].cnt;

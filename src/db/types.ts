@@ -3,8 +3,11 @@
  * 所有代码中对任务状态的比较应使用此枚举，避免魔法字符串。
  */
 export const TaskStatus = {
+  PendingPm: 'pending_pm',
   PendingDev: 'pending_dev',
   InDev: 'in_dev',
+  PendingReview: 'pending_review',
+  InReview: 'in_review',
   Done: 'done',
   Rejected: 'rejected',
   Cancelled: 'cancelled',

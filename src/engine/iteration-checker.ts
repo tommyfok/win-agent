@@ -3,6 +3,26 @@ import { MessageStatus } from '../db/types.js';
 import type { SessionManager } from './session-manager.js';
 import { cleanExpiredMemories } from '../embedding/memory.js';
 import { cleanExpiredOutputs } from './output-cleaner.js';
+import { engineBus, EngineEvents, type DispatchCompletePayload } from './event-bus.js';
+
+/** SessionManager injected by the engine at startup (via initIterationChecker). */
+let storedSessionManager: SessionManager | null = null;
+
+/**
+ * Inject the SessionManager so event-driven callbacks can access it.
+ * Call once in cli/engine.ts before starting the scheduler loop.
+ * Also registers the DISPATCH_COMPLETE listener on first call.
+ */
+export function initIterationChecker(sm: SessionManager | null): void {
+  storedSessionManager = sm;
+}
+
+// Subscribe to dispatch events — check iteration review only after PM dispatches.
+engineBus.on(EngineEvents.DISPATCH_COMPLETE, (payload: DispatchCompletePayload) => {
+  if (payload.role === 'PM') {
+    checkIterationReview(storedSessionManager);
+  }
+});
 
 interface IterationRow {
   id: number;

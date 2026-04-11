@@ -1,7 +1,8 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
-import { insert } from '../db/repository.js';
+import { insert, select, upsertProjectConfig } from '../db/repository.js';
 import { loadConfig } from '../config/index.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Default context window size (tokens) for rotation calculation.
@@ -93,6 +94,28 @@ function getMaxContext(): number {
 }
 
 /**
+ * Load per-role output token history from project_config (call at engine startup).
+ */
+export function loadOutputHistory(): void {
+  try {
+    const rows = select<{ key: string; value: string }>('project_config', {});
+    for (const row of rows) {
+      if (row.key.startsWith('engine.outputHistory.')) {
+        const role = row.key.replace('engine.outputHistory.', '');
+        const parsed = JSON.parse(row.value) as number[];
+        if (Array.isArray(parsed)) outputHistory.set(role, parsed);
+      }
+    }
+  } catch { /* non-fatal */ }
+}
+
+function saveOutputHistory(role: string): void {
+  try {
+    upsertProjectConfig(`engine.outputHistory.${role}`, JSON.stringify(outputHistory.get(role) ?? []));
+  } catch { /* non-fatal */ }
+}
+
+/**
  * Record output tokens for a role (for context anxiety detection).
  */
 export function recordOutputTokens(role: string, outputTokens: number): void {
@@ -106,6 +129,7 @@ export function recordOutputTokens(role: string, outputTokens: number): void {
   if (history.length > ANXIETY_HISTORY_SIZE + 1) {
     history.shift();
   }
+  saveOutputHistory(role);
 }
 
 /**
@@ -154,25 +178,26 @@ export async function checkAndRotate(
   // Check hard threshold
   const rotationThreshold = getRotationThreshold();
   if (usage > rotationThreshold) {
-    console.log(
-      `   🔄 ${role} 上下文使用率 ${Math.round(usage * 100)}%（阈值 ${Math.round(rotationThreshold * 100)}%），执行 session 轮转`
-    );
+    const usagePct = Math.round(usage * 100);
+    const threshold = Math.round(rotationThreshold * 100);
+    logger.info({ role, usagePct, threshold }, 'session rotation triggered');
     insert('logs', {
       role: 'system',
       action: 'session_rotation',
-      content: `${role} 上下文使用率 ${Math.round(usage * 100)}%（限制 ${maxContext} tokens），执行 session 轮转`,
+      content: `${role} 上下文使用率 ${usagePct}%（限制 ${maxContext} tokens），执行 session 轮转`,
     });
     return sessionManager.rotateSession(role, sessionId, taskId);
   }
 
   // Check context anxiety (only if we're past 50% usage — don't trigger too early)
   if (usage > 0.5 && detectContextAnxiety(role, outputTokens)) {
-    console.log(`   🔄 ${role} 检测到 context anxiety（输出突然变短），提前执行 session 轮转`);
+    logger.info({ role, outputTokens, usagePct: Math.round(usage * 100) }, 'context anxiety rotation');
     insert('logs', {
       role: 'system',
       action: 'session_rotation',
       content: `${role} context anxiety 检测触发（使用率 ${Math.round(usage * 100)}%，输出 ${outputTokens} tokens 远低于近期平均）`,
     });
+
     return sessionManager.rotateSession(role, sessionId, taskId);
   }
 

@@ -35,8 +35,11 @@ function getStatusLabel(status: string): string {
 }
 
 const statusLabels: Record<TaskStatus, string> = {
+  [TaskStatus.PendingPm]: '待PM审阅',
   [TaskStatus.PendingDev]: '待开发',
   [TaskStatus.InDev]: '开发中',
+  [TaskStatus.PendingReview]: '待验收',
+  [TaskStatus.InReview]: '验收中',
   [TaskStatus.Done]: '已完成',
   [TaskStatus.Rejected]: '已打回',
   [TaskStatus.Cancelled]: '已取消',

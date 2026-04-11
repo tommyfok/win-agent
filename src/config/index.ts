@@ -24,12 +24,28 @@ export interface ContextRotationConfig {
   anxietyDropRatio?: number;
 }
 
+export interface EngineConfig {
+  /** 调度循环间隔，默认 1000ms */
+  tickIntervalMs?: number;
+  /** PM dispatch 后冷却时间，默认 3000ms */
+  pmCooldownMs?: number;
+  /** 触发打回率告警的最少任务数，默认 3 */
+  minTasksForRejectionStats?: number;
+  /** 打回率告警阈值，默认 0.3（30%） */
+  rejectionRateThreshold?: number;
+  /** 单次 dispatch 超时时间，默认 300000ms（5 分钟） */
+  dispatchTimeoutMs?: number;
+  /** session 初始化等待超时，默认 60000ms */
+  sessionInitTimeoutMs?: number;
+}
+
 export interface WinAgentConfig {
   workspaceId?: string;
   provider?: ProviderConfig;
   embedding?: EmbeddingConfig;
   serverPassword?: string;
   contextRotation?: ContextRotationConfig;
+  engine?: EngineConfig;
 }
 
 /** A named provider+embedding preset stored globally. */
