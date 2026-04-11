@@ -147,25 +147,35 @@ src/
 │   ├── update.ts         # 更新文档模板
 │   └── clean.ts          # 清理工作区
 ├── engine/               # 核心调度引擎
-│   ├── scheduler.ts      # 主事件循环，统筹所有调度逻辑
-│   ├── dispatcher.ts     # 消息路由，注入知识上下文
-│   ├── session-manager.ts # PM/DEV 会话生命周期管理
-│   ├── role-manager.ts   # 角色忙闲状态管理
-│   ├── memory-rotator.ts # 上下文轮转与记忆压缩
-│   ├── auto-trigger.ts   # 里程碑自动触发器
-│   ├── dependency-checker.ts # 任务依赖图检查
+│   ├── scheduler.ts          # 主事件循环
+│   ├── scheduler-dispatch.ts # dispatch 状态与子流程（用户优先 / 轮转）
+│   ├── dispatcher.ts         # 消息路由主流程编排
+│   ├── dispatch-filter.ts    # 消息过滤与依赖检查
+│   ├── prompt-builder.ts     # Prompt 组装：知识注入 + 任务上下文
+│   ├── event-bus.ts          # 内部事件总线（解耦调度器与各模块）
+│   ├── session-manager.ts    # PM/DEV 会话生命周期管理
+│   ├── session-store.ts      # sessions.json 持久化与恢复
+│   ├── session-factory.ts    # 会话创建工厂
+│   ├── memory-writer.ts      # 记忆写入（去重后的统一入口）
+│   ├── memory-rotator.ts     # 上下文轮转与焦虑检测
+│   ├── role-manager.ts       # 角色忙闲状态管理
+│   ├── auto-trigger.ts       # 里程碑自动触发器
+│   ├── iteration-stats.ts    # 迭代统计计算
+│   ├── dependency-checker.ts # 任务依赖图检查（支持传递依赖）
 │   ├── iteration-checker.ts  # 迭代完成检测
-│   ├── opencode-server.ts    # OpenCode 服务器管理
+│   ├── opencode-server.ts    # OpenCode 服务器管理与健康检查
+│   ├── opencode-config.ts    # OpenCode 配置构建
 │   ├── output-cleaner.ts     # 输出清洗
-│   └── retry.ts          # 指数退避重试
+│   └── retry.ts              # 指数退避重试
 ├── db/                   # 数据库层
 │   ├── connection.ts     # SQLite 连接（WAL 模式 + sqlite-vec）
 │   ├── schema.ts         # 表结构与向量虚拟表定义
-│   ├── repository.ts     # 通用查询抽象
+│   ├── repository.ts     # 通用查询抽象（含 withTransaction）
+│   ├── state-machine.ts  # 任务状态机（合法转换校验）
 │   ├── types.ts          # TaskStatus / MessageStatus 枚举
 │   └── permissions.ts    # RBAC 权限种子数据
 ├── embedding/            # 向量嵌入与语义检索
-│   ├── index.ts          # 嵌入提供商工厂
+│   ├── index.ts          # 嵌入提供商工厂（含 LRU 缓存）
 │   ├── knowledge.ts      # 知识库写入与相似度检索
 │   ├── memory.ts         # 记忆写入、召回与上下文构建
 │   ├── local.ts          # 本地嵌入（HuggingFace bge-small-zh-v1.5）
@@ -184,7 +194,8 @@ src/
 │   ├── DEV-scaffold.md
 │   └── DEV-update-docs.md
 └── utils/
-    └── format.ts         # Token 格式化工具
+    ├── format.ts         # Token 格式化工具
+    └── logger.ts         # 结构化日志（pino）
 ```
 
 ### 数据库结构
@@ -320,9 +331,28 @@ PM 角色
   "contextRotation": {
     "threshold": 0.8,
     "anxietyThreshold": 0.3
+  },
+  "engine": {
+    "tickIntervalMs": 1000,
+    "pmCooldownMs": 3000,
+    "dispatchTimeoutMs": 300000,
+    "sessionInitTimeoutMs": 60000,
+    "minTasksForRejectionStats": 3,
+    "rejectionRateThreshold": 0.3
   }
 }
 ```
+
+`engine` 字段所有项均有默认值，缺省时行为不变。各项说明：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `tickIntervalMs` | 1000 | 调度循环间隔（ms） |
+| `pmCooldownMs` | 3000 | PM dispatch 后的冷却时间（ms） |
+| `dispatchTimeoutMs` | 300000 | 单次 dispatch 超时时间（ms） |
+| `sessionInitTimeoutMs` | 60000 | 会话初始化等待超时（ms） |
+| `minTasksForRejectionStats` | 3 | 触发打回率告警的最少任务数 |
+| `rejectionRateThreshold` | 0.3 | 打回率告警阈值（30%） |
 
 ### 角色 Prompt 定制
 
@@ -355,6 +385,9 @@ pnpm dev
 
 # 构建
 pnpm build
+
+# 运行单元测试
+pnpm test
 
 # 本地链接（用于测试 CLI）
 pnpm link --global
