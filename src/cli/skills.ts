@@ -265,7 +265,6 @@ async function promptSession(
   const result = await client.session.prompt({
     path: { id: sessionId },
     body: {
-      agent: 'DEV',
       parts: [{ type: 'text', text: prompt }],
     },
   });

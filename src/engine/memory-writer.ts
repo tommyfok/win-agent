@@ -38,7 +38,6 @@ export async function writeMemory(
     client.session.prompt({
       path: { id: sessionId },
       body: {
-        agent: role,
         parts: [{ type: 'text', text: WRITE_MEMORY_PROMPT }],
       },
     }),

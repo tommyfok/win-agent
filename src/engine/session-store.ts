@@ -125,7 +125,6 @@ export async function checkAndResumeInterrupted(
         client.session.promptAsync({
           path: { id: sessionId },
           body: {
-            agent: role,
             parts: [{ type: 'text', text: resumePrompt }],
           },
         }),

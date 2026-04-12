@@ -453,7 +453,6 @@ async function _onboardingCommand() {
         const result = await client.session.prompt({
           path: { id: sessionId },
           body: {
-            agent: 'PM',
             parts: [{ type: 'text', text: prompt }],
           },
         });

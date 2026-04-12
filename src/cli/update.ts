@@ -181,7 +181,6 @@ async function updateDocs(workspace: string) {
       const result = await client.session.prompt({
         path: { id: sessionId },
         body: {
-          agent: 'PM',
           parts: [{ type: 'text', text: spec.buildPrompt(subProjects) }],
         },
       });
@@ -471,7 +470,6 @@ async function aiMergeRoles(
       const result = await client.session.prompt({
         path: { id: sessionId },
         body: {
-          agent: 'PM',
           parts: [{ type: 'text', text: mergePrompt }],
         },
       });

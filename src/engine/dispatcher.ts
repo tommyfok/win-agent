@@ -123,7 +123,6 @@ export async function dispatchToRole(
         client.session.prompt({
           path: { id: sessionId },
           body: {
-            agent: role,
             parts: [{ type: 'text', text: prompt }],
           },
         }),
