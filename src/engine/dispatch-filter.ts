@@ -21,23 +21,23 @@ const DEV_SKIP_STATUSES: TaskStatus[] = [
   TaskStatus.Paused,
   TaskStatus.Cancelled,
   TaskStatus.Blocked,
-  TaskStatus.Done,
 ];
 
 /**
  * Filter messages before dispatch:
- * - DEV: skip messages for paused/blocked/cancelled/done tasks; also checks unmet dependencies
+ * - DEV: skip messages for paused/blocked/cancelled tasks; also checks unmet dependencies
+ * - For done tasks: if message is feedback/cancel_task, auto-reject task to allow DEV to process
  * - Other roles: returns messages unchanged
  *
  * Skipped messages are marked as read to prevent infinite retry.
- * cancel_task messages are always delivered so DEV can execute rollback/cleanup.
+ * cancel_task and feedback messages are always delivered so DEV can execute rollback/feedback handling.
  */
 export function filterMessagesForRole(role: Role, messages: MessageRow[]): MessageRow[] {
   if (role !== 'DEV') return messages;
 
   const filtered: MessageRow[] = [];
   for (const msg of messages) {
-    if (msg.related_task_id && msg.type !== 'cancel_task') {
+    if (msg.related_task_id && msg.type !== 'cancel_task' && msg.type !== 'feedback') {
       const tasks = select<{ id: number; status: TaskStatus }>('tasks', {
         id: msg.related_task_id,
       });
@@ -54,6 +54,17 @@ export function filterMessagesForRole(role: Role, messages: MessageRow[]): Messa
         }
       }
     }
+
+    if (msg.related_task_id && msg.type === 'feedback') {
+      const tasks = select<{ id: number; status: TaskStatus }>('tasks', {
+        id: msg.related_task_id,
+      });
+      const taskStatus = tasks[0]?.status;
+      if (taskStatus === TaskStatus.Done) {
+        update('tasks', { id: msg.related_task_id }, { status: TaskStatus.Rejected });
+      }
+    }
+
     filtered.push(msg);
   }
   return filtered;
