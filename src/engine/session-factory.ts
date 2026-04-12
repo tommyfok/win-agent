@@ -23,7 +23,7 @@ export async function createRoleSession(
   const sessionResult = await withRetry(
     () =>
       client.session.create({
-        body: { title: `${sessionPrefix}-${role}` },
+        body: { title: `${sessionPrefix}-${role}-${Date.now()}` },
       }),
     { maxAttempts: 3, label: `${role} session.create` }
   );

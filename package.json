@@ -14,7 +14,8 @@
     "lint:fix": "tsc --noEmit && eslint src --fix",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy:local": "pnpm lint && pnpm test && pnpm build && npm link"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1",
