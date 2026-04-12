@@ -5,11 +5,7 @@ import { runEnvCheck } from './check.js';
 import { initWorkspace, detectExistingCode, detectSubProjects } from '../workspace/init.js';
 import { openDb, closeDb, getDb } from '../db/connection.js';
 import { select as dbSelect, insert as dbInsert, update as dbUpdate } from '../db/repository.js';
-import {
-  syncAgents,
-  deployTools,
-  ensureRequiredMcps,
-} from '../workspace/sync-agents.js';
+import { syncAgents, deployTools, ensureRequiredMcps } from '../workspace/sync-agents.js';
 import { insertKnowledge } from '../embedding/knowledge.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
@@ -398,11 +394,12 @@ async function _onboardingCommand() {
   // ── 6️⃣ 项目上下文导入 ──
   await importProjectContext(workspace);
 
-  // ── 7️⃣ 同步角色配置（分析前需先有 .opencode/agents/） ──
-  console.log('\n7️⃣  同步角色配置');
-  syncAgents(workspace);
+  // ── 7️⃣ 验证角色配置 ──
+  console.log('\n7️⃣  验证角色配置');
+  const validated = syncAgents(workspace);
+  console.log(`   ✓ ${validated.length} 个角色已验证`);
   deployTools(workspace);
-  console.log('   ✓ 完成');
+  console.log('   ✓ 数据库工具已部署');
 
   // ── 7.5 检查必要的 MCP 服务 ──
   console.log('\n   检查 MCP 服务');
@@ -428,9 +425,8 @@ async function _onboardingCommand() {
     console.log(`   ${label}，跳过 AI 分析，生成占位文档`);
     const docsDir = path.join(workspace, '.win-agent', 'docs');
     if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
-    const placeholderDocs = projectMode === 'greenfield'
-      ? buildGreenfieldDocs()
-      : buildPendingDocs();
+    const placeholderDocs =
+      projectMode === 'greenfield' ? buildGreenfieldDocs() : buildPendingDocs();
     for (const [filename, content] of Object.entries(placeholderDocs)) {
       const filePath = path.join(docsDir, filename);
       fs.writeFileSync(filePath, content, 'utf-8');
@@ -532,7 +528,7 @@ async function _onboardingCommand() {
       }
       console.log(`   ⚠️  工作空间分析失败，跳过: ${err}`);
     }
-    // NOTE: serverHandle is kept alive for skills check below, closed after init completes
+  // NOTE: serverHandle is kept alive for skills check below, closed after init completes
 
   // ── 9️⃣ 注入项目上下文到角色文件 ──
   console.log('\n9️⃣  更新角色文件');
@@ -927,7 +923,11 @@ export function snapshotDocsMtimes(workspace: string): void {
     key: 'docs_mtimes_snapshot',
   });
   if (existing.length > 0) {
-    dbUpdate('project_config', { key: 'docs_mtimes_snapshot' }, { value: JSON.stringify(snapshot) });
+    dbUpdate(
+      'project_config',
+      { key: 'docs_mtimes_snapshot' },
+      { value: JSON.stringify(snapshot) }
+    );
   } else {
     dbInsert('project_config', { key: 'docs_mtimes_snapshot', value: JSON.stringify(snapshot) });
   }

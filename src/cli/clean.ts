@@ -2,8 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { confirm } from '@inquirer/prompts';
-import { loadConfig, checkEngineRunning, removePidFile, isProcessRunning } from '../config/index.js';
-import { DEFAULT_SKILLS, getSkillDirName } from '../workspace/sync-agents.js';
+import {
+  loadConfig,
+  checkEngineRunning,
+  removePidFile,
+  isProcessRunning,
+} from '../config/index.js';
+
 import {
   startOpencodeServer,
   removeServerInfo,
@@ -61,13 +66,10 @@ async function _cleanCommand() {
   const agentMdPath = path.join(cwd, 'AGENT.md');
   const hasAgentMd = fs.existsSync(agentMdPath);
 
-  const skillNames = DEFAULT_SKILLS.map((s) => getSkillDirName(s.pkg)).join(', ');
   console.log('\n将清理以下内容：');
   console.log(`  - ${winAgentDir}/`);
   if (hasAgentMd) console.log('  - AGENT.md（根目录）');
-  console.log(`  - .opencode/agents/{PM,DEV}.md`);
   console.log(`  - .opencode/tools/database_{PM,DEV}.ts`);
-  console.log(`  - .opencode/skills/{${skillNames}}`);
   console.log(`  - .opencode/opencode.json 中的 permission 字段`);
   if (sessionPrefix) {
     console.log(`  - opencode 中 ${sessionPrefix}-* 相关 session`);
@@ -127,17 +129,7 @@ function cleanOpencodeFiles(opencodeDir: string): void {
   if (fs.existsSync(legacy)) fs.unlinkSync(legacy);
   removeIfEmpty(toolsDir);
 
-  // 3. Remove win-agent-managed skill directories
-  const skillsDir = path.join(opencodeDir, 'skills');
-  if (fs.existsSync(skillsDir)) {
-    for (const skill of DEFAULT_SKILLS) {
-      const skillDir = path.join(skillsDir, getSkillDirName(skill.pkg));
-      if (fs.existsSync(skillDir)) fs.rmSync(skillDir, { recursive: true, force: true });
-    }
-    removeIfEmpty(skillsDir);
-  }
-
-  // 4. Remove permission key from opencode.json
+  // 3. Remove permission key from opencode.json
   const configFile = path.join(opencodeDir, 'opencode.json');
   if (fs.existsSync(configFile)) {
     try {
@@ -223,7 +215,11 @@ function cleanupOrphanedProcesses(workspace: string): void {
     for (const line of result.split('\n')) {
       const opPid = parseInt(line.trim().split(/\s+/)[0], 10);
       if (opPid && !isNaN(opPid)) {
-        try { process.kill(opPid, 'SIGTERM'); } catch { /* already dead */ }
+        try {
+          process.kill(opPid, 'SIGTERM');
+        } catch {
+          /* already dead */
+        }
       }
     }
   } catch {
@@ -233,12 +229,16 @@ function cleanupOrphanedProcesses(workspace: string): void {
   try {
     const result = execSync(
       `ps -eo pid,command | grep 'win-agent _engine ${workspace}' | grep -v grep`,
-      { encoding: 'utf-8', timeout: 5000 },
+      { encoding: 'utf-8', timeout: 5000 }
     ).trim();
     for (const line of result.split('\n')) {
       const opPid = parseInt(line.trim().split(/\s+/)[0], 10);
       if (opPid && !isNaN(opPid)) {
-        try { process.kill(opPid, 'SIGTERM'); } catch { /* already dead */ }
+        try {
+          process.kill(opPid, 'SIGTERM');
+        } catch {
+          /* already dead */
+        }
       }
     }
   } catch {

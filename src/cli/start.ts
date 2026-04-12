@@ -6,7 +6,7 @@ import { runEnvCheck } from './check.js';
 import { initWorkspace } from '../workspace/init.js';
 import { openDb, closeDb, getDb } from '../db/connection.js';
 import { select as dbSelect, insert as dbInsert } from '../db/repository.js';
-import { syncAgents, deployTools } from '../workspace/sync-agents.js';
+import { syncAgents } from '../workspace/sync-agents.js';
 import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
 import { hasTodoMarkers } from './init.js';
@@ -74,12 +74,10 @@ async function _startCommand() {
     openDb(dbPath);
   }
 
-  // Sync agent configs and deploy tools
-  console.log('   → Agent 配置同步...');
+  // Validate role prompts
+  console.log('   → 角色配置验证...');
   const synced = syncAgents(workspace);
-  console.log(`   ✓ ${synced.length} 个角色已同步到 .opencode/agents/`);
-  deployTools(workspace);
-  console.log('   ✓ 数据库工具已部署到 .opencode/tools/');
+  console.log(`   ✓ ${synced.length} 个角色已验证`);
 
   // ── 4️⃣ 前置检查 ──
   const onboardDone = dbSelect<{ key: string; value: string }>('project_config', {
@@ -245,9 +243,7 @@ async function checkRoleFilesReviewed(workspace: string): Promise<void> {
       }
     }
     if (docsWithTodos.length > 0) {
-      console.log(
-        `\n❌ 以下文件仍包含待补充的 TODO 标记（⚠️ TODO），请补充完整后再启动：`
-      );
+      console.log(`\n❌ 以下文件仍包含待补充的 TODO 标记（⚠️ TODO），请补充完整后再启动：`);
       for (const file of docsWithTodos) {
         console.log(`   • .win-agent/docs/${file}`);
       }

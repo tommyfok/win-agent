@@ -1,24 +1,16 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import { withRetry } from './retry.js';
 import { buildRecallPrompt } from '../embedding/memory.js';
 
-/**
- * Load the role prompt content from .win-agent/roles/{role}.md
- */
-function loadRolePrompt(workspace: string, role: string): string {
-  const promptFile = path.join(workspace, '.win-agent', 'roles', `${role}.md`);
-  if (!fs.existsSync(promptFile)) {
-    throw new Error(`Role prompt not found: ${promptFile}`);
-  }
-  return fs.readFileSync(promptFile, 'utf-8');
+function getRoleFilePath(workspace: string, role: string): string {
+  return path.join(workspace, '.win-agent', 'roles', `${role}.md`);
 }
 
 /**
  * Create a new opencode session for a role with identity prompt and recalled memories.
  * - Creates the session via API
- * - Injects role identity prompt (from .win-agent/roles/{role}.md)
+ * - Injects role identity prompt (from getRoleFilePath(workspace, role))
  * - Injects recalled memories (from vector store)
  * - Sends an async bind prompt to prime the agent
  */
@@ -39,14 +31,7 @@ export async function createRoleSession(
 
   const parts: string[] = [];
 
-  try {
-    const rolePrompt = loadRolePrompt(workspace, role);
-    parts.push(
-      `# 你的身份：${role}\n\n以下是你的角色定义、工作职责和行为准则：\n\n${rolePrompt}`
-    );
-  } catch {
-    // Role prompt not found — non-fatal
-  }
+  parts.push(`请阅读 ${getRoleFilePath(workspace, role)} 文件并严格按要求工作`);
 
   try {
     const recallPrompt = await buildRecallPrompt(role);
@@ -55,14 +40,11 @@ export async function createRoleSession(
     // Memory recall failed — non-fatal
   }
 
-  parts.push(`你是 ${role} 角色，已准备就绪。等待引擎调度器为你分配任务。`);
-
   await withRetry(
     () =>
       client.session.promptAsync({
         path: { id: sessionId },
         body: {
-          agent: role,
           parts: [
             {
               type: 'text',

@@ -98,9 +98,9 @@ export async function buildRecallPrompt(
   const vecResults = db
     .prepare('SELECT id, distance FROM memory_vec WHERE embedding MATCH ? AND k = ?')
     .all(new Float32Array(queryEmbedding), limit * 3) as Array<{
-    id: number;
-    distance: number;
-  }>;
+      id: number;
+      distance: number;
+    }>;
 
   if (vecResults.length === 0) {
     return formatRecallPrompt([]);
@@ -119,10 +119,10 @@ export async function buildRecallPrompt(
        ORDER BY created_at DESC`
     )
     .all(role, ...ids) as Array<{
-    id: number;
-    summary: string;
-    created_at: string;
-  }>;
+      id: number;
+      summary: string;
+      created_at: string;
+    }>;
 
   // Apply time-decay filtering
   const now = Date.now();
@@ -181,8 +181,7 @@ function formatRecallPrompt(memories: Array<{ id: number; summary: string }>): s
 
   const summaries = memories.map((m) => `- [#${m.id}] ${m.summary}`).join('\n');
 
-  return `## 近期工作回忆
-以下是你最近的工作记忆摘要，请在接下来的工作中参考这些上下文：
+  return `以下是你最近的工作记忆摘要，请在接下来的工作中参考这些上下文：
 ${summaries}
 
 如需了解某条记忆的详细内容，可以通过 database_query 查询 memory 表。`;

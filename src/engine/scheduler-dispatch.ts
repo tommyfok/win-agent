@@ -101,10 +101,6 @@ export async function abortCurrentDispatch(): Promise<DispatchContext | null> {
   return ctx;
 }
 
-/**
- * Promote deferred trigger messages when PM is idle and has no pending unread messages.
- * This ensures auto-trigger messages are dispatched in their own batch.
- */
 export function promoteDeferredTriggers(roleManager: RoleManager): void {
   if (!roleManager.isBusy('PM')) {
     const pmUnread = select<MessageRow>('messages', {
@@ -117,68 +113,6 @@ export function promoteDeferredTriggers(roleManager: RoleManager): void {
       );
     }
   }
-}
-
-/**
- * Try to dispatch user→PM messages (priority path).
- * Returns true if a dispatch happened (caller should skip normal dispatch).
- */
-export async function tryDispatchUserMessages(
-  client: OpencodeClient,
-  sessionManager: SessionManager,
-  roleManager: RoleManager
-): Promise<boolean> {
-  if (roleManager.isBusy('PM')) return false;
-
-  const userMessages = select<MessageRow>(
-    'messages',
-    { from_role: 'user', to_role: 'PM', status: MessageStatus.Unread },
-    { orderBy: 'created_at ASC' }
-  );
-  if (userMessages.length === 0) return false;
-
-  logger.info({ role: 'PM', messageCount: userMessages.length }, 'dispatch start (user priority)');
-  roleManager.setBusy('PM', true);
-  const abortController = new AbortController();
-  currentAbortController = abortController;
-  const taskId = userMessages.find((m) => m.related_task_id)?.related_task_id ?? null;
-  currentDispatch = { role: 'PM', taskId, sessionId: null, startedAt: new Date().toISOString() };
-
-  try {
-    const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
-      client,
-      sessionManager,
-      'PM',
-      userMessages,
-      {
-        signal: abortController.signal,
-        onSessionResolved: (sid) => {
-          if (currentDispatch) currentDispatch.sessionId = sid;
-        },
-      }
-    );
-    if (sessionId) {
-      await checkAndRotate(
-        sessionManager,
-        'PM',
-        sessionId,
-        inputTokens,
-        outputTokens,
-        taskId ?? undefined
-      );
-      engineBus.emit(EngineEvents.DISPATCH_COMPLETE, { role: 'PM', inputTokens, outputTokens });
-    }
-    logger.info({ role: 'PM' }, 'dispatch done (user priority)');
-  } finally {
-    currentDispatch = null;
-    currentAbortController = null;
-    roleManager.setBusy('PM', false);
-    // User-priority messages do NOT trigger PM cooldown
-    lastDispatchedRole = null;
-    saveDispatchState();
-  }
-
-  return true;
 }
 
 /**

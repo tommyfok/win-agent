@@ -8,7 +8,6 @@ import { checkHealth } from './opencode-server.js';
 import {
   initDispatchState,
   promoteDeferredTriggers,
-  tryDispatchUserMessages,
   tryDispatchNormalRole,
 } from './scheduler-dispatch.js';
 import { loadConfig } from '../config/index.js';
@@ -34,8 +33,7 @@ let lastHealthCheckAt = 0;
  * Start the scheduler main loop.
  *
  * V1 serial strategy:
- * - Each cycle iterates through ALL_ROLES
- * - PM has priority (user messages bypass cooldown)
+ * - Each cycle iterates through ALL_ROLES (round-robin with PM cooldown)
  * - Only one role is dispatched per cycle
  * - After dispatch, check auto-triggers and iteration review
  * - Sleep 1s between cycles to avoid tight polling
@@ -87,11 +85,12 @@ export function stopSchedulerLoop(): void {
 /**
  * Single tick of the scheduler.
  *
- * 1. Auto-unblock tasks whose dependencies are satisfied
- * 2. Promote deferred trigger messages when PM is idle
- * 3. Try user-priority dispatch (PM first, bypasses cooldown)
- * 4. Try normal round-robin dispatch (if no user-priority dispatch)
- * 5. Check auto-triggers and iteration review
+ * 1. Periodic opencode health check (may return early if unhealthy)
+ * 2. Auto-unblock tasks whose dependencies are satisfied
+ * 3. Promote deferred PM messages when PM is idle and has no unread inbox
+ * 4. Round-robin dispatch (at most one role per tick)
+ *
+ * Auto-triggers fire on DISPATCH_COMPLETE; iteration review uses its own checker.
  */
 async function schedulerTick(
   client: OpencodeClient,
@@ -120,8 +119,5 @@ async function schedulerTick(
   checkAndUnblockDependencies();
   promoteDeferredTriggers(roleManager);
 
-  const userDispatched = await tryDispatchUserMessages(client, sessionManager, roleManager);
-  if (!userDispatched) {
-    await tryDispatchNormalRole(client, sessionManager, roleManager);
-  }
+  await tryDispatchNormalRole(client, sessionManager, roleManager);
 }

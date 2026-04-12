@@ -90,7 +90,7 @@ async function _updateCommand() {
   // ── Step 3: AI 融合角色模板 ──
   await mergeRoleTemplates(workspace, templatesDir);
 
-  // Re-sync to .opencode/agents/
+  // Validate role configs and deploy tools
   syncAgents(workspace);
   deployTools(workspace);
 
@@ -210,9 +210,12 @@ async function updateDocs(workspace: string) {
       // When overview.md is regenerated, also update root AGENT.md
       if (spec.file === 'overview.md') {
         const projectName =
-          dbSelect<{ key: string; value: string }>('project_config', { key: 'projectName' })[0]?.value ?? '';
+          dbSelect<{ key: string; value: string }>('project_config', { key: 'projectName' })[0]
+            ?.value ?? '';
         const projectDescription =
-          dbSelect<{ key: string; value: string }>('project_config', { key: 'projectDescription' })[0]?.value ?? '';
+          dbSelect<{ key: string; value: string }>('project_config', {
+            key: 'projectDescription',
+          })[0]?.value ?? '';
         const agentMdPath = path.join(workspace, 'AGENT.md');
         if (fs.existsSync(agentMdPath)) {
           const agentBackupsDir = path.join(workspace, '.win-agent', 'backups');
@@ -220,7 +223,11 @@ async function updateDocs(workspace: string) {
           const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
           fs.copyFileSync(agentMdPath, path.join(agentBackupsDir, `AGENT.${ts}.md`));
         }
-        fs.writeFileSync(agentMdPath, buildAgentMd(projectName, projectDescription, content), 'utf-8');
+        fs.writeFileSync(
+          agentMdPath,
+          buildAgentMd(projectName, projectDescription, content),
+          'utf-8'
+        );
         console.log(`   ✓ 已同步更新 AGENT.md（根目录）`);
       }
     }
