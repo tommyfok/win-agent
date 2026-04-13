@@ -85,7 +85,7 @@ export function buildDispatchPrompt(
   parts.push('## 待处理消息');
   for (const msg of messages) {
     const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : '';
-    parts.push(`**来自 ${msg.from_role}** [type: ${msg.type}]${taskRef}：\n${msg.content}`);
+    parts.push(`来自 ${msg.from_role} [type: ${msg.type}]${taskRef}：\n${msg.content}`);
   }
 
   // 2. Task context (for DEV)
@@ -138,7 +138,10 @@ export function buildDispatchPrompt(
       lines.push(`DEV 待处理队列（共 ${pendingDevMsgs.length} 条未读）：`);
 
       if (currentTaskMsgs.length > 0) {
-        const taskRefs = [...currentTaskIds].filter(Boolean).map((id) => `task#${id}`).join(', ');
+        const taskRefs = [...currentTaskIds]
+          .filter(Boolean)
+          .map((id) => `task#${id}`)
+          .join(', ');
         lines.push(`  当前 ${taskRefs} 相关（${currentTaskMsgs.length} 条）：`);
         for (const m of currentTaskMsgs) {
           const ref = m.related_task_id ? ` (task#${m.related_task_id})` : '';

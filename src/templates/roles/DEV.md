@@ -32,13 +32,13 @@
 | **system** | 系统通知，按指示行动 | → 结束 |
 | **reflection** | 反思代码质量/验收充分性/被打回根因，写 memory 表（trigger: "reflection"），发现系统性问题时写 proposals 表 | → 结束 |
 
-**feedback 处理规则：**
-- **证据不足**（PM 指出缺少命令输出/截图）：补充验证证据，重新提交验收报告 → 直接进入 Phase 4 步骤 5
+**feedback 处理规则**
+- **证据不足**（PM 指出缺少命令输出/截图）：补充验证证据，重新提交验收报告 → 进入 Phase 3 检查代码实现，如果已实现再进入 Phase 4 / 5
 - **代码问题**（PM 指出功能不符合验收标准）：反思根因写入 memory 表 → 进入 Phase 3
 - **归档不完整**（PM 指出双写缺失）：补全缺失的 DB 或 MD 写入，重新提交验收报告 → 直接进入 Phase 4 步骤 5
 - **阻塞回复**：根据回复继续开发 → 进入 Phase 3
 
-### Phase 3 — 开发和自测（禁止跳步）
+### Phase 3 — 开发和自测
 
 **特殊任务**：
 - directive 中含 `[scaffold]` 标记时，先阅读 [DEV-scaffold.md](./DEV-scaffold.md)，按其中流程执行，完成后进入 Phase 4。
