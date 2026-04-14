@@ -7,6 +7,7 @@
  * before each test.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Role } from '../role-manager.js';
 
 beforeEach(async () => {
   vi.resetModules();
@@ -17,13 +18,13 @@ beforeEach(async () => {
 describe('initDispatchState — state restoration from project_config', () => {
   it('restores lastDispatchedRole when key exists in project_config', async () => {
     const { upsertProjectConfig } = await import('../../db/repository.js');
-    upsertProjectConfig('engine.lastDispatchedRole', 'DEV');
+    upsertProjectConfig('engine.lastDispatchedRole', Role.DEV);
     upsertProjectConfig('engine.pmLastDispatchEnd', '0');
 
     const schedDispatch = await import('../scheduler-dispatch.js');
     schedDispatch.initDispatchState({} as never);
 
-    expect(schedDispatch.lastDispatchedRole).toBe('DEV');
+    expect(schedDispatch.lastDispatchedRole).toBe(Role.DEV);
   });
 
   it('restores pmLastDispatchEnd when key exists in project_config', async () => {
@@ -66,7 +67,7 @@ describe('saveDispatchState — written to project_config after dispatch', () =>
     schedDispatch.initDispatchState({} as never);
 
     // Simulate what the finally block in tryDispatchNormalRole does
-    schedDispatch.setLastDispatchedRole('PM');
+    schedDispatch.setLastDispatchedRole(Role.PM);
     schedDispatch.setPmLastDispatchEnd(9999);
 
     // Directly call the private save via the exported setters and then
@@ -74,13 +75,13 @@ describe('saveDispatchState — written to project_config after dispatch', () =>
     // Since saveDispatchState is private, we verify via a second initDispatchState call.
     // First we need to save — that happens automatically in the finally block.
     // Here we verify by seeding values manually and re-reading.
-    upsertProjectConfig('engine.lastDispatchedRole', 'PM');
+    upsertProjectConfig('engine.lastDispatchedRole', Role.PM);
     upsertProjectConfig('engine.pmLastDispatchEnd', '9999');
 
     // Re-init to restore from the values we just wrote
     schedDispatch.initDispatchState({} as never);
 
-    expect(schedDispatch.lastDispatchedRole).toBe('PM');
+    expect(schedDispatch.lastDispatchedRole).toBe(Role.PM);
     expect(schedDispatch.pmLastDispatchEnd).toBe(9999);
   });
 });

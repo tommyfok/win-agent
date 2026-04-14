@@ -261,7 +261,7 @@ win-agent/
 
 #### 5.5 调度器主循环 (`src/engine/scheduler.ts`)
 - [x] `mainLoop(client, sessionManager)`：
-  1. 遍历 ALL_ROLES，检查未读消息
+  1. 遍历 AGENT_ROLES，检查未读消息
   2. 空闲角色有消息 → setBusy → dispatchToRole → setIdle
   3. checkAutoTriggers()
   4. checkWorkflowCompletion()

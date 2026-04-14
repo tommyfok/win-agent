@@ -3,6 +3,7 @@ import { setupTestDb } from '../../db/__tests__/test-helpers.js';
 import { select, insert } from '../../db/repository.js';
 import { filterMessagesForRole } from '../dispatch-filter.js';
 import { TaskStatus, MessageStatus } from '../../db/types.js';
+import { Role } from '../role-manager.js';
 
 beforeEach(() => {
   setupTestDb();
@@ -38,13 +39,13 @@ describe('filterMessagesForRole', () => {
   describe('DEV role', () => {
     it('skips messages for paused tasks', () => {
       const taskId = createTask('Task', TaskStatus.Paused);
-      const msgId = createMessage('PM', 'DEV', 'directive', taskId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'directive', taskId);
 
-      const filtered = filterMessagesForRole('DEV', [
+      const filtered = filterMessagesForRole(Role.DEV, [
         {
           id: msgId,
-          from_role: 'PM',
-          to_role: 'DEV',
+          from_role: Role.PM,
+          to_role: Role.DEV,
           type: 'directive',
           content: 'test',
           status: 'unread',
@@ -62,13 +63,13 @@ describe('filterMessagesForRole', () => {
 
     it('skips messages for cancelled tasks', () => {
       const taskId = createTask('Task', TaskStatus.Cancelled);
-      const msgId = createMessage('PM', 'DEV', 'directive', taskId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'directive', taskId);
 
-      const filtered = filterMessagesForRole('DEV', [
+      const filtered = filterMessagesForRole(Role.DEV, [
         {
           id: msgId,
-          from_role: 'PM',
-          to_role: 'DEV',
+          from_role: Role.PM,
+          to_role: Role.DEV,
           type: 'directive',
           content: 'test',
           status: 'unread',
@@ -84,13 +85,13 @@ describe('filterMessagesForRole', () => {
 
     it('skips messages for blocked tasks', () => {
       const taskId = createTask('Task', TaskStatus.Blocked);
-      const msgId = createMessage('PM', 'DEV', 'directive', taskId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'directive', taskId);
 
-      const filtered = filterMessagesForRole('DEV', [
+      const filtered = filterMessagesForRole(Role.DEV, [
         {
           id: msgId,
-          from_role: 'PM',
-          to_role: 'DEV',
+          from_role: Role.PM,
+          to_role: Role.DEV,
           type: 'directive',
           content: 'test',
           status: 'unread',
@@ -106,13 +107,13 @@ describe('filterMessagesForRole', () => {
 
     it('delivers cancel_task messages even for done tasks', () => {
       const taskId = createTask('Task', TaskStatus.Done);
-      const msgId = createMessage('PM', 'DEV', 'cancel_task', taskId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'cancel_task', taskId);
 
-      const filtered = filterMessagesForRole('DEV', [
+      const filtered = filterMessagesForRole(Role.DEV, [
         {
           id: msgId,
-          from_role: 'PM',
-          to_role: 'DEV',
+          from_role: Role.PM,
+          to_role: Role.DEV,
           type: 'cancel_task',
           content: 'test',
           status: 'unread',
@@ -128,13 +129,13 @@ describe('filterMessagesForRole', () => {
 
     it('delivers feedback messages and auto-rejects done tasks', () => {
       const taskId = createTask('Task', TaskStatus.Done);
-      const msgId = createMessage('PM', 'DEV', 'feedback', taskId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'feedback', taskId);
 
-      const filtered = filterMessagesForRole('DEV', [
+      const filtered = filterMessagesForRole(Role.DEV, [
         {
           id: msgId,
-          from_role: 'PM',
-          to_role: 'DEV',
+          from_role: Role.PM,
+          to_role: Role.DEV,
           type: 'feedback',
           content: 'test',
           status: 'unread',
@@ -152,13 +153,13 @@ describe('filterMessagesForRole', () => {
 
     it('does not change status for feedback on non-done tasks', () => {
       const taskId = createTask('Task', TaskStatus.PendingDev);
-      const msgId = createMessage('PM', 'DEV', 'feedback', taskId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'feedback', taskId);
 
-      filterMessagesForRole('DEV', [
+      filterMessagesForRole(Role.DEV, [
         {
           id: msgId,
-          from_role: 'PM',
-          to_role: 'DEV',
+          from_role: Role.PM,
+          to_role: Role.DEV,
           type: 'feedback',
           content: 'test',
           status: 'unread',
@@ -175,13 +176,13 @@ describe('filterMessagesForRole', () => {
 
     it('delivers directive messages for pending_dev tasks', () => {
       const taskId = createTask('Task', TaskStatus.PendingDev);
-      const msgId = createMessage('PM', 'DEV', 'directive', taskId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'directive', taskId);
 
-      const filtered = filterMessagesForRole('DEV', [
+      const filtered = filterMessagesForRole(Role.DEV, [
         {
           id: msgId,
-          from_role: 'PM',
-          to_role: 'DEV',
+          from_role: Role.PM,
+          to_role: Role.DEV,
           type: 'directive',
           content: 'test',
           status: 'unread',
@@ -199,13 +200,13 @@ describe('filterMessagesForRole', () => {
   describe('non-DEV roles', () => {
     it('returns all messages unchanged for PM', () => {
       const taskId = createTask('Task', TaskStatus.Done);
-      const msgId = createMessage('DEV', 'PM', 'acceptance_report', taskId);
+      const msgId = createMessage(Role.DEV, Role.PM, 'acceptance_report', taskId);
 
-      const filtered = filterMessagesForRole('PM', [
+      const filtered = filterMessagesForRole(Role.PM, [
         {
           id: msgId,
-          from_role: 'DEV',
-          to_role: 'PM',
+          from_role: Role.DEV,
+          to_role: Role.PM,
           type: 'acceptance_report',
           content: 'test',
           status: 'unread',

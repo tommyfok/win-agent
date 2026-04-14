@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Role } from '../role-manager.js';
 
 // memory-rotator.ts has module-level state (dynamicMaxContext, outputHistory).
 // We reset modules before each test and re-initialize the DB in the fresh module context.
@@ -27,7 +28,7 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
     // 50% usage — below 80% threshold, no rotation
     const result = await checkAndRotate(
       mockSessionManager as never,
-      'PM',
+      Role.PM,
       'session-1',
       50_000,
       1000
@@ -54,13 +55,13 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
     // 85% usage — exceeds 80% threshold
     const result = await checkAndRotate(
       mockSessionManager as never,
-      'PM',
+      Role.PM,
       'session-1',
       85_000,
       1000
     );
 
-    expect(mockSessionManager.rotateSession).toHaveBeenCalledWith('PM', 'session-1', undefined);
+    expect(mockSessionManager.rotateSession).toHaveBeenCalledWith(Role.PM, 'session-1', undefined);
     expect(result).toBe('new-session');
   });
 
@@ -81,15 +82,15 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
     const mockSessionManager = { rotateSession: vi.fn().mockResolvedValue('new-session') };
 
     // Build history: 3 normal outputs averaging 1000 tokens
-    recordOutputTokens('PM', 1000);
-    recordOutputTokens('PM', 1000);
-    recordOutputTokens('PM', 1000);
+    recordOutputTokens(Role.PM, 1000);
+    recordOutputTokens(Role.PM, 1000);
+    recordOutputTokens(Role.PM, 1000);
 
     // Sudden drop to 100 (10% of avg 1000). Anxiety threshold = 30% of 1000 = 300.
     // 100 < 300 → anxiety. Usage 60% > 50% minimum → triggers.
     const result = await checkAndRotate(
       mockSessionManager as never,
-      'PM',
+      Role.PM,
       'session-1',
       60_000,
       100
@@ -116,12 +117,12 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
     const mockSessionManager = { rotateSession: vi.fn().mockResolvedValue('new-session') };
 
     // Only 2 history entries — below the 3-entry minimum
-    recordOutputTokens('PM', 1000);
-    recordOutputTokens('PM', 1000);
+    recordOutputTokens(Role.PM, 1000);
+    recordOutputTokens(Role.PM, 1000);
 
     const result = await checkAndRotate(
       mockSessionManager as never,
-      'PM',
+      Role.PM,
       'session-1',
       60_000,
       10 // dramatic drop, but insufficient history
@@ -147,14 +148,14 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
 
     const mockSessionManager = { rotateSession: vi.fn().mockResolvedValue('new-session') };
 
-    recordOutputTokens('PM', 1000);
-    recordOutputTokens('PM', 1000);
-    recordOutputTokens('PM', 1000);
+    recordOutputTokens(Role.PM, 1000);
+    recordOutputTokens(Role.PM, 1000);
+    recordOutputTokens(Role.PM, 1000);
 
     // Dramatic drop but usage only 40% — anxiety check skipped at <50%
     const result = await checkAndRotate(
       mockSessionManager as never,
-      'PM',
+      Role.PM,
       'session-1',
       40_000,
       10
@@ -170,7 +171,7 @@ describe('loadOutputHistory / saveOutputHistory (P1-3 persistence)', () => {
     const { recordOutputTokens } = await import('../memory-rotator.js');
     const { select } = await import('../../db/repository.js');
 
-    recordOutputTokens('PM', 1234);
+    recordOutputTokens(Role.PM, 1234);
 
     const rows = select<{ value: string }>('project_config', { key: 'engine.outputHistory.PM' });
     expect(rows.length).toBe(1);
@@ -204,7 +205,7 @@ describe('loadOutputHistory / saveOutputHistory (P1-3 persistence)', () => {
     // Output of 50 is well below 30% of avg 1000 → context anxiety should trigger at 60% usage
     const result = await checkAndRotate(
       mockSessionManager as never,
-      'PM',
+      Role.PM,
       'session-1',
       60_000,
       50
@@ -234,7 +235,7 @@ describe('loadOutputHistory / saveOutputHistory (P1-3 persistence)', () => {
     // Same dramatic drop, but history is empty — anxiety check skipped (insufficient history)
     const result = await checkAndRotate(
       mockSessionManager as never,
-      'PM',
+      Role.PM,
       'session-1',
       60_000,
       50

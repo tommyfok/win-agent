@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { TaskStatus } from './types.js';
 
 const TABLE_SCHEMAS: Record<string, string> = {
   messages: `
@@ -23,7 +24,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       acceptance_criteria TEXT,
       acceptance_process  TEXT,
       priority        TEXT NOT NULL DEFAULT 'medium',
-      status          TEXT NOT NULL DEFAULT 'pending_dev',
+      status          TEXT NOT NULL DEFAULT '${TaskStatus.PendingDev}',
       assigned_to     TEXT,
       implementation_notes TEXT,
       rejection_reason    TEXT,

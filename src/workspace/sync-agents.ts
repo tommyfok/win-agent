@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AGENT_ROLES } from '../engine/role-manager.js';
 
 export interface McpConfig {
   name: string;
@@ -74,7 +75,7 @@ export function syncAgents(workspace: string): string[] {
   const rolesDir = path.join(workspace, '.win-agent', 'roles');
   const validated: string[] = [];
 
-  for (const role of ['PM', 'DEV']) {
+  for (const role of AGENT_ROLES) {
     const promptFile = path.join(rolesDir, `${role}.md`);
     if (fs.existsSync(promptFile)) {
       validated.push(role);
@@ -99,7 +100,7 @@ export function deployTools(workspace: string): void {
   if (fs.existsSync(legacyFile)) fs.unlinkSync(legacyFile);
 
   // Generate per-role database tools with hardcoded role name
-  for (const role of ['PM', 'DEV']) {
+  for (const role of AGENT_ROLES) {
     const toolContent = renderDatabaseToolSource(role);
     const toolFile = path.join(toolsDir, `database_${role}.ts`);
     fs.writeFileSync(toolFile, toolContent, 'utf-8');

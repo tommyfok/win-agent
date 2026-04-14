@@ -2,6 +2,7 @@ import { select } from '../db/repository.js';
 import { MessageStatus } from '../db/types.js';
 import type { KnowledgeEntry } from '../embedding/knowledge.js';
 import type { MessageRow } from './dispatch-filter.js';
+import { Role } from './role-manager.js';
 
 /** Task context injected into DEV dispatch prompts */
 export interface TaskContext {
@@ -74,7 +75,7 @@ export function getTaskContext(messages: MessageRow[]): TaskContext | null {
  * 5. 操作提示 (action hints)
  */
 export function buildDispatchPrompt(
-  role: string,
+  role: Role,
   messages: MessageRow[],
   knowledge: KnowledgeEntry[],
   taskContext?: TaskContext | null
@@ -117,10 +118,10 @@ export function buildDispatchPrompt(
 
   // 4. DEV pending queue (PM only) — dedup guard so PM doesn't resend
   //    directives already queued and waiting to be dispatched.
-  if (role === 'PM') {
+  if (role === Role.PM) {
     const pendingDevMsgs = select<MessageRow>(
       'messages',
-      { to_role: 'DEV', status: MessageStatus.Unread },
+      { to_role: Role.DEV, status: MessageStatus.Unread },
       { orderBy: 'created_at ASC' }
     );
 

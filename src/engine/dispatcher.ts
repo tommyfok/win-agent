@@ -4,12 +4,13 @@ import type { SessionManager } from './session-manager.js';
 import { update, insert as dbInsert, withTransaction } from '../db/repository.js';
 import { MessageStatus } from '../db/types.js';
 import { queryRelevantKnowledge, type KnowledgeEntry } from '../embedding/knowledge.js';
+import { match } from 'ts-pattern';
 import { withRetry, withTimeout } from './retry.js';
 import { checkAndRotate } from './memory-rotator.js';
 import { filterMessagesForRole } from './dispatch-filter.js';
 import type { MessageRow } from './dispatch-filter.js';
 import { buildDispatchPrompt, getTaskContext } from './prompt-builder.js';
-import type { Role } from './role-manager.js';
+import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -111,7 +112,7 @@ export async function dispatchToRole(
   }
 
   // 4. Build and send prompt
-  const taskContext = role === 'DEV' ? getTaskContext(messages) : null;
+  const taskContext = role === Role.DEV ? getTaskContext(messages) : null;
   const pendingContext = sessionManager.consumePendingContext(sessionId);
   const prompt =
     (pendingContext ? pendingContext + '\n\n---\n\n' : '') +
@@ -184,14 +185,18 @@ async function getSessionForRole(
   role: Role,
   messages: MessageRow[]
 ): Promise<string> {
-  if (role === 'DEV') {
-    const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
-    if (taskId) {
-      return sessionManager.getTaskSession(taskId, role);
-    }
-    logger.warn({ role }, 'DEV received messages with no related_task_id, using fallback session');
-    return sessionManager.getTaskSession(-1, role);
-  }
-
-  return sessionManager.getSession(role);
+  return match(role)
+    .with(Role.DEV, (devRole) => {
+      const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
+      if (taskId) {
+        return sessionManager.getTaskSession(taskId, devRole);
+      }
+      logger.warn({ role }, 'DEV received messages with no related_task_id, using fallback session');
+      return sessionManager.getTaskSession(-1, devRole);
+    })
+    .with(Role.PM, (pmRole) => sessionManager.getSession(pmRole))
+    .with(Role.USER, Role.SYS, () => {
+      throw new Error(`Unsupported role for dispatch session resolution: ${role}`);
+    })
+    .exhaustive();
 }

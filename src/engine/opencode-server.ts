@@ -4,6 +4,7 @@ import { execSync, spawn } from 'node:child_process';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 import { loadConfig, type WinAgentConfig } from '../config/index.js';
 import { buildOpencodeConfig, ensureOpencodePackages } from './opencode-config.js';
+import { logger } from '../utils/logger.js';
 
 /** Build Basic Auth headers if serverPassword is configured */
 function buildAuthHeaders(config: WinAgentConfig): Record<string, string> {
@@ -233,7 +234,8 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
 
   // Health check
   try {
-    await client.session.list();
+    const sessions = await client.session.list();
+    logger.info(() => ({ sessions }), 'opencode server health check');
   } catch (err) {
     server.close();
     throw new Error(`opencode server health check failed: ${err}`, { cause: err });

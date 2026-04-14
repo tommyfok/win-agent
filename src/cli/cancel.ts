@@ -8,6 +8,8 @@ import {
   rawQuery,
 } from '../db/repository.js';
 import { checkAndUnblockDependencies } from '../engine/dependency-checker.js';
+import { Role } from '../engine/role-manager.js';
+import { TaskStatus } from '../db/types.js';
 
 export async function cancelCommand(iterationId: string) {
   // 1. Check engine is running
@@ -51,12 +53,17 @@ export async function cancelCommand(iterationId: string) {
   }
 
   // 3. Show task overview
-  const tasks = dbSelect<{ id: number; status: string; title: string }>('tasks', {
+  const tasks = dbSelect<{ id: number; status: TaskStatus; title: string }>('tasks', {
     iteration_id: id,
   });
-  const inProgressStatuses = ['pending_dev', 'in_dev', 'paused', 'blocked'];
-  const inProgressTasks = tasks.filter((t) => inProgressStatuses.includes(t.status));
-  const doneTasks = tasks.filter((t) => t.status === 'done');
+  const inProgressStatuses = new Set<TaskStatus>([
+    TaskStatus.PendingDev,
+    TaskStatus.InDev,
+    TaskStatus.Paused,
+    TaskStatus.Blocked,
+  ]);
+  const inProgressTasks = tasks.filter((t) => inProgressStatuses.has(t.status));
+  const doneTasks = tasks.filter((t) => t.status === TaskStatus.Done);
 
   const taskStatusCounts = rawQuery<{ status: string; cnt: number }>(
     `
@@ -91,7 +98,7 @@ export async function cancelCommand(iterationId: string) {
   // 6. Cancel in-progress tasks
   let cancelledCount = 0;
   for (const task of inProgressTasks) {
-    dbUpdate('tasks', { id: task.id }, { status: 'cancelled' });
+    dbUpdate('tasks', { id: task.id }, { status: TaskStatus.Cancelled });
     cancelledCount++;
   }
 
@@ -100,8 +107,8 @@ export async function cancelCommand(iterationId: string) {
 
   // 7. Notify PM via system message
   dbInsert('messages', {
-    from_role: 'system',
-    to_role: 'PM',
+    from_role: Role.SYS,
+    to_role: Role.PM,
     type: 'notification',
     content: `迭代 #${id}${name} 已被用户取消。${cancelledCount} 个进行中任务已标记为 cancelled，${doneTasks.length} 个已完成任务保留。`,
     related_iteration_id: id,

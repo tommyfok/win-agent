@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { setupTestDb } from '../../db/__tests__/test-helpers.js';
 import { insert } from '../../db/repository.js';
 import { generateIterationStats } from '../iteration-stats.js';
+import { Role } from '../role-manager.js';
+import { TaskStatus } from '../../db/types.js';
 
 beforeEach(() => {
   setupTestDb();
@@ -11,16 +13,16 @@ function createIteration(): number {
   return insert('iterations', { name: 'Sprint 1', status: 'active' }).lastInsertRowid as number;
 }
 
-function createTask(iterationId: number, title: string, status: string): number {
+function createTask(iterationId: number, title: string, status: TaskStatus): number {
   return insert('tasks', { title, status, iteration_id: iterationId }).lastInsertRowid as number;
 }
 
 function addRejectionEvent(taskId: number): void {
   insert('task_events', {
     task_id: taskId,
-    from_status: 'in_dev',
-    to_status: 'rejected',
-    changed_by: 'PM',
+    from_status: TaskStatus.InDev,
+    to_status: TaskStatus.Rejected,
+    changed_by: Role.PM,
     reason: 'does not meet criteria',
   });
 }
@@ -34,10 +36,10 @@ describe('generateIterationStats', () => {
 
   it('reports task status counts correctly', () => {
     const iterId = createIteration();
-    createTask(iterId, 'Task A', 'done');
-    createTask(iterId, 'Task B', 'done');
-    createTask(iterId, 'Task C', 'rejected');
-    createTask(iterId, 'Task D', 'pending_dev');
+    createTask(iterId, 'Task A', TaskStatus.Done);
+    createTask(iterId, 'Task B', TaskStatus.Done);
+    createTask(iterId, 'Task C', TaskStatus.Rejected);
+    createTask(iterId, 'Task D', TaskStatus.PendingDev);
 
     const report = generateIterationStats(iterId);
 
@@ -49,7 +51,7 @@ describe('generateIterationStats', () => {
 
   it('counts rejection events from task_events (not current status)', () => {
     const iterId = createIteration();
-    const taskId = createTask(iterId, 'Bouncy Task', 'done');
+    const taskId = createTask(iterId, 'Bouncy Task', TaskStatus.Done);
     // Task was rejected twice before finally being done
     addRejectionEvent(taskId);
     addRejectionEvent(taskId);
@@ -61,7 +63,7 @@ describe('generateIterationStats', () => {
 
   it('shows zero rejections when no rejection events exist', () => {
     const iterId = createIteration();
-    createTask(iterId, 'Clean Task', 'done');
+    createTask(iterId, 'Clean Task', TaskStatus.Done);
 
     const report = generateIterationStats(iterId);
 
@@ -71,12 +73,12 @@ describe('generateIterationStats', () => {
 
   it('counts tasks that were ever blocked', () => {
     const iterId = createIteration();
-    const taskId = createTask(iterId, 'Blocked Task', 'done');
+    const taskId = createTask(iterId, 'Blocked Task', TaskStatus.Done);
     insert('task_events', {
       task_id: taskId,
-      from_status: 'pending_dev',
-      to_status: 'blocked',
-      changed_by: 'system',
+      from_status: TaskStatus.PendingDev,
+      to_status: TaskStatus.Blocked,
+      changed_by: Role.SYS,
       reason: 'dep unmet',
     });
 
@@ -88,7 +90,7 @@ describe('generateIterationStats', () => {
   it('includes token consumption section when role_outputs exist', () => {
     const iterId = createIteration();
     insert('role_outputs', {
-      role: 'PM',
+      role: Role.PM,
       session_id: 'sess-1',
       input_summary: 'summary',
       output_text: 'output',
@@ -97,7 +99,7 @@ describe('generateIterationStats', () => {
       related_iteration_id: iterId,
     });
     insert('role_outputs', {
-      role: 'DEV',
+      role: Role.DEV,
       session_id: 'sess-2',
       input_summary: 'summary',
       output_text: 'output',
@@ -116,7 +118,7 @@ describe('generateIterationStats', () => {
 
   it('skips token section when no role_outputs exist', () => {
     const iterId = createIteration();
-    createTask(iterId, 'Task', 'done');
+    createTask(iterId, 'Task', TaskStatus.Done);
 
     const report = generateIterationStats(iterId);
 
@@ -125,10 +127,10 @@ describe('generateIterationStats', () => {
 
   it('shows top rejected tasks section', () => {
     const iterId = createIteration();
-    const t1 = createTask(iterId, 'Problem Task', 'done');
+    const t1 = createTask(iterId, 'Problem Task', TaskStatus.Done);
     addRejectionEvent(t1);
     addRejectionEvent(t1);
-    const t2 = createTask(iterId, 'Other Task', 'done');
+    const t2 = createTask(iterId, 'Other Task', TaskStatus.Done);
     addRejectionEvent(t2);
 
     const report = generateIterationStats(iterId);

@@ -1,7 +1,7 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
 import type { RoleManager } from './role-manager.js';
-import { ALL_ROLES } from './role-manager.js';
+import { AGENT_ROLES, Role } from './role-manager.js';
 import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from './dispatcher.js';
 import { AbortError } from './retry.js';
 import { checkAndRotate } from './memory-rotator.js';
@@ -13,7 +13,7 @@ import { logger } from '../utils/logger.js';
 
 /** Context of a currently active dispatch (for interrupt & resume) */
 export interface DispatchContext {
-  role: string;
+  role: Role;
   taskId: number | null;
   sessionId: string | null;
   startedAt: string;
@@ -35,7 +35,7 @@ function getPmCooldownMs(): number {
   }
 }
 export let pmLastDispatchEnd = 0;
-export let lastDispatchedRole: string | null = null;
+export let lastDispatchedRole: Role | null = null;
 
 export function initDispatchState(client: OpencodeClient): void {
   storedClient = client;
@@ -46,8 +46,10 @@ function loadDispatchState(): void {
   try {
     const rows = select<{ key: string; value: string }>('project_config', {});
     const m = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-    if (m['engine.lastDispatchedRole'] !== undefined)
-      lastDispatchedRole = m['engine.lastDispatchedRole'] || null;
+    if (m['engine.lastDispatchedRole'] !== undefined) {
+      const savedRole = m['engine.lastDispatchedRole'];
+      lastDispatchedRole = savedRole ? (savedRole as Role) : null;
+    }
     if (m['engine.pmLastDispatchEnd'] !== undefined)
       pmLastDispatchEnd = parseInt(m['engine.pmLastDispatchEnd'], 10) || 0;
   } catch {
@@ -64,7 +66,7 @@ function saveDispatchState(): void {
   }
 }
 
-export function setLastDispatchedRole(role: string): void {
+export function setLastDispatchedRole(role: Role): void {
   lastDispatchedRole = role;
 }
 
@@ -102,21 +104,21 @@ export async function abortCurrentDispatch(): Promise<DispatchContext | null> {
 }
 
 export function promoteDeferredTriggers(roleManager: RoleManager): void {
-  if (!roleManager.isBusy('PM')) {
+  if (!roleManager.isBusy(Role.PM)) {
     const pmUnread = select<MessageRow>('messages', {
-      to_role: 'PM',
+      to_role: Role.PM,
       status: MessageStatus.Unread,
     });
     if (pmUnread.length === 0) {
       rawRun(
-        `UPDATE messages SET status = '${MessageStatus.Unread}' WHERE status = '${MessageStatus.Deferred}' AND to_role = 'PM'`
+        `UPDATE messages SET status = '${MessageStatus.Unread}' WHERE status = '${MessageStatus.Deferred}' AND to_role = '${Role.PM}'`
       );
     }
   }
 }
 
 /**
- * Try to dispatch normal role messages (round-robin across ALL_ROLES).
+ * Try to dispatch normal role messages (round-robin across AGENT_ROLES).
  * Dispatches at most one role per call (V1 serial strategy).
  */
 export async function tryDispatchNormalRole(
@@ -125,16 +127,16 @@ export async function tryDispatchNormalRole(
   roleManager: RoleManager
 ): Promise<void> {
   const roleOrder =
-    lastDispatchedRole && ALL_ROLES.includes(lastDispatchedRole as (typeof ALL_ROLES)[number])
-      ? [...ALL_ROLES].sort((a, b) =>
+    lastDispatchedRole && AGENT_ROLES.includes(lastDispatchedRole)
+      ? [...AGENT_ROLES].sort((a, b) =>
           a === lastDispatchedRole ? 1 : b === lastDispatchedRole ? -1 : 0
         )
-      : [...ALL_ROLES];
+      : [...AGENT_ROLES];
 
   for (const role of roleOrder) {
     if (roleManager.isBusy(role)) continue;
 
-    if (role === 'PM' && Date.now() - pmLastDispatchEnd < getPmCooldownMs()) {
+    if (role === Role.PM && Date.now() - pmLastDispatchEnd < getPmCooldownMs()) {
       continue;
     }
 
@@ -158,7 +160,7 @@ export async function tryDispatchNormalRole(
     };
 
     try {
-      const dispatch = role === 'DEV' ? dispatchToRoleGrouped : dispatchToRole;
+      const dispatch = role === Role.DEV ? dispatchToRoleGrouped : dispatchToRole;
       const { sessionId, inputTokens, outputTokens } = await dispatch(
         client,
         sessionManager,
@@ -171,7 +173,7 @@ export async function tryDispatchNormalRole(
           },
         }
       );
-      if (role === 'PM' && sessionId) {
+      if (role === Role.PM && sessionId) {
         await checkAndRotate(
           sessionManager,
           role,
@@ -195,7 +197,7 @@ export async function tryDispatchNormalRole(
         update('messages', { id: msg.id }, { status: MessageStatus.Read });
       }
       insert('logs', {
-        role: 'system',
+        role: Role.SYS,
         action: 'dispatch_failed',
         content: `${role} dispatch failed, ${messages.length} messages marked read: ${String(err).slice(0, 200)}`,
         related_task_id: dispatchTaskId,
@@ -205,7 +207,7 @@ export async function tryDispatchNormalRole(
       currentAbortController = null;
       roleManager.setBusy(role, false);
       lastDispatchedRole = role;
-      if (role === 'PM') {
+      if (role === Role.PM) {
         pmLastDispatchEnd = Date.now();
       }
       saveDispatchState();

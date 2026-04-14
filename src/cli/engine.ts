@@ -29,6 +29,7 @@ import { detectModelContextLimit, loadOutputHistory } from '../engine/memory-rot
 import { setSimilarityThreshold } from '../embedding/memory.js';
 import { resetTriggers } from '../engine/auto-trigger.js';
 import { initIterationChecker } from '../engine/iteration-checker.js';
+import { Role } from '../engine/role-manager.js';
 
 let serverHandle: OpencodeServerHandle | null = null;
 let sessionManager: SessionManager | null = null;
@@ -102,8 +103,8 @@ export async function engineCommand(workspace: string) {
   const activeIterations = dbSelect('iterations', { status: 'active' });
   if (activeIterations.length > 0) {
     dbInsert('messages', {
-      from_role: 'system',
-      to_role: 'PM',
+      from_role: Role.SYS,
+      to_role: Role.PM,
       type: 'system',
       content: `引擎已重启恢复，有 ${activeIterations.length} 个活跃迭代继续执行。`,
       status: MessageStatus.Unread,
@@ -114,7 +115,7 @@ export async function engineCommand(workspace: string) {
   // Log engine start
   const projectName = dbSelect('project_config', { key: 'projectName' })[0]?.value ?? '未命名';
   dbInsert('logs', {
-    role: 'system',
+    role: Role.SYS,
     action: 'engine_start',
     content: `引擎启动 (PID: ${process.pid})，项目: ${projectName}`,
   });
@@ -169,7 +170,7 @@ export async function engineCommand(workspace: string) {
     }
     try {
       dbInsert('logs', {
-        role: 'system',
+        role: Role.SYS,
         action: 'engine_stop',
         content: `引擎停止 (PID: ${process.pid})${interruptedCtx ? `, 中断角色: ${interruptedCtx.role}` : ''}`,
       });

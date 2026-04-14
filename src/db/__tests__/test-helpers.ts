@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { openDb } from '../connection.js';
+import { TaskStatus } from '../types.js';
 
 /**
  * Set up an in-memory SQLite test database with the non-vector tables.
@@ -25,7 +26,7 @@ export function setupTestDb(): Database.Database {
       acceptance_criteria TEXT,
       acceptance_process  TEXT,
       priority        TEXT NOT NULL DEFAULT 'medium',
-      status          TEXT NOT NULL DEFAULT 'pending_dev',
+      status          TEXT NOT NULL DEFAULT '${TaskStatus.PendingDev}',
       assigned_to     TEXT,
       pre_suspend_status  TEXT,
       iteration_id    INTEGER REFERENCES iterations(id),

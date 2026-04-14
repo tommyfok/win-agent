@@ -1,13 +1,13 @@
 import { select, update } from '../db/repository.js';
 import { TaskStatus, MessageStatus } from '../db/types.js';
 import { checkAndBlockUnmetDependencies } from './dependency-checker.js';
-import type { Role } from './role-manager.js';
+import { Role } from './role-manager.js';
 
 /** Message row from the messages table */
 export interface MessageRow {
   id: number;
-  from_role: string;
-  to_role: string;
+  from_role: Role;
+  to_role: Role;
   type: string;
   content: string;
   status: string;
@@ -33,7 +33,7 @@ const DEV_SKIP_STATUSES: TaskStatus[] = [
  * cancel_task and feedback messages are always delivered so DEV can execute rollback/feedback handling.
  */
 export function filterMessagesForRole(role: Role, messages: MessageRow[]): MessageRow[] {
-  if (role !== 'DEV') return messages;
+  if (role !== Role.DEV) return messages;
 
   const filtered: MessageRow[] = [];
   for (const msg of messages) {

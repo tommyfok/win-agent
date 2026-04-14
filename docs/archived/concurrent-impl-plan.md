@@ -257,7 +257,7 @@ async function schedulerTick(client, sessionManager, roleManager): Promise<void>
   }
 
   // 2. 遍历所有角色（不再 break，每个角色都检查）
-  for (const role of ALL_ROLES) {
+  for (const role of AGENT_ROLES) {
     if (role === "PM") {
       if (roleManager.isBusy("PM")) continue;
       if (Date.now() - pmLastDispatchEnd < PM_COOLDOWN_MS) continue;

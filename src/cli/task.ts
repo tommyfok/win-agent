@@ -9,6 +9,7 @@ import {
 } from '../db/repository.js';
 import { TaskStatus, MessageStatus } from '../db/types.js';
 import type { Command } from 'commander';
+import { Role } from '../engine/role-manager.js';
 
 interface TaskRow {
   id: number;
@@ -26,7 +27,7 @@ interface TaskEventRow {
   from_status: string;
   to_status: string;
   created_at: string;
-  changed_by: string;
+  changed_by: Role;
 }
 
 /** DB 返回的 status 字符串 → 中文标签，未知值 fallback 到原始字符串 */
@@ -64,7 +65,7 @@ function taskList() {
   ensureDb();
 
   const tasks = rawQuery<TaskRow>(
-    "SELECT * FROM tasks WHERE status NOT IN ('done','cancelled') ORDER BY priority DESC, created_at ASC"
+    `SELECT * FROM tasks WHERE status NOT IN ('${TaskStatus.Done}','${TaskStatus.Cancelled}') ORDER BY priority DESC, created_at ASC`
   );
 
   if (tasks.length === 0) {
@@ -159,7 +160,7 @@ function taskPause(taskId: string) {
     task_id: id,
     from_status: task.status,
     to_status: TaskStatus.Paused,
-    changed_by: 'user',
+    changed_by: Role.USER,
   });
 
   dbUpdate('tasks', { id }, { status: TaskStatus.Paused, pre_suspend_status: task.status });
@@ -170,8 +171,8 @@ function taskPause(taskId: string) {
   );
 
   dbInsert('messages', {
-    from_role: 'system',
-    to_role: 'PM',
+    from_role: Role.SYS,
+    to_role: Role.PM,
     type: 'notification',
     content: `任务 #${id}「${task.title}」已被用户暂停。`,
     related_task_id: id,
@@ -209,7 +210,7 @@ function taskResume(taskId: string) {
     task_id: id,
     from_status: TaskStatus.Paused,
     to_status: restoreStatus,
-    changed_by: 'user',
+    changed_by: Role.USER,
   });
 
   dbUpdate('tasks', { id }, { status: restoreStatus, pre_suspend_status: null });
@@ -217,8 +218,8 @@ function taskResume(taskId: string) {
   const restoreLabel = getStatusLabel(restoreStatus);
 
   dbInsert('messages', {
-    from_role: 'system',
-    to_role: 'PM',
+    from_role: Role.SYS,
+    to_role: Role.PM,
     type: 'notification',
     content: `任务 #${id}「${task.title}」已被用户恢复，状态恢复为「${restoreLabel}」。`,
     related_task_id: id,
@@ -254,7 +255,7 @@ function taskCancel(taskId: string) {
     task_id: id,
     from_status: task.status,
     to_status: TaskStatus.Cancelled,
-    changed_by: 'user',
+    changed_by: Role.USER,
   });
 
   dbUpdate('tasks', { id }, { status: TaskStatus.Cancelled });
@@ -265,8 +266,8 @@ function taskCancel(taskId: string) {
   );
 
   dbInsert('messages', {
-    from_role: 'system',
-    to_role: 'PM',
+    from_role: Role.SYS,
+    to_role: Role.PM,
     type: 'notification',
     content: `任务 #${id}「${task.title}」已被用户取消。`,
     related_task_id: id,
@@ -363,8 +364,8 @@ function taskReprioritize(taskId: string, priority: string) {
   dbUpdate('tasks', { id }, { priority });
 
   dbInsert('messages', {
-    from_role: 'system',
-    to_role: 'PM',
+    from_role: Role.SYS,
+    to_role: Role.PM,
     type: 'notification',
     content: `任务 #${id}「${task.title}」优先级已从 ${oldPriority} 调整为 ${priority}。`,
     related_task_id: id,

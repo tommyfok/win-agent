@@ -2,8 +2,9 @@ import path from 'node:path';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import { withRetry } from './retry.js';
 import { buildRecallPrompt } from '../embedding/memory.js';
+import type { Role } from './role-manager.js';
 
-function getRoleFilePath(workspace: string, role: string): string {
+function getRoleFilePath(workspace: string, role: Role): string {
   return path.join(workspace, '.win-agent', 'roles', `${role}.md`);
 }
 
@@ -18,7 +19,7 @@ export async function createRoleSession(
   client: OpencodeClient,
   sessionPrefix: string,
   workspace: string,
-  role: string
+  role: Role
 ): Promise<string> {
   const sessionResult = await withRetry(
     () =>

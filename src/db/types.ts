@@ -17,6 +17,10 @@ export const TaskStatus = {
 
 export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
 
+/** Canonical ordered list for task status validation/display. */
+export const TASK_STATUS_VALUES: TaskStatus[] = Object.values(TaskStatus);
+export const TASK_STATUS_SET = new Set<TaskStatus>(TASK_STATUS_VALUES);
+
 /**
  * 消息状态枚举，与数据库 messages.status 字段值保持一致。
  */

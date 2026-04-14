@@ -27,7 +27,11 @@ program
   .description('One-time project setup: configure, scan workspace, inject context into role files')
   .action(initCommand);
 
-program.command('start').description('Start the engine').action(startCommand);
+program
+  .command('start')
+  .description('Start the engine')
+  .option('--log', 'Automatically tail the log file after starting')
+  .action(startCommand);
 
 program.command('talk').description('Open PM conversation in browser').action(talkCommand);
 
@@ -36,10 +40,7 @@ program
   .description('Show engine status and iteration progress')
   .action(statusCommand);
 
-program
-  .command('cancel <iteration_id>')
-  .description('Cancel an iteration')
-  .action(cancelCommand);
+program.command('cancel <iteration_id>').description('Cancel an iteration').action(cancelCommand);
 
 program.command('stop').description('Stop the engine').action(stopCommand);
 

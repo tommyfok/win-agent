@@ -1,8 +1,9 @@
 import { EventEmitter } from 'node:events';
+import type { Role } from './role-manager.js';
 
 /** Payload emitted with DISPATCH_COMPLETE. */
 export interface DispatchCompletePayload {
-  role: string;
+  role: Role;
   inputTokens: number;
   outputTokens: number;
 }

@@ -1,5 +1,7 @@
 import { rawQuery } from '../db/repository.js';
+import { TaskStatus } from '../db/types.js';
 import { formatTokens } from '../utils/format.js';
+import type { Role } from './role-manager.js';
 
 /**
  * Generate an iteration statistics report via SQL aggregation.
@@ -23,7 +25,7 @@ export function generateIterationStats(iterationId: number): string {
   const rejections = rawQuery<{ cnt: number }>(
     `SELECT COUNT(*) as cnt FROM task_events te
      JOIN tasks t ON te.task_id = t.id
-     WHERE t.iteration_id = ? AND te.to_status = 'rejected'`,
+     WHERE t.iteration_id = ? AND te.to_status = '${TaskStatus.Rejected}'`,
     [iterationId]
   );
   const rejectionCount = rejections[0]?.cnt ?? 0;
@@ -36,14 +38,14 @@ export function generateIterationStats(iterationId: number): string {
   const blockedEvents = rawQuery<{ cnt: number }>(
     `SELECT COUNT(DISTINCT te.task_id) as cnt FROM task_events te
      JOIN tasks t ON te.task_id = t.id
-     WHERE t.iteration_id = ? AND te.to_status = 'blocked'`,
+     WHERE t.iteration_id = ? AND te.to_status = '${TaskStatus.Blocked}'`,
     [iterationId]
   );
   lines.push(`- 曾被阻塞的任务数: ${blockedEvents[0]?.cnt ?? 0}`);
 
   // Token consumption by role
   const tokenStats = rawQuery<{
-    role: string;
+    role: Role;
     dispatches: number;
     input_total: number;
     output_total: number;
@@ -75,7 +77,7 @@ export function generateIterationStats(iterationId: number): string {
     `SELECT t.id, t.title, COUNT(*) as reject_count
      FROM task_events te
      JOIN tasks t ON te.task_id = t.id
-     WHERE t.iteration_id = ? AND te.to_status = 'rejected'
+     WHERE t.iteration_id = ? AND te.to_status = '${TaskStatus.Rejected}'
      GROUP BY te.task_id
      ORDER BY reject_count DESC LIMIT 5`,
     [iterationId]

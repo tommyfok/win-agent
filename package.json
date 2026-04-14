@@ -25,7 +25,8 @@
     "commander": "^13.1.0",
     "lru-cache": "^11.0.2",
     "pino": "^10.3.1",
-    "sqlite-vec": "^0.1.9"
+    "sqlite-vec": "^0.1.9",
+    "ts-pattern": "^5.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

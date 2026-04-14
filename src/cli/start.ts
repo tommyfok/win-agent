@@ -14,9 +14,9 @@ import { hasTodoMarkers } from './init.js';
 // Re-export for stop command compatibility
 export { getServerHandle, getSessionManager } from './engine.js';
 
-export async function startCommand() {
+export async function startCommand(options?: { log?: boolean }) {
   try {
-    await _startCommand();
+    await _startCommand(options?.log ?? false);
   } catch (err: unknown) {
     // inquirer throws ExitPromptError on Ctrl+C during prompts
     if (
@@ -31,7 +31,7 @@ export async function startCommand() {
   }
 }
 
-async function _startCommand() {
+async function _startCommand(tailLog: boolean = false) {
   // ── 1️⃣ 冲突检测 ──
   console.log('\n1️⃣  冲突检测');
   const { running, pid } = checkEngineRunning();
@@ -140,6 +140,13 @@ async function _startCommand() {
   console.log(`   日志: .win-agent/engine.log`);
   console.log('   输入 npx win-agent talk  打开与产品经理的对话页面');
   console.log('   输入 npx win-agent stop  停止引擎');
+
+  if (tailLog) {
+    const tail = spawn('tail', ['-f', logFile], { stdio: 'inherit' });
+    tail.on('exit', (code) => {
+      process.exit(code ?? 0);
+    });
+  }
 }
 
 /**

@@ -3,6 +3,7 @@ import type { SessionManager } from './session-manager.js';
 import { insert, select, upsertProjectConfig } from '../db/repository.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { Role } from './role-manager.js';
 
 /**
  * Default context window size (tokens) for rotation calculation.
@@ -47,7 +48,7 @@ function getAnxietyDropRatio(): number {
 let dynamicMaxContext: number | null = null;
 
 /** Per-role output token history for context anxiety detection. */
-const outputHistory: Map<string, number[]> = new Map();
+const outputHistory: Map<Role, number[]> = new Map();
 
 /**
  * Fetch the model's context limit from the opencode provider API.
@@ -101,7 +102,7 @@ export function loadOutputHistory(): void {
     const rows = select<{ key: string; value: string }>('project_config', {});
     for (const row of rows) {
       if (row.key.startsWith('engine.outputHistory.')) {
-        const role = row.key.replace('engine.outputHistory.', '');
+        const role = row.key.replace('engine.outputHistory.', '') as Role;
         const parsed = JSON.parse(row.value) as number[];
         if (Array.isArray(parsed)) outputHistory.set(role, parsed);
       }
@@ -109,7 +110,7 @@ export function loadOutputHistory(): void {
   } catch { /* non-fatal */ }
 }
 
-function saveOutputHistory(role: string): void {
+function saveOutputHistory(role: Role): void {
   try {
     upsertProjectConfig(`engine.outputHistory.${role}`, JSON.stringify(outputHistory.get(role) ?? []));
   } catch { /* non-fatal */ }
@@ -118,7 +119,7 @@ function saveOutputHistory(role: string): void {
 /**
  * Record output tokens for a role (for context anxiety detection).
  */
-export function recordOutputTokens(role: string, outputTokens: number): void {
+export function recordOutputTokens(role: Role, outputTokens: number): void {
   let history = outputHistory.get(role);
   if (!history) {
     history = [];
@@ -136,7 +137,7 @@ export function recordOutputTokens(role: string, outputTokens: number): void {
  * Check whether a role shows "context anxiety" — sudden output drop
  * suggesting the model is struggling with context pressure.
  */
-function detectContextAnxiety(role: string, outputTokens: number): boolean {
+function detectContextAnxiety(role: Role, outputTokens: number): boolean {
   const history = outputHistory.get(role);
   if (!history || history.length < ANXIETY_HISTORY_SIZE) return false;
 
@@ -163,7 +164,7 @@ function detectContextAnxiety(role: string, outputTokens: number): boolean {
  */
 export async function checkAndRotate(
   sessionManager: SessionManager,
-  role: string,
+  role: Role,
   sessionId: string,
   inputTokens: number,
   outputTokens: number,
@@ -182,7 +183,7 @@ export async function checkAndRotate(
     const threshold = Math.round(rotationThreshold * 100);
     logger.info({ role, usagePct, threshold }, 'session rotation triggered');
     insert('logs', {
-      role: 'system',
+      role: Role.SYS,
       action: 'session_rotation',
       content: `${role} 上下文使用率 ${usagePct}%（限制 ${maxContext} tokens），执行 session 轮转`,
     });
@@ -193,7 +194,7 @@ export async function checkAndRotate(
   if (usage > 0.5 && detectContextAnxiety(role, outputTokens)) {
     logger.info({ role, outputTokens, usagePct: Math.round(usage * 100) }, 'context anxiety rotation');
     insert('logs', {
-      role: 'system',
+      role: Role.SYS,
       action: 'session_rotation',
       content: `${role} context anxiety 检测触发（使用率 ${Math.round(usage * 100)}%，输出 ${outputTokens} tokens 远低于近期平均）`,
     });

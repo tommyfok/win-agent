@@ -1,8 +1,9 @@
 import { select, insert, rawQuery, rawRun, withTransaction } from '../db/repository.js';
-import { MessageStatus } from '../db/types.js';
+import { MessageStatus, TaskStatus } from '../db/types.js';
 import { generateIterationStats } from './iteration-stats.js';
 import { engineBus, EngineEvents } from './event-bus.js';
 import { loadConfig } from '../config/index.js';
+import { Role } from './role-manager.js';
 
 interface ProjectConfigRow {
   key: string;
@@ -59,7 +60,7 @@ function checkScaffoldDone(): void {
 
   // 查找已完成的脚手架任务（title 包含 [scaffold]）
   const scaffoldDone = rawQuery<{ id: number }>(
-    "SELECT id FROM tasks WHERE title LIKE '%[scaffold]%' AND status = 'done' LIMIT 1",
+    `SELECT id FROM tasks WHERE title LIKE '%[scaffold]%' AND status = '${TaskStatus.Done}' LIMIT 1`,
     []
   );
   if (scaffoldDone.length === 0) return;
@@ -68,8 +69,8 @@ function checkScaffoldDone(): void {
 
   withTransaction(() => {
     insert('messages', {
-      from_role: 'system',
-      to_role: 'PM',
+      from_role: Role.SYS,
+      to_role: Role.PM,
       type: 'system',
       content: `🏗️ 脚手架任务已完成。请执行以下操作：
 
@@ -83,7 +84,7 @@ function checkScaffoldDone(): void {
       status: MessageStatus.Deferred,
     });
     insert('logs', {
-      role: 'system',
+      role: Role.SYS,
       action: 'auto_trigger',
       content: '脚手架任务完成，已通知 PM 生成 overview.md',
     });
@@ -108,8 +109,8 @@ function checkAllTasksDone(): void {
 
     if (tasks.length === 0) continue;
 
-    const active = tasks.filter((t) => t.status !== 'cancelled');
-    const allDone = active.length > 0 && active.every((t) => t.status === 'done');
+    const active = tasks.filter((t) => t.status !== TaskStatus.Cancelled);
+    const allDone = active.length > 0 && active.every((t) => t.status === TaskStatus.Done);
     if (!allDone) continue;
 
     firedTriggers.add(key);
@@ -123,15 +124,15 @@ function checkAllTasksDone(): void {
         [iter.id]
       );
       insert('messages', {
-        from_role: 'system',
-        to_role: 'PM',
+        from_role: Role.SYS,
+        to_role: Role.PM,
         type: 'system',
         content: `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。\n\n${statsReport}\n\n请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。\n审阅完成后，将回顾摘要写入 memory 表，然后通过 database_update 将迭代 #${iter.id} 的 status 更新为 'reviewed'。`,
         status: MessageStatus.Deferred,
         related_iteration_id: iter.id,
       });
       insert('logs', {
-        role: 'system',
+        role: Role.SYS,
         action: 'auto_trigger',
         content: `迭代 #${iter.id} 全部任务完成，已生成统计报告并通知 PM`,
       });
@@ -156,7 +157,7 @@ function checkRejectionRate(): void {
     const stats = rawQuery<{ total: number; rejected: number }>(
       `SELECT
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+        SUM(CASE WHEN status = '${TaskStatus.Rejected}' THEN 1 ELSE 0 END) as rejected
       FROM tasks WHERE iteration_id = ?`,
       [iter.id]
     )[0];
@@ -175,17 +176,17 @@ function checkRejectionRate(): void {
 
     withTransaction(() => {
       // 持久化到日志，引擎重启后仍可恢复，避免对同一活跃迭代重复触发
-      insert('logs', { role: 'system', action: 'trigger_fired', content: key });
+      insert('logs', { role: Role.SYS, action: 'trigger_fired', content: key });
       insert('messages', {
-        from_role: 'system',
-        to_role: 'PM',
+        from_role: Role.SYS,
+        to_role: Role.PM,
         type: 'system',
         content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 ${Math.round(rateThreshold * 100)}%，需要关注。\n\n${statsReport}\n\n请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。`,
         status: MessageStatus.Deferred,
         related_iteration_id: iter.id,
       });
       insert('logs', {
-        role: 'system',
+        role: Role.SYS,
         action: 'auto_trigger',
         content: `迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超阈值，已通知 PM`,
       });

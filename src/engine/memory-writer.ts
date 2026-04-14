@@ -2,6 +2,7 @@ import type { OpencodeClient } from '@opencode-ai/sdk';
 import { insertMemory } from '../embedding/memory.js';
 import { withTimeout } from './retry.js';
 import { insert as dbInsert } from '../db/repository.js';
+import type { Role } from './role-manager.js';
 
 export const WRITE_MEMORY_PROMPT = `你即将被轮转到一个新的 session。请总结你当前的工作状态，包括：
 
@@ -30,7 +31,7 @@ export const WRITE_MEMORY_PROMPT = `你即将被轮转到一个新的 session。
  */
 export async function writeMemory(
   client: OpencodeClient,
-  role: string,
+  role: Role,
   sessionId: string,
   trigger: string
 ): Promise<void> {

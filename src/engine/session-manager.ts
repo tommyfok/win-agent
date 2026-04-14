@@ -9,12 +9,12 @@ import {
   cleanupOldSessions,
 } from './session-store.js';
 import { ensureWorkspaceId } from '../config/index.js';
+import { Role } from './role-manager.js';
 
 // Re-export for callers that previously imported from here
 export type { InterruptedState } from './session-store.js';
 
-type Role = 'PM' | 'DEV';
-const PERSISTENT_ROLES: Role[] = ['PM'];
+const PERSISTENT_ROLES: Role[] = [Role.PM];
 
 /**
  * SessionManager manages opencode sessions for all roles.
@@ -28,7 +28,7 @@ const PERSISTENT_ROLES: Role[] = ['PM'];
  */
 export class SessionManager {
   /** role → sessionId for persistent roles (PM) */
-  private activeSessions: Map<string, string> = new Map();
+  private activeSessions: Map<Role, string> = new Map();
   /** "taskId-role" → sessionId for task-scoped roles (DEV) */
   private taskSessions: Map<string, string> = new Map();
   /** Unique prefix for this workspace's sessions */
@@ -103,7 +103,7 @@ export class SessionManager {
   /**
    * Get the session ID for a persistent role (PM).
    */
-  getSession(role: 'PM'): string {
+  getSession(role: Role.PM): string {
     const id = this.activeSessions.get(role);
     if (!id) {
       throw new Error(`No active session for role ${role}`);
@@ -115,14 +115,14 @@ export class SessionManager {
    * Get PM session ID (convenience method for talk command).
    */
   getPmSessionId(): string {
-    return this.getSession('PM');
+    return this.getSession(Role.PM);
   }
 
   /**
    * Create a fresh session for DEV on every dispatch.
    * Each dispatch gets a clean context with role identity and memory recall.
    */
-  async getTaskSession(taskId: number, role: 'DEV'): Promise<string> {
+  async getTaskSession(taskId: number, role: Role.DEV): Promise<string> {
     const key = `${taskId}-${role}`;
     this.taskSessions.delete(key);
 
@@ -141,7 +141,7 @@ export class SessionManager {
    * Release a task session after task completion.
    */
   releaseTaskSession(taskId: number): void {
-    this.taskSessions.delete(`${taskId}-DEV`);
+    this.taskSessions.delete(`${taskId}-${Role.DEV}`);
   }
 
   /**
@@ -150,7 +150,7 @@ export class SessionManager {
    *
    * @returns The new session ID
    */
-  async rotateSession(role: string, sessionId: string, taskId?: number): Promise<string> {
+  async rotateSession(role: Role, sessionId: string, taskId?: number): Promise<string> {
     // 1. Ask role to write memory (best effort — continue even on failure)
     try {
       await writeMemory(this.client, role, sessionId, 'context_limit');
@@ -181,11 +181,11 @@ export class SessionManager {
    * Trigger all roles (PM + DEV task sessions) to write memory (used on engine stop).
    */
   async writeAllMemories(trigger: string): Promise<void> {
-    const sessions: Array<[string, string]> = [
+    const sessions: Array<[Role, string]> = [
       ...this.activeSessions.entries(),
       ...Array.from(this.taskSessions.entries()).map(([key, id]) => {
-        const role = key.split('-')[1]; // e.g. "42-DEV" → "DEV"
-        return [role, id] as [string, string];
+        const role = key.split('-')[1] as Role; // e.g. "42-DEV" → "DEV"
+        return [role, id] as [Role, string];
       }),
     ];
 

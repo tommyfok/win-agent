@@ -11,6 +11,7 @@ import { getEmbeddingDimension } from '../embedding/index.js';
 import { setEmbeddingDimension } from '../db/schema.js';
 import { getDbPath } from '../config/index.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
+import { Role } from '../engine/role-manager.js';
 import { checkAndInstallSkills } from './skills.js';
 
 /** Machine-detectable marker for content that needs user review */
@@ -625,7 +626,7 @@ async function importProjectContext(workspace: string) {
         content: parts.join('\n'),
         category: 'convention',
         tags: 'constraints',
-        created_by: 'system',
+        created_by: Role.SYS,
       });
       knowledgeCount++;
       console.log(`   ✓ ${Object.keys(constraints).length} 条约束已记录`);
@@ -656,7 +657,7 @@ async function importReferenceDir(refDir: string, workspace: string): Promise<nu
         content: fs.readFileSync(filePath, 'utf-8'),
         category: 'reference',
         tags: `imported,${ext.slice(1)}`,
-        created_by: 'system',
+        created_by: Role.SYS,
       });
       console.log(`   ✓ 导入文本: ${entry.name}`);
     } else {
@@ -666,7 +667,7 @@ async function importReferenceDir(refDir: string, workspace: string): Promise<nu
         content: `[${IMAGE_EXTS.has(ext) ? '图片' : '附件'}] .win-agent/attachments/${entry.name}`,
         category: 'reference',
         tags: `imported,${IMAGE_EXTS.has(ext) ? 'image,' : 'attachment,'}${ext.slice(1)}`,
-        created_by: 'system',
+        created_by: Role.SYS,
       });
       console.log(`   ✓ 导入${IMAGE_EXTS.has(ext) ? '图片' : '附件'}: ${entry.name}`);
     }

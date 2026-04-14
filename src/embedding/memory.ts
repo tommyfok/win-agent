@@ -1,6 +1,7 @@
 import { getDb } from '../db/connection.js';
 import { insert } from '../db/repository.js';
 import { generateEmbedding } from './index.js';
+import type { Role } from '../engine/role-manager.js';
 
 /**
  * Default similarity threshold (L2 distance).
@@ -18,7 +19,7 @@ export function setSimilarityThreshold(threshold: number): void {
 }
 
 export interface MemoryData {
-  role: string;
+  role: Role;
   summary: string;
   content: string;
   trigger: string;
@@ -54,7 +55,7 @@ export interface MemoryEntry {
   id: number;
   summary: string;
   content: string;
-  role: string;
+  role: Role;
   created_at: string;
 }
 
@@ -71,7 +72,7 @@ export interface MemoryEntry {
  * @param limit - Max memories to include (default 10)
  */
 export async function buildRecallPrompt(
-  role: string,
+  role: Role,
   currentContext?: string,
   limit: number = 10
 ): Promise<string> {

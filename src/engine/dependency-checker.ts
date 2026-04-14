@@ -1,11 +1,11 @@
 import { select, insert, rawQuery, withTransaction } from '../db/repository.js';
-import { MessageStatus } from '../db/types.js';
-import type { TaskStatus } from '../db/types.js';
+import { MessageStatus, TaskStatus } from '../db/types.js';
 import { transitionTaskStatus } from '../db/state-machine.js';
+import { Role } from './role-manager.js';
 
-export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: string): boolean {
+export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: TaskStatus): boolean {
   // Already blocked — don't overwrite pre_suspend_status (would create infinite loop)
-  if (currentStatus === 'blocked') return true;
+  if (currentStatus === TaskStatus.Blocked) return true;
 
   const unmetDeps = rawQuery<{ id: number; title: string }>(
     `WITH RECURSIVE transitive_deps AS (
@@ -17,7 +17,7 @@ export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: st
      )
      SELECT t.id, t.title FROM tasks t
      WHERE t.id IN (SELECT depends_on FROM transitive_deps)
-       AND t.status != 'done'`,
+       AND t.status != '${TaskStatus.Done}'`,
     [taskId]
   );
   if (unmetDeps.length > 0) {
@@ -25,8 +25,8 @@ export function checkAndBlockUnmetDependencies(taskId: number, currentStatus: st
       transitionTaskStatus(
         taskId,
         currentStatus as TaskStatus,
-        'blocked',
-        'system',
+        TaskStatus.Blocked,
+        Role.SYS,
         `依赖未完成: ${unmetDeps.map((d) => `#${d.id} ${d.title}`).join(', ')}`
       );
     });
@@ -39,9 +39,9 @@ export function checkAndUnblockDependencies(): void {
   const blockedTasks = select<{
     id: number;
     title: string;
-    pre_suspend_status: string | null;
+    pre_suspend_status: TaskStatus | null;
     assigned_to: string | null;
-  }>('tasks', { status: 'blocked' });
+  }>('tasks', { status: TaskStatus.Blocked });
   for (const task of blockedTasks) {
     const unmet = rawQuery(
       `WITH RECURSIVE transitive_deps AS (
@@ -53,20 +53,20 @@ export function checkAndUnblockDependencies(): void {
        )
        SELECT 1 FROM tasks t
        WHERE t.id IN (SELECT depends_on FROM transitive_deps)
-         AND t.status != 'done'
+         AND t.status != '${TaskStatus.Done}'
        LIMIT 1`,
       [task.id]
     );
     if (unmet.length === 0) {
-      const restoreStatus = task.pre_suspend_status || 'pending_dev';
+      const restoreStatus = task.pre_suspend_status || TaskStatus.PendingDev;
       // Dedup check outside transaction (read-only)
       // Check for ANY existing notification (any status), not just Unread
       // because DEV may have already read the message after processing
       const assignedRole = task.assigned_to;
       const existingNotify =
-        assignedRole && assignedRole !== 'PM'
+        assignedRole && assignedRole !== Role.PM
           ? select<{ id: number }>('messages', {
-              from_role: 'system',
+              from_role: Role.SYS,
               to_role: assignedRole,
               related_task_id: task.id,
             })
@@ -75,23 +75,23 @@ export function checkAndUnblockDependencies(): void {
       withTransaction(() => {
         transitionTaskStatus(
           task.id,
-          'blocked',
+          TaskStatus.Blocked,
           restoreStatus as TaskStatus,
-          'system',
+          Role.SYS,
           '依赖已全部完成，自动解除阻塞'
         );
         insert('messages', {
-          from_role: 'system',
-          to_role: 'PM',
+          from_role: Role.SYS,
+          to_role: Role.PM,
           type: 'notification',
           content: `任务 #${task.id}「${task.title}」依赖已满足，已自动从 blocked 恢复为 ${restoreStatus}`,
           related_task_id: task.id,
           status: MessageStatus.Unread,
         });
         // Also notify the assigned role directly so DEV can resume without waiting for PM.
-        if (assignedRole && assignedRole !== 'PM' && existingNotify.length === 0) {
+        if (assignedRole && assignedRole !== Role.PM && existingNotify.length === 0) {
           insert('messages', {
-            from_role: 'system',
+            from_role: Role.SYS,
             to_role: assignedRole,
             type: 'notification',
             content: `任务 #${task.id}「${task.title}」的依赖已全部完成，可以继续开发了。`,

@@ -3,13 +3,14 @@ import path from 'node:path';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import { withRetry } from './retry.js';
 import { loadConfig } from '../config/index.js';
+import { Role } from './role-manager.js';
 
 // Re-export for callers that import session creation from this module
 export { createRoleSession } from './session-factory.js';
 
 /** Persisted state of an interrupted dispatch (written by engine on shutdown). */
 export interface InterruptedState {
-  role: string;
+  role: Role;
   taskId: number | null;
   sessionId: string | null;
   timestamp: string;
@@ -107,9 +108,9 @@ export async function checkAndResumeInterrupted(
   }
 
   // Re-register session in maps
-  if (role === 'PM') {
+  if (role === Role.PM) {
     activeSessions.set(role, sessionId);
-  } else if (taskId && role === 'DEV') {
+  } else if (taskId && role === Role.DEV) {
     taskSessions.set(`${taskId}-${role}`, sessionId);
   }
   onPersist();
@@ -151,7 +152,7 @@ export async function waitForSessionsReady(
   client: OpencodeClient,
   activeSessions: Map<string, string>
 ): Promise<void> {
-  const maxWait = loadConfig().engine?.sessionInitTimeoutMs ?? 60_000;
+  const maxWait = loadConfig().engine?.sessionInitTimeoutMs ?? 120_000;
   const pollInterval = 2_000;
   const startTime = Date.now();
 

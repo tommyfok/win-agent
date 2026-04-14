@@ -4,6 +4,7 @@ import type { SessionManager } from './session-manager.js';
 import { cleanExpiredMemories } from '../embedding/memory.js';
 import { cleanExpiredOutputs } from './output-cleaner.js';
 import { engineBus, EngineEvents, type DispatchCompletePayload } from './event-bus.js';
+import { Role } from './role-manager.js';
 
 /** SessionManager injected by the engine at startup (via initIterationChecker). */
 let storedSessionManager: SessionManager | null = null;
@@ -19,7 +20,7 @@ export function initIterationChecker(sm: SessionManager | null): void {
 
 // Subscribe to dispatch events — check iteration review only after PM dispatches.
 engineBus.on(EngineEvents.DISPATCH_COMPLETE, (payload: DispatchCompletePayload) => {
-  if (payload.role === 'PM') {
+  if (payload.role === Role.PM) {
     checkIterationReview(storedSessionManager);
   }
 });
@@ -65,7 +66,7 @@ export function checkIterationReview(sessionManager?: SessionManager | null): vo
     const cleaned = cleanExpiredMemories();
     if (cleaned > 0) {
       insert('logs', {
-        role: 'system',
+        role: Role.SYS,
         action: 'memory_cleanup',
         content: `已清理 ${cleaned} 条过期记忆（90+ 天）`,
       });
@@ -74,7 +75,7 @@ export function checkIterationReview(sessionManager?: SessionManager | null): vo
     const cleanedOutputs = cleanExpiredOutputs();
     if (cleanedOutputs > 0) {
       insert('logs', {
-        role: 'system',
+        role: Role.SYS,
         action: 'output_cleanup',
         content: `已清理 ${cleanedOutputs} 条过期角色输出（90+ 天）`,
       });
@@ -85,7 +86,7 @@ export function checkIterationReview(sessionManager?: SessionManager | null): vo
     update('iterations', { id: iter.id }, { reviewed_at: new Date().toISOString() });
 
     insert('logs', {
-      role: 'system',
+      role: Role.SYS,
       action: 'iteration_reviewed',
       content: `迭代 #${iter.id} 回顾完成`,
     });
@@ -100,29 +101,29 @@ export function checkIterationReview(sessionManager?: SessionManager | null): vo
  */
 function sendReflectionTriggers(iter: IterationRow): void {
   // Find all roles that participated via messages
-  const messages = select<{ from_role: string; to_role: string }>('messages', {
+  const messages = select<{ from_role: Role; to_role: Role }>('messages', {
     related_iteration_id: iter.id,
   });
 
   // Also check tasks assigned to roles
-  const tasks = select<{ assigned_to: string | null }>('tasks', { iteration_id: iter.id });
+  const tasks = select<{ assigned_to: Role | null }>('tasks', { iteration_id: iter.id });
 
-  const participatingRoles = new Set<string>();
+  const participatingRoles = new Set<Role>();
   for (const msg of messages) {
-    if (msg.from_role !== 'system') participatingRoles.add(msg.from_role);
-    if (msg.to_role !== 'system') participatingRoles.add(msg.to_role);
+    if (msg.from_role !== Role.SYS) participatingRoles.add(msg.from_role);
+    if (msg.to_role !== Role.SYS) participatingRoles.add(msg.to_role);
   }
   for (const task of tasks) {
     if (task.assigned_to) participatingRoles.add(task.assigned_to);
   }
 
   // Always include PM, exclude "user"
-  participatingRoles.add('PM');
-  participatingRoles.delete('user');
+  participatingRoles.add(Role.PM);
+  participatingRoles.delete(Role.USER);
 
   for (const role of participatingRoles) {
     insert('messages', {
-      from_role: 'system',
+      from_role: Role.SYS,
       to_role: role,
       type: 'reflection',
       content: buildReflectionPrompt(role, iter),
@@ -132,7 +133,7 @@ function sendReflectionTriggers(iter: IterationRow): void {
   }
 
   insert('logs', {
-    role: 'system',
+    role: Role.SYS,
     action: 'reflection_triggered',
     content: `迭代 #${iter.id} 回顾完成，已向 ${[...participatingRoles].join(',')} 发送反思触发`,
   });
@@ -141,7 +142,7 @@ function sendReflectionTriggers(iter: IterationRow): void {
 /**
  * Build a reflection prompt tailored to each role.
  */
-function buildReflectionPrompt(role: string, iter: IterationRow): string {
+function buildReflectionPrompt(role: Role, iter: IterationRow): string {
   const iterName = iter.name ? `「${iter.name}」` : '';
   const base = `【自我反思】迭代 #${iter.id}${iterName} 已完成回顾，请进行自我反思。`;
 

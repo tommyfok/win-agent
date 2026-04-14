@@ -10,6 +10,7 @@ import {
   promoteDeferredTriggers,
   tryDispatchNormalRole,
 } from './scheduler-dispatch.js';
+import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -33,7 +34,7 @@ let lastHealthCheckAt = 0;
  * Start the scheduler main loop.
  *
  * V1 serial strategy:
- * - Each cycle iterates through ALL_ROLES (round-robin with PM cooldown)
+ * - Each cycle iterates through AGENT_ROLES (round-robin with PM cooldown)
  * - Only one role is dispatched per cycle
  * - After dispatch, check auto-triggers and iteration review
  * - Sleep 1s between cycles to avoid tight polling
@@ -59,7 +60,7 @@ export async function startSchedulerLoop(
       logger.error({ err }, 'scheduler error');
       try {
         insert('logs', {
-          role: 'system',
+          role: Role.SYS,
           action: 'scheduler_error',
           content: `调度器异常: ${err instanceof Error ? err.message : String(err)}`,
         });

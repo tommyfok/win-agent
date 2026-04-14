@@ -2,6 +2,8 @@ import { checkEngineRunning, getDbPath } from '../config/index.js';
 import { openDb, getDb } from '../db/connection.js';
 import { select as dbSelect, rawQuery } from '../db/repository.js';
 import { formatTokens } from '../utils/format.js';
+import type { Role } from '../engine/role-manager.js';
+import { TaskStatus } from '../db/types.js';
 
 export async function statusCommand() {
   // 1. Check engine status
@@ -58,7 +60,7 @@ export async function statusCommand() {
     totalTasks += row.cnt;
   }
 
-  const doneCount = statsMap['done'] ?? 0;
+  const doneCount = statsMap[TaskStatus.Done] ?? 0;
 
   console.log('\n📊 任务统计:');
   if (totalTasks === 0) {
@@ -66,13 +68,13 @@ export async function statusCommand() {
   } else {
     const parts: string[] = [];
     const statusLabels: Record<string, string> = {
-      pending_dev: '待开发',
-      in_dev: '开发中',
-      done: '已完成',
-      rejected: '已打回',
-      paused: '已暂停',
-      blocked: '已阻塞',
-      cancelled: '已取消',
+      [TaskStatus.PendingDev]: '待开发',
+      [TaskStatus.InDev]: '开发中',
+      [TaskStatus.Done]: '已完成',
+      [TaskStatus.Rejected]: '已打回',
+      [TaskStatus.Paused]: '已暂停',
+      [TaskStatus.Blocked]: '已阻塞',
+      [TaskStatus.Cancelled]: '已取消',
     };
     for (const [status, label] of Object.entries(statusLabels)) {
       if (statsMap[status]) {
@@ -87,7 +89,7 @@ export async function statusCommand() {
 
   // 4. Cost overview (token consumption per role)
   const costStats = rawQuery<{
-    role: string;
+    role: Role;
     dispatch_count: number;
     total_input: number;
     total_output: number;
@@ -144,8 +146,8 @@ export async function statusCommand() {
   // 5. Recent messages
   const recentMessages = dbSelect<{
     id: number;
-    from_role: string;
-    to_role: string;
+    from_role: Role;
+    to_role: Role;
     content: string;
     created_at: string;
   }>('messages', undefined, {
@@ -158,8 +160,13 @@ export async function statusCommand() {
   } else {
     for (const msg of recentMessages) {
       const time = formatTime(msg.created_at);
-      const content = msg.content.length > 50 ? msg.content.substring(0, 50) + '...' : msg.content;
-      console.log(`   [${time}] ${msg.from_role} → ${msg.to_role}: ${content}`);
+      console.log(`   [${time}] ${msg.from_role} → ${msg.to_role}:`);
+      console.log(
+        msg.content
+          .split('\n')
+          .map((l) => '   ' + l)
+          .join('\n')
+      );
     }
   }
 

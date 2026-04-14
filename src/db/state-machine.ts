@@ -1,5 +1,6 @@
 import { update, insert } from './repository.js';
-import type { TaskStatus } from './types.js';
+import { TaskStatus } from './types.js';
+import type { Role } from '../engine/role-manager.js';
 
 /**
  * 合法的任务状态流转图
@@ -8,16 +9,31 @@ import type { TaskStatus } from './types.js';
  * done / cancelled / paused 为终态或特殊态，不参与常规流转。
  */
 export const TASK_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  pending_pm:     ['in_review', 'blocked', 'cancelled'],
-  pending_dev:    ['in_dev', 'blocked', 'cancelled'],
-  in_dev:         ['pending_review', 'rejected', 'blocked', 'cancelled'],
-  pending_review: ['in_review', 'rejected', 'blocked', 'cancelled'],
-  blocked:        ['pending_pm', 'pending_dev', 'in_dev', 'pending_review'],
-  in_review:      ['done', 'rejected'],
-  rejected:       ['pending_dev', 'cancelled'],
-  done:           [],
-  cancelled:      [],
-  paused:         [],
+  [TaskStatus.PendingPm]: [TaskStatus.InReview, TaskStatus.Blocked, TaskStatus.Cancelled],
+  [TaskStatus.PendingDev]: [TaskStatus.InDev, TaskStatus.Blocked, TaskStatus.Cancelled],
+  [TaskStatus.InDev]: [
+    TaskStatus.PendingReview,
+    TaskStatus.Rejected,
+    TaskStatus.Blocked,
+    TaskStatus.Cancelled,
+  ],
+  [TaskStatus.PendingReview]: [
+    TaskStatus.InReview,
+    TaskStatus.Rejected,
+    TaskStatus.Blocked,
+    TaskStatus.Cancelled,
+  ],
+  [TaskStatus.Blocked]: [
+    TaskStatus.PendingPm,
+    TaskStatus.PendingDev,
+    TaskStatus.InDev,
+    TaskStatus.PendingReview,
+  ],
+  [TaskStatus.InReview]: [TaskStatus.Done, TaskStatus.Rejected],
+  [TaskStatus.Rejected]: [TaskStatus.PendingDev, TaskStatus.Cancelled],
+  [TaskStatus.Done]: [],
+  [TaskStatus.Cancelled]: [],
+  [TaskStatus.Paused]: [],
 };
 
 /**
@@ -35,7 +51,7 @@ export function transitionTaskStatus(
   taskId: number,
   from: TaskStatus,
   to: TaskStatus,
-  changedBy: string,
+  changedBy: Role,
   reason: string
 ): void {
   const allowed = TASK_TRANSITIONS[from];
@@ -44,7 +60,7 @@ export function transitionTaskStatus(
   }
   update('tasks', { id: taskId }, {
     status: to,
-    pre_suspend_status: to === 'blocked' ? from : null,
+    pre_suspend_status: to === TaskStatus.Blocked ? from : null,
   });
   insert('task_events', {
     task_id: taskId,

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { setupTestDb } from './test-helpers.js';
 import { select, insert, update, del, withTransaction, upsertProjectConfig } from '../repository.js';
+import { TaskStatus } from '../types.js';
 
 beforeEach(() => {
   setupTestDb();
@@ -8,23 +9,23 @@ beforeEach(() => {
 
 describe('select', () => {
   it('returns all rows when no where clause', () => {
-    insert('tasks', { title: 'Task A', status: 'pending_dev' });
-    insert('tasks', { title: 'Task B', status: 'done' });
+    insert('tasks', { title: 'Task A', status: TaskStatus.PendingDev });
+    insert('tasks', { title: 'Task B', status: TaskStatus.Done });
     const rows = select('tasks');
     expect(rows.length).toBe(2);
   });
 
   it('filters by where clause', () => {
-    insert('tasks', { title: 'Task A', status: 'pending_dev' });
-    insert('tasks', { title: 'Task B', status: 'done' });
-    const rows = select('tasks', { status: 'done' });
+    insert('tasks', { title: 'Task A', status: TaskStatus.PendingDev });
+    insert('tasks', { title: 'Task B', status: TaskStatus.Done });
+    const rows = select('tasks', { status: TaskStatus.Done });
     expect(rows.length).toBe(1);
     expect((rows[0] as { title: string }).title).toBe('Task B');
   });
 
   it('orders by column', () => {
-    insert('tasks', { title: 'B task', status: 'pending_dev' });
-    insert('tasks', { title: 'A task', status: 'pending_dev' });
+    insert('tasks', { title: 'B task', status: TaskStatus.PendingDev });
+    insert('tasks', { title: 'A task', status: TaskStatus.PendingDev });
     const rows = select<{ title: string }>('tasks', {}, { orderBy: 'title ASC' });
     expect(rows[0].title).toBe('A task');
     expect(rows[1].title).toBe('B task');
@@ -37,9 +38,9 @@ describe('select', () => {
   });
 
   it('applies limit and offset', () => {
-    insert('tasks', { title: 'T1', status: 'pending_dev' });
-    insert('tasks', { title: 'T2', status: 'pending_dev' });
-    insert('tasks', { title: 'T3', status: 'pending_dev' });
+    insert('tasks', { title: 'T1', status: TaskStatus.PendingDev });
+    insert('tasks', { title: 'T2', status: TaskStatus.PendingDev });
+    insert('tasks', { title: 'T3', status: TaskStatus.PendingDev });
     const rows = select<{ title: string }>('tasks', {}, { limit: 2, offset: 1, orderBy: 'id ASC' });
     expect(rows.length).toBe(2);
     expect(rows[0].title).toBe('T2');
@@ -48,7 +49,7 @@ describe('select', () => {
 
 describe('insert', () => {
   it('inserts a row and returns lastInsertRowid', () => {
-    const result = insert('tasks', { title: 'New Task', status: 'pending_dev' });
+    const result = insert('tasks', { title: 'New Task', status: TaskStatus.PendingDev });
     expect(typeof result.lastInsertRowid).toBe('number');
     expect(result.lastInsertRowid).toBeGreaterThan(0);
   });
@@ -56,18 +57,18 @@ describe('insert', () => {
 
 describe('update', () => {
   it('updates matching rows and returns changes count', () => {
-    insert('tasks', { title: 'Task', status: 'pending_dev' });
-    const result = update('tasks', { status: 'pending_dev' }, { status: 'done' });
+    insert('tasks', { title: 'Task', status: TaskStatus.PendingDev });
+    const result = update('tasks', { status: TaskStatus.PendingDev }, { status: TaskStatus.Done });
     expect(result.changes).toBe(1);
-    const rows = select<{ status: string }>('tasks', { status: 'done' });
+    const rows = select<{ status: string }>('tasks', { status: TaskStatus.Done });
     expect(rows.length).toBe(1);
   });
 
   it('auto-updates updated_at when the column exists', () => {
-    const { lastInsertRowid } = insert('tasks', { title: 'T', status: 'pending_dev' });
+    const { lastInsertRowid } = insert('tasks', { title: 'T', status: TaskStatus.PendingDev });
     const before = select<{ updated_at: string }>('tasks', { id: lastInsertRowid })[0].updated_at;
     // Small delay to ensure timestamp differs
-    update('tasks', { id: lastInsertRowid as number }, { status: 'done' });
+    update('tasks', { id: lastInsertRowid as number }, { status: TaskStatus.Done });
     const after = select<{ updated_at: string }>('tasks', { id: lastInsertRowid })[0].updated_at;
     // updated_at should be set (either same or later)
     expect(after).toBeDefined();
@@ -77,8 +78,8 @@ describe('update', () => {
 
 describe('del', () => {
   it('deletes matching rows', () => {
-    insert('tasks', { title: 'To Delete', status: 'pending_dev' });
-    const result = del('tasks', { status: 'pending_dev' });
+    insert('tasks', { title: 'To Delete', status: TaskStatus.PendingDev });
+    const result = del('tasks', { status: TaskStatus.PendingDev });
     expect(result.changes).toBe(1);
     expect(select('tasks').length).toBe(0);
   });
@@ -87,7 +88,7 @@ describe('del', () => {
 describe('withTransaction', () => {
   it('commits on success', () => {
     withTransaction(() => {
-      insert('tasks', { title: 'Tx Task', status: 'pending_dev' });
+      insert('tasks', { title: 'Tx Task', status: TaskStatus.PendingDev });
     });
     expect(select('tasks').length).toBe(1);
   });
@@ -95,7 +96,7 @@ describe('withTransaction', () => {
   it('rolls back on exception', () => {
     expect(() => {
       withTransaction(() => {
-        insert('tasks', { title: 'Should Rollback', status: 'pending_dev' });
+        insert('tasks', { title: 'Should Rollback', status: TaskStatus.PendingDev });
         throw new Error('intentional error');
       });
     }).toThrow('intentional error');
@@ -105,7 +106,7 @@ describe('withTransaction', () => {
 
   it('returns the function result', () => {
     const result = withTransaction(() => {
-      insert('tasks', { title: 'Return Test', status: 'pending_dev' });
+      insert('tasks', { title: 'Return Test', status: TaskStatus.PendingDev });
       return 42;
     });
     expect(result).toBe(42);

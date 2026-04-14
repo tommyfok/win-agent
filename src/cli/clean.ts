@@ -16,6 +16,7 @@ import {
   killProcessTree,
   type OpencodeServerHandle,
 } from '../engine/opencode-server.js';
+import { AGENT_ROLES } from '../engine/role-manager.js';
 
 export async function cleanCommand() {
   try {
@@ -112,7 +113,7 @@ function cleanOpencodeFiles(opencodeDir: string): void {
 
   // 1. Remove agent files
   const agentsDir = path.join(opencodeDir, 'agents');
-  for (const role of ['PM', 'DEV']) {
+  for (const role of AGENT_ROLES) {
     const f = path.join(agentsDir, `${role}.md`);
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }
@@ -120,7 +121,7 @@ function cleanOpencodeFiles(opencodeDir: string): void {
 
   // 2. Remove tool files
   const toolsDir = path.join(opencodeDir, 'tools');
-  for (const role of ['PM', 'DEV']) {
+  for (const role of AGENT_ROLES) {
     const f = path.join(toolsDir, `database_${role}.ts`);
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }
