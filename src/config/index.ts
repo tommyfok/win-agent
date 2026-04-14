@@ -33,7 +33,7 @@ export interface EngineConfig {
   minTasksForRejectionStats?: number;
   /** 打回率告警阈值，默认 0.3（30%） */
   rejectionRateThreshold?: number;
-  /** 单次 dispatch 超时时间，默认 300000ms（5 分钟） */
+  /** 单次 dispatch 超时时间，默认 1800000ms（30 分钟） */
   dispatchTimeoutMs?: number;
   /** session 初始化等待超时，默认 60000ms */
   sessionInitTimeoutMs?: number;

@@ -132,7 +132,7 @@ export async function dispatchToRole(
             parts: [{ type: 'text', text: prompt }],
           },
         }),
-        loadConfig().engine?.dispatchTimeoutMs ?? 5 * 60 * 1000,
+        loadConfig().engine?.dispatchTimeoutMs ?? 30 * 60 * 1000, // 30 minutes
         `${role} session.prompt`
       ),
     { maxAttempts: 3, label: `${role} dispatch`, signal: options?.signal }

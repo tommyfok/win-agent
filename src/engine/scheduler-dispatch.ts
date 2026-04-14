@@ -2,7 +2,7 @@ import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
 import type { RoleManager } from './role-manager.js';
 import { AGENT_ROLES, Role } from './role-manager.js';
-import { dispatchToRole, dispatchToRoleGrouped, type MessageRow } from './dispatcher.js';
+import { dispatchToRole, type MessageRow } from './dispatcher.js';
 import { AbortError } from './retry.js';
 import { checkAndRotate } from './memory-rotator.js';
 import { select, insert, update, rawRun, upsertProjectConfig } from '../db/repository.js';
@@ -160,8 +160,7 @@ export async function tryDispatchNormalRole(
     };
 
     try {
-      const dispatch = role === Role.DEV ? dispatchToRoleGrouped : dispatchToRole;
-      const { sessionId, inputTokens, outputTokens } = await dispatch(
+      const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
         client,
         sessionManager,
         role,
