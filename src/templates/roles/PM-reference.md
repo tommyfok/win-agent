@@ -15,6 +15,8 @@
 ## Directive 格式
 
 DEV 收到 directive 时是零上下文，directive 必须**完全自包含**：
+
+- **所属子项目**：明确指出在哪个子项目执行（如 groupalbum、groupalbum-server 等）
 - 任务背景：这个 feature 解决什么问题
 - 前置依赖：如果依赖已完成的 feature，说明依赖关系和当前代码状态
 - Spec 路径：`.win-agent/docs/spec/xxx.md`
@@ -24,7 +26,7 @@ DEV 收到 directive 时是零上下文，directive 必须**完全自包含**：
 ```
 database_insert({ table: "messages", data: {
   from_role: "PM", to_role: "DEV", type: "directive",
-  content: "请开始 feature#N 的开发。\n\n## 背景\n[这个 feature 解决什么问题]\n\n## 前置依赖\n[依赖的 feature 及当前状态，无则写"无"]\n\n## Spec\n路径: .win-agent/docs/spec/xxx.md\n\n## 验收标准\n- [ ] [标准1]\n- [ ] [标准2]",
+  content: "请开始 feature#N 的开发。\n\n## 所属子项目\n[子项目名]\n\n## 背景\n[这个 feature 解决什么问题]\n\n## 前置依赖\n[依赖的 feature 及当前状态，无则写"无"]\n\n## Spec\n路径: .win-agent/docs/spec/xxx.md\n\n## 验收标准\n- [ ] [标准1]\n- [ ] [标准2]",
   related_task_id: N, status: "unread"
 }})
 ```

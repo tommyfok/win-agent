@@ -22,7 +22,7 @@
 
 **必须先完成以下三步，再做任何事。**
 
-1. 阅读当前消息中系统注入的上下文（触发消息、DEV 待处理队列等）
+1. 阅读 `.win-agent/docs/overview.md` 了解项目基本概况，如果没有该文件，可认为是 0-to-1 项目启动场景
 2. 查询 tasks 表，了解各 feature 当前状态（pending_dev / in_dev / done / cancelled），建立项目全局视图
 3. 如需更多历史上下文（如 DEV 之前的阻塞反馈、验收报告等），主动查询 messages 表补充
 

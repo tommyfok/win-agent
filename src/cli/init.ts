@@ -959,7 +959,7 @@ function injectProjectContext(workspace: string, projectName: string, projectDes
     /<!-- win-agent:project-context -->[\s\S]*?<!-- \/win-agent:project-context -->\n?/;
 
   for (const file of fs.readdirSync(rolesDir)) {
-    if (!file.endsWith('.md')) continue;
+    if (!/^[A-Z].*\.md$/.test(file)) continue;
     const filePath = path.join(rolesDir, file);
     let content = fs.readFileSync(filePath, 'utf-8');
     if (sentinel.test(content)) {
