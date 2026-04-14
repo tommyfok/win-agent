@@ -58,9 +58,7 @@ export function buildWorkspaceAnalysisPrompt(subProjects: string[]): string {
   const subProjectList = subProjects.map((p) => `  - ${p}`).join('\n');
 
   const monorepoSection = isMonorepo
-    ? `
-
-**重要：这是一个 Monorepo 项目，包含以下子项目：**
+    ? `**重要：这是一个 Monorepo 项目，包含以下子项目：**
 ${subProjectList}
 
 你必须逐个进入每个子项目目录，读取其 package.json / Makefile / 配置文件等，分析其独立的技术栈。不要只看根目录。`
@@ -146,7 +144,7 @@ ${subProjectList}
 
   return `分析当前工作空间，生成面向 AI Agent 的开发指南。内容必须简洁、可直接执行。
 
-**重要：本文档与 validation.md 职责分工明确。本文档包含"搭环境"、"理解架构"、"写代码"和"写测试"相关内容。验证类命令的执行（lint/test 的运行和通过标准）由 validation.md 负责，本文档不要列出验证类命令的执行方式，但必须说明测试的编写规范。**
+**重要：本文档只包含具体的执行步骤。项目背景、技术栈、架构关系等宏观信息请参考 overview.md，不要在本文档中重复。**
 
 扫描步骤（禁止扫描 \`.\` 开头的目录）：
   glob("[!.]**/package.json")
@@ -163,14 +161,12 @@ ${subProjectList}
   glob("[!.]**/pytest.ini")
   glob("[!.]**/setup.cfg")  （查找 [tool:pytest] 段）
   也读取根目录 README.md（如果存在）
-  ls src/（或主代码目录）第一层，了解顶层模块划分
   找 2-3 个已有测试文件，read 其内容以了解测试编写模式
-  read 上述找到的文件
-${monorepoNote}
+ ${monorepoNote}
 
 输出以下章节：
 
-## Phase 1: 准备环境
+## Phase 1: 准备工作
 
 列出从零开始到可以开发需要的所有命令和前置依赖，例如：
 \`\`\`bash
@@ -179,19 +175,7 @@ pnpm install
 包括但不限于：包管理器安装、依赖安装、环境变量配置（列出需要的 .env 变量名）、数据库初始化、Docker 服务启动等。
 优先检查是否有 docker-compose.dev 相关配置，如果有则使用 docker compose 启动开发环境。
 
-### 项目结构与约定
-
-基于实际目录结构，说明 Agent 在开发时必须了解的架构信息：
-
-1. **目录职责**：列出主要目录（src/ 下第一层或等价结构）及其职责，每个目录一行，格式如：
-   - \`src/engine/\` — 调度引擎核心逻辑
-   - \`src/cli/\` — CLI 命令入口
-2. **新增文件放置规则**：新文件应该放在哪里？是否有 barrel export（index.ts）需要同步更新？
-3. **模块依赖方向**：哪些模块可以引用哪些模块？是否有分层约束（如 controller → service → repository，禁止反向引用）？如果项目无明显分层，说明实际的组织方式
-
-仅描述实际存在的结构，不要发明项目中没有的约定。
-
-## Phase 2: 执行开发命令
+## Phase 2: 启动开发环境
 
 基于 package.json / Makefile 等实际命令，**只列出开发过程中使用的命令**：
 \`\`\`bash
@@ -201,10 +185,10 @@ pnpm db:generate  # 生成数据库迁移（如有）
 \`\`\`
 **不要列出 lint、test 等验证类命令**（这些由 validation.md 管理）。
 
-## Phase 3: 编码
+## Phase 3: 按照以下要求实现功能
 
 根据项目实际技术栈，给出 Agent 编码时必须遵循的要求。每条 1 句话，分为两层：
-1. **通用规则**（5-8 条）：适用于所有子项目的规则，包括：
+1. **通用规则**，适用于所有子项目的规则，包括：
    - 代码规范（根据 eslint/prettier/biome 配置推断）
    - 提交规范
    - 技术栈最佳实践（如有 \`npx skills find\` 可用则查询，否则根据配置文件推断）
