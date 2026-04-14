@@ -95,11 +95,16 @@ export async function dispatchToRole(
   // 1. Filter messages (DEV skips paused/blocked/cancelled/done tasks)
   messages = filterMessagesForRole(role, messages);
   if (messages.length === 0) {
+    log.warn({ role }, 'no messages to dispatch');
     return { sessionId: null, inputTokens: 0, outputTokens: 0 };
   }
 
   // 2. Get or create session
   const sessionId = await getSessionForRole(sessionManager, role, messages);
+  if (!sessionId) {
+    log.warn({ role }, 'no session found for role');
+    return { sessionId: null, inputTokens: 0, outputTokens: 0 };
+  }
   options?.onSessionResolved?.(sessionId);
 
   // 3. Query relevant knowledge
@@ -184,19 +189,21 @@ async function getSessionForRole(
   sessionManager: SessionManager,
   role: Role,
   messages: MessageRow[]
-): Promise<string> {
+): Promise<string | null> {
   return match(role)
     .with(Role.DEV, (devRole) => {
       const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
       if (taskId) {
         return sessionManager.getTaskSession(taskId, devRole);
+      } else {
+        logger.warn({ role }, 'DEV received messages with no related_task_id, using fallback session');
+        return sessionManager.getTaskSession(-1, devRole);
       }
-      logger.warn({ role }, 'DEV received messages with no related_task_id, using fallback session');
-      return sessionManager.getTaskSession(-1, devRole);
     })
     .with(Role.PM, (pmRole) => sessionManager.getSession(pmRole))
     .with(Role.USER, Role.SYS, () => {
-      throw new Error(`Unsupported role for dispatch session resolution: ${role}`);
+      logger.warn({ role }, 'Unsupported role for dispatch session resolution');
+      return null;
     })
     .exhaustive();
 }
