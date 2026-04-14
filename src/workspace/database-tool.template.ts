@@ -5,10 +5,23 @@
  */
 import { tool, type ToolContext, type ToolDefinition } from '@opencode-ai/plugin';
 import path from 'node:path';
-import { TASK_STATUS_VALUES } from '../db/types.js';
 
 /** Hardcoded role identity — ctx.agent is unreliable */
 const ROLE = '__WIN_AGENT_ROLE__';
+
+/** Task status values (hardcoded to avoid cross-module imports) */
+const TASK_STATUS_VALUES = [
+  'pending_pm',
+  'pending_dev',
+  'in_dev',
+  'pending_review',
+  'in_review',
+  'done',
+  'rejected',
+  'cancelled',
+  'paused',
+  'blocked',
+] as const;
 
 const z = tool.schema;
 
@@ -295,7 +308,9 @@ export const insert: ToolDefinition = tool({
       }
     }
     if (args.table === 'tasks' && data.status) {
-      if (!TASK_STATUS_VALUES.includes(String(data.status) as (typeof TASK_STATUS_VALUES)[number])) {
+      if (
+        !TASK_STATUS_VALUES.includes(String(data.status) as (typeof TASK_STATUS_VALUES)[number])
+      ) {
         return JSON.stringify({
           error: `无效的任务状态: ${String(data.status)}，有效值: ${TASK_STATUS_VALUES.join(', ')}`,
         });
@@ -337,7 +352,9 @@ export const update: ToolDefinition = tool({
       }
     }
     if (args.table === 'tasks' && data.status) {
-      if (!TASK_STATUS_VALUES.includes(String(data.status) as (typeof TASK_STATUS_VALUES)[number])) {
+      if (
+        !TASK_STATUS_VALUES.includes(String(data.status) as (typeof TASK_STATUS_VALUES)[number])
+      ) {
         return JSON.stringify({
           error: `无效的任务状态: ${String(data.status)}，有效值: ${TASK_STATUS_VALUES.join(', ')}`,
         });

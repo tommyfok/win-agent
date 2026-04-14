@@ -5,9 +5,10 @@
 export enum Role {
   PM = 'PM',
   DEV = 'DEV',
-  // lower case roles for non-agent
+  // lower case roles for opencode roles
   USER = 'user',
   SYS = 'system',
+  ASSISTANT = 'assistant',
 }
 
 export const AGENT_ROLES: readonly Role[] = [Role.PM, Role.DEV];

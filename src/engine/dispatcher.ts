@@ -201,8 +201,8 @@ async function getSessionForRole(
       }
     })
     .with(Role.PM, (pmRole) => sessionManager.getSession(pmRole))
-    .with(Role.USER, Role.SYS, () => {
-      logger.warn({ role }, 'Unsupported role for dispatch session resolution');
+    .with(Role.USER, Role.SYS, Role.ASSISTANT, () => {
+      logger.warn({ role }, 'Unsupported roles for dispatch session resolution: ' + [Role.USER, Role.SYS, Role.ASSISTANT].join(','));
       return null;
     })
     .exhaustive();

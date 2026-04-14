@@ -161,8 +161,8 @@ export async function waitForSessionsReady(
     for (const [, sessionId] of activeSessions) {
       try {
         const msgs = await client.session.messages({ path: { id: sessionId } });
-        const messages = (msgs.data ?? []) as Array<{ role?: string }>;
-        const hasAssistantResponse = messages.some((m) => m.role === 'assistant');
+        const messages = (msgs.data ?? []) as Array<{ role?: Role }>;
+        const hasAssistantResponse = messages.some((m) => m.role === Role.ASSISTANT);
         if (!hasAssistantResponse) {
           allIdle = false;
           break;
