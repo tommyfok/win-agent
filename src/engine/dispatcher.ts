@@ -117,7 +117,8 @@ export async function dispatchToRole(
   }
 
   // 4. Build and send prompt
-  const taskContext = role === Role.DEV ? getTaskContext(messages) : null;
+  const taskContext =
+    role === Role.DEV ? getTaskContext(messages, sessionManager.getWorkspace()) : null;
   const pendingContext = sessionManager.consumePendingContext(sessionId);
   const prompt =
     (pendingContext ? pendingContext + '\n\n---\n\n' : '') +
@@ -196,13 +197,20 @@ async function getSessionForRole(
       if (taskId) {
         return sessionManager.getTaskSession(taskId, devRole);
       } else {
-        logger.warn({ role }, 'DEV received messages with no related_task_id, using fallback session');
+        logger.warn(
+          { role },
+          'DEV received messages with no related_task_id, using fallback session'
+        );
         return sessionManager.getTaskSession(-1, devRole);
       }
     })
     .with(Role.PM, (pmRole) => sessionManager.getSession(pmRole))
     .with(Role.USER, Role.SYS, Role.ASSISTANT, () => {
-      logger.warn({ role }, 'Unsupported roles for dispatch session resolution: ' + [Role.USER, Role.SYS, Role.ASSISTANT].join(','));
+      logger.warn(
+        { role },
+        'Unsupported roles for dispatch session resolution: ' +
+          [Role.USER, Role.SYS, Role.ASSISTANT].join(',')
+      );
       return null;
     })
     .exhaustive();

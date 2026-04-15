@@ -613,7 +613,8 @@ async function importProjectContext(workspace: string) {
         created_by: Role.SYS,
       });
       knowledgeCount++;
-      console.log(`   ✓ ${Object.keys(constraints).length} 条约束已记录`);
+
+      console.log(`   ✓ ${Object.keys(constraints).length} 条约束已记录（project_config + knowledge）`);
     }
   }
 

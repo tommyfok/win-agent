@@ -42,6 +42,10 @@ export class SessionManager {
     this.sessionPrefix = `wa-${wsId}`;
   }
 
+  getWorkspace(): string {
+    return this.workspace;
+  }
+
   /**
    * Initialize sessions for persistent roles (PM).
    * If an interrupted session exists and was resumed, skip creating a new session for that role.

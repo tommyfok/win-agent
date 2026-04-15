@@ -3,6 +3,8 @@ import { MessageStatus } from '../db/types.js';
 import type { KnowledgeEntry } from '../embedding/knowledge.js';
 import type { MessageRow } from './dispatch-filter.js';
 import { Role } from './role-manager.js';
+import path from 'node:path';
+import fs from 'node:fs';
 
 /** Task context injected into DEV dispatch prompts */
 export interface TaskContext {
@@ -13,13 +15,15 @@ export interface TaskContext {
   acceptanceProcess: string | null;
   status: string;
   dependencies: Array<{ id: number; title: string; status: string }>;
+  specContent: string | null;
+  constitutionContent: string | null;
 }
 
 /**
  * Get task context for DEV role.
  * Returns task details and its dependency statuses, or null if no task is found.
  */
-export function getTaskContext(messages: MessageRow[]): TaskContext | null {
+export function getTaskContext(messages: MessageRow[], workspace?: string): TaskContext | null {
   const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
   if (!taskId) return null;
 
@@ -61,7 +65,38 @@ export function getTaskContext(messages: MessageRow[]): TaskContext | null {
     acceptanceProcess: task.acceptance_process,
     status: task.status,
     dependencies,
+    specContent: workspace ? getSpecContentForTask(task.description, task.title, workspace) : null,
+    constitutionContent: workspace ? getConstitutionContent(workspace) : null,
   };
+}
+
+function getSpecContentForTask(
+  description: string | null,
+  title: string | null,
+  workspace: string
+): string | null {
+  const specPathMatch =
+    description?.match(/\.win-agent\/docs\/spec\/[\w-]+\.md/) ||
+    title?.match(/\.win-agent\/docs\/spec\/[\w-]+\.md/);
+  if (!specPathMatch) return null;
+  try {
+    const specPath = path.join(workspace, specPathMatch[0]);
+    return fs.readFileSync(specPath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+function getConstitutionContent(workspace: string): string | null {
+  const constitutionPath = path.join(workspace, '.win-agent', 'docs', 'constitution.md');
+  try {
+    if (fs.existsSync(constitutionPath)) {
+      return fs.readFileSync(constitutionPath, 'utf-8');
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**
@@ -106,6 +141,28 @@ export function buildDispatchPrompt(
         (taskContext.acceptanceProcess ? `- 验收流程:\n${taskContext.acceptanceProcess}\n` : '') +
         `- 前置依赖:\n${depLines}`
     );
+
+    if (taskContext.specContent) {
+      parts.push(`## Feature Spec（完整内容）\n${taskContext.specContent}`);
+    }
+
+    if (taskContext.constitutionContent) {
+      parts.push(`## 项目约束（constitution）\n${taskContext.constitutionContent}`);
+    }
+
+    if (role === Role.DEV && taskContext.dependencies.some((d) => d.status === 'done')) {
+      const completedDeps = taskContext.dependencies.filter((d) => d.status === 'done');
+      const memoryRows = select<{ content: string }>('memory', {
+        role: 'DEV',
+        trigger: 'task_complete',
+      });
+      for (const dep of completedDeps) {
+        const relevantMemories = memoryRows.filter((m) => m.content.includes(`task#${dep.id}`));
+        if (relevantMemories.length > 0) {
+          parts.push(`## 前置任务 task#${dep.id} 完成摘要\n${relevantMemories[0].content}`);
+        }
+      }
+    }
   }
 
   // 3. Relevant knowledge

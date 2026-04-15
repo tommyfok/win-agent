@@ -4,11 +4,11 @@
 
 > 如果 docs 文件夹或对应文件不存在，直接创建。仅完成 Step A 或仅完成 Step B 视为归档未完成，两步都做才算完成。开发过程中已归档的无需重复。
 
-| 场景 | Step A：写入 DB | Step B：追加 MD |
-|------|----------------|----------------|
-| 遇到技术问题（库/框架坑、lint 规则、构建问题、排查 >5min 的问题） | `database_insert` → `knowledge`（`category='issue'`） | 追加 `.win-agent/docs/known-issues.md` |
-| 发现项目开发细节、经验 | `database_insert` → `knowledge`（`category='dev_note'`） | 追加 `.win-agent/docs/dev-notes.md` |
-| 发现效率瓶颈或重复操作 | `database_insert` → `knowledge`（`category='efficiency'`） | 追加 `.win-agent/docs/efficiency-and-skills.md` |
+| 场景                                                              | Step A：写入 DB                                            | Step B：追加 MD                                 |
+| ----------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------- |
+| 遇到技术问题（库/框架坑、lint 规则、构建问题、排查 >5min 的问题） | `database_insert` → `knowledge`（`category='issue'`）      | 追加 `.win-agent/docs/known-issues.md`          |
+| 发现项目开发细节、经验                                            | `database_insert` → `knowledge`（`category='dev_note'`）   | 追加 `.win-agent/docs/dev-notes.md`             |
+| 发现效率瓶颈或重复操作                                            | `database_insert` → `knowledge`（`category='efficiency'`） | 追加 `.win-agent/docs/efficiency-and-skills.md` |
 
 > `knowledge.category` 枚举值：`issue`、`dev_note`、`efficiency`、`requirement`、`convention`、`reference`，仅限以上值。
 > 规则类文件（`development.md`、`validation.md`）以 Markdown 为主，无需双写 DB。
@@ -20,7 +20,7 @@
 ```
 database_insert({ table: "messages", data: {
   from_role: "DEV", to_role: "PM", type: "feedback",
-  content: "feature#N 验收报告：\n\n## 实现说明\n[做了什么，git diff 摘要]\n\n## 代码检查\n[lint/build/test 命令及输出]\n\n## E2E 验收\n[端到端验证的操作步骤、命令输出/截图]\n\n## 验收标准逐项确认\n- [标准1]：✅ [证据]\n- [标准2]：✅ [证据]\n\n## 经验归档\n[本次归档的经验条目，无则写"无新增"]",
+  content: "feature#N 验收报告：\n\n## 实现说明\n[做了什么，git diff 摘要]\n\n## 代码检查\n[lint/build/test 命令及输出]\n\n## E2E 验收\n[端到端验证的操作步骤、命令输出/截图]\n\n## 验收标准逐项确认\n\n对照 spec 文件中的每一条验收标准，逐条列出：\n\n- [标准原文]：✅ [具体证据：命令输出/截图/代码引用，不接受纯文字声明]\n- [标准原文]：❌ [未实现的原因和计划]\n\n**如有任何标准标记为 ❌，不得提交验收报告，必须先完成或发阻塞消息给 PM。**\n\n## 经验归档\n[本次归档的经验条目，无则写"无新增"]",
   related_task_id: N, status: "unread"
 }})
 ```
@@ -47,10 +47,10 @@ database_insert({ table: "messages", data: {
 
 ## docs 速查
 
-| 文件 | 何时阅读 |
-|------|----------|
-| `.win-agent/docs/development.md` | Phase 3 Step 1（环境准备）、Step 3（编码实现） |
-| `.win-agent/docs/validation.md` | Phase 3 Step 2（基线验证）、Step 4（代码检查）、Step 5（E2E 验收） |
-| `.win-agent/docs/known-issues.md` | 遇到报错时，排查前先查阅 |
-| `.win-agent/docs/dev-notes.md` | 涉及对应子项目时，了解项目特有经验 |
-| `.win-agent/docs/efficiency-and-skills.md` | 收尾归档时参考，避免重复记录 |
+| 文件                                       | 何时阅读                           |
+| ------------------------------------------ | ---------------------------------- |
+| `.win-agent/docs/development.md`           | Phase 3 步骤 1（开发）            |
+| `.win-agent/docs/validation.md`            | Phase 3 步骤 2（验证）            |
+| `.win-agent/docs/known-issues.md`          | 遇到报错时，排查前先查阅          |
+| `.win-agent/docs/dev-notes.md`             | 涉及对应子项目时，了解项目特有经验 |
+| `.win-agent/docs/efficiency-and-skills.md` | 收尾归档时参考，避免重复记录       |
