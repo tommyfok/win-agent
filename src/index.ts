@@ -32,6 +32,7 @@ program
   .command('start')
   .description('Start the engine')
   .option('--log', 'Automatically tail the log file after starting')
+  .option('--password <password>', 'Set HTTP basic auth password for the opencode server')
   .action(startCommand);
 
 program.command('talk').description('Open PM conversation in browser').action(talkCommand);

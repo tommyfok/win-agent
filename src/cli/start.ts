@@ -1,7 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { checkEngineRunning, writePidFile, removePidFile, getDbPath } from '../config/index.js';
+import {
+  checkEngineRunning,
+  writePidFile,
+  removePidFile,
+  getDbPath,
+  loadConfig,
+  saveConfig,
+} from '../config/index.js';
 import { runEnvCheck } from './check.js';
 import { initWorkspace } from '../workspace/init.js';
 import { openDb, closeDb, getDb } from '../db/connection.js';
@@ -14,9 +22,14 @@ import { hasTodoMarkers } from './init.js';
 // Re-export for stop command compatibility
 export { getServerHandle, getSessionManager } from './engine.js';
 
-export async function startCommand(options?: { log?: boolean }) {
+interface StartOptions {
+  log?: boolean;
+  password?: string;
+}
+
+export async function startCommand(options?: StartOptions) {
   try {
-    await _startCommand(options?.log ?? false);
+    await _startCommand(options?.log ?? false, options?.password);
   } catch (err: unknown) {
     // inquirer throws ExitPromptError on Ctrl+C during prompts
     if (
@@ -31,7 +44,7 @@ export async function startCommand(options?: { log?: boolean }) {
   }
 }
 
-async function _startCommand(tailLog: boolean = false) {
+async function _startCommand(tailLog: boolean = false, password?: string) {
   // ── 1️⃣ 冲突检测 ──
   console.log('\n1️⃣  冲突检测');
   const { running, pid } = checkEngineRunning();
@@ -46,6 +59,17 @@ async function _startCommand(tailLog: boolean = false) {
   // ── 2️⃣ 环境检查 ──
   console.log('\n2️⃣  环境检查');
   const { workspace } = await runEnvCheck();
+
+  // ── 2.5️⃣ 设置 server 密码 ──
+  const config = loadConfig(workspace);
+  const serverPassword =
+    password ?? config.serverPassword ?? crypto.randomBytes(12).toString('base64url');
+  if (!config.serverPassword || config.serverPassword !== serverPassword) {
+    config.serverPassword = serverPassword;
+    saveConfig(config, workspace);
+  }
+  console.log(`   → Server 密码: ${serverPassword}`);
+  console.log('   💡 可通过 --password 参数指定密码，或修改 config.json');
 
   // Set embedding dimension before DB init (affects vector table schema)
   setEmbeddingDimension(getEmbeddingDimension());
