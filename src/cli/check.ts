@@ -29,6 +29,37 @@ async function fetchModelsOpenAI(baseUrl: string, apiKey: string): Promise<strin
 }
 
 /**
+ * Fetch available models from OpenCode Zen API.
+ * Endpoint: https://opencode.ai/zen/v1/models
+ */
+async function fetchZenModels(apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch('https://opencode.ai/zen/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { data?: Array<{ id: string }> };
+    return (body.data ?? []).map((m) => m.id).sort();
+  } catch {
+    return [];
+  }
+}
+
+/** Known OpenCode Go models (no /models endpoint available). */
+const OPENCODE_GO_MODELS = [
+  'glm-5.1',
+  'glm-5',
+  'kimi-k2.5',
+  'mimo-v2-pro',
+  'mimo-v2-omni',
+  'minimax-m2.7',
+  'minimax-m2.5',
+  'qwen3.6-plus',
+  'qwen3.5-plus',
+];
+
+/**
  * Detect if a model supports reasoning by making a quick test call.
  * Checks if the response contains `reasoning_content` in the message.
  */
@@ -69,7 +100,7 @@ function presetLabel(p: ProviderPreset): string {
  * Prompt the user to configure a new provider interactively.
  * Returns a partial config with provider and embedding filled in.
  */
-async function promptNewProvider(_existingProvider?: WinAgentConfig['provider']): Promise<{
+export async function promptNewProvider(_existingProvider?: WinAgentConfig['provider']): Promise<{
   provider: WinAgentConfig['provider'];
   embedding: WinAgentConfig['embedding'];
 }> {
@@ -78,21 +109,52 @@ async function promptNewProvider(_existingProvider?: WinAgentConfig['provider'])
     choices: [
       { value: 'anthropic', name: 'Anthropic' },
       { value: 'openai', name: 'OpenAI' },
+      { value: 'opencode-zen', name: 'OpenCode Zen（按量付费，多种精选模型）' },
+      { value: 'opencode-go', name: 'OpenCode Go（$10/月订阅，低成本模型）' },
       { value: 'custom-openai', name: '自定义（OpenAI 兼容接口）' },
       { value: 'custom-anthropic', name: '自定义（Anthropic 兼容接口）' },
     ],
   });
   const isCustom = type === 'custom-openai' || type === 'custom-anthropic';
+  const isOpenCode = type === 'opencode-zen' || type === 'opencode-go';
   let baseUrl: string | undefined;
   if (isCustom) {
     baseUrl = await input({ message: '请输入 API Base URL（如 https://api.example.com/v1）' });
   }
-  const apiKey = await input({ message: '请输入 API Key' });
+
+  let apiKey: string;
+  if (isOpenCode) {
+    console.log('   💡 请在 https://opencode.ai/auth 登录并获取 API Key');
+    apiKey = await input({ message: '请输入 OpenCode API Key' });
+  } else {
+    apiKey = await input({ message: '请输入 API Key' });
+  }
 
   let model: string;
   let reasoning = false;
 
-  if (type === 'custom-openai' && baseUrl) {
+  if (type === 'opencode-zen') {
+    console.log('   → 获取 OpenCode Zen 可用模型列表...');
+    const models = await fetchZenModels(apiKey);
+
+    if (models.length > 0) {
+      model = await select({
+        message: '请选择模型',
+        choices: models.map((m) => ({ value: m, name: m })),
+      });
+    } else {
+      console.log('   ⚠️  无法获取模型列表，请手动输入');
+      console.log('   💡 模型 ID 格式参见 https://opencode.ai/docs/zen/');
+      model = await input({ message: '请输入模型 ID（如 claude-sonnet-4-6）' });
+    }
+    console.log(`   ✓ 已选择: ${model}`);
+  } else if (type === 'opencode-go') {
+    model = await select({
+      message: '请选择 Go 模型',
+      choices: OPENCODE_GO_MODELS.map((m) => ({ value: m, name: m })),
+    });
+    console.log(`   ✓ 已选择: ${model}`);
+  } else if (type === 'custom-openai' && baseUrl) {
     console.log('   → 获取可用模型列表...');
     const models = await fetchModelsOpenAI(baseUrl, apiKey);
 

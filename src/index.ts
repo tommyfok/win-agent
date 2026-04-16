@@ -12,6 +12,7 @@ import { cleanCommand } from './cli/clean.js';
 import { logCommand } from './cli/log.js';
 import { updateCommand } from './cli/update.js';
 import { skillsCommand } from './cli/skills.js';
+import { modelCommand } from './cli/model.js';
 import { registerTaskCommands } from './cli/task.js';
 
 const program = new Command();
@@ -65,6 +66,11 @@ program
   .command('skills')
   .description('Recommend and install skills based on project tech stack')
   .action(skillsCommand);
+
+program
+  .command('model')
+  .description('Switch the LLM provider/model for the current workspace')
+  .action(modelCommand);
 
 registerTaskCommands(program);
 

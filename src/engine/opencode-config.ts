@@ -9,6 +9,7 @@ import type { ProviderConfig } from '../config/index.js';
  */
 export function buildOpencodeConfig(provider: ProviderConfig) {
   const isCustom = provider.type === 'custom-openai' || provider.type === 'custom-anthropic';
+  const isOpenCode = provider.type === 'opencode-zen' || provider.type === 'opencode-go';
 
   if (isCustom) {
     const npm =
@@ -30,6 +31,25 @@ export function buildOpencodeConfig(provider: ProviderConfig) {
             ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
           },
         },
+      },
+      permission: {
+        edit: 'allow' as const,
+        bash: 'allow' as const,
+      },
+    };
+  }
+
+  if (isOpenCode) {
+    // OpenCode Zen: opencode/<model-id>
+    // OpenCode Go:  opencode-go/<model-id>
+    // Both use OPENCODE_API_KEY for authentication
+    const providerPrefix = provider.type === 'opencode-zen' ? 'opencode' : 'opencode-go';
+    return {
+      model: `${providerPrefix}/${provider.model}`,
+      provider: {
+        ...(provider.apiKey
+          ? { [providerPrefix]: { env: [`OPENCODE_API_KEY=${provider.apiKey}`] } }
+          : {}),
       },
       permission: {
         edit: 'allow' as const,
@@ -75,7 +95,7 @@ export function ensureOpencodePackages(workspace: string, provider: ProviderConf
 
   const needed: string[] = [];
 
-  // 1. Provider SDK package (for custom providers)
+  // 1. Provider SDK package (for custom providers; opencode-zen/opencode-go are built-in)
   const isCustom = provider.type === 'custom-openai' || provider.type === 'custom-anthropic';
   if (isCustom) {
     const npm =
