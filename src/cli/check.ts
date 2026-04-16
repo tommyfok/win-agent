@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import {
   loadConfig,
   saveConfig,
@@ -46,18 +47,75 @@ async function fetchZenModels(apiKey: string): Promise<string[]> {
   }
 }
 
-/** Known OpenCode Go models (no /models endpoint available). */
-const OPENCODE_GO_MODELS = [
-  'glm-5.1',
-  'glm-5',
-  'kimi-k2.5',
-  'mimo-v2-pro',
-  'mimo-v2-omni',
-  'minimax-m2.7',
-  'minimax-m2.5',
-  'qwen3.6-plus',
-  'qwen3.5-plus',
-];
+/**
+ * Parse opencode-go models from `opencode models` CLI output.
+ */
+export function parseGoModelsFromCli(output: string): string[] {
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('opencode-go/'))
+    .map((line) => line.replace('opencode-go/', ''))
+    .sort();
+}
+
+/**
+ * Parse opencode-go models from /config/providers JSON response.
+ */
+export function parseGoModelsFromProviders(body: {
+  providers?: Array<{ id: string; models?: Record<string, { id: string }> }>;
+}): string[] {
+  const providers = body.providers ?? [];
+  const goProvider = providers.find((p) => p.id === 'opencode-go');
+  if (!goProvider?.models) return [];
+  return Object.keys(goProvider.models).sort();
+}
+
+/**
+ * Fetch available OpenCode Go models.
+ * 1. Try running opencode server's /config/providers endpoint.
+ * 2. Fallback to `opencode models | grep opencode-go`.
+ */
+export async function fetchGoModels(_apiKey: string): Promise<string[]> {
+  // Method 1: Try running opencode server
+  try {
+    const workspace = process.cwd();
+    const infoFile = `${workspace}/.win-agent/opencode-server.json`;
+    let serverUrl = 'http://localhost:4096';
+
+    if (fs.existsSync(infoFile)) {
+      const info = JSON.parse(fs.readFileSync(infoFile, 'utf-8'));
+      if (info.url) serverUrl = info.url;
+    }
+
+    const res = await fetch(`${serverUrl.replace(/\/+$/, '')}/config/providers`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as {
+        providers?: Array<{ id: string; models?: Record<string, { id: string }> }>;
+      };
+      const models = parseGoModelsFromProviders(body);
+      if (models.length > 0) return models;
+    }
+  } catch {
+    // Server not available, try CLI fallback
+  }
+
+  // Method 2: Fallback to `opencode models`
+  try {
+    const output = execSync('opencode models 2>/dev/null', {
+      encoding: 'utf-8',
+      timeout: 15000,
+    });
+    const models = parseGoModelsFromCli(output);
+    if (models.length > 0) return models;
+  } catch {
+    // CLI not available
+  }
+
+  return [];
+}
 
 /**
  * Detect if a model supports reasoning by making a quick test call.
@@ -149,10 +207,19 @@ export async function promptNewProvider(_existingProvider?: WinAgentConfig['prov
     }
     console.log(`   ✓ 已选择: ${model}`);
   } else if (type === 'opencode-go') {
-    model = await select({
-      message: '请选择 Go 模型',
-      choices: OPENCODE_GO_MODELS.map((m) => ({ value: m, name: m })),
-    });
+    console.log('   → 获取 OpenCode Go 可用模型列表...');
+    const models = await fetchGoModels(apiKey);
+
+    if (models.length > 0) {
+      model = await select({
+        message: '请选择 Go 模型',
+        choices: models.map((m) => ({ value: m, name: m })),
+      });
+    } else {
+      console.log('   ⚠️  无法获取模型列表，请手动输入');
+      console.log('   💡 模型 ID 格式参见 https://opencode.ai/docs/go/');
+      model = await input({ message: '请输入模型 ID（如 kimi-k2.5）' });
+    }
     console.log(`   ✓ 已选择: ${model}`);
   } else if (type === 'custom-openai' && baseUrl) {
     console.log('   → 获取可用模型列表...');
