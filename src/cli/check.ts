@@ -19,7 +19,7 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
 
   // 1. Provider/Model
   console.log('\n1. LLM Provider 配置');
-  if (config.provider?.type && config.provider?.apiKey && config.provider?.model) {
+  if (config.provider?.type && config.provider?.model) {
     console.log(
       `   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? ' (推理模型)' : ''}`
     );
