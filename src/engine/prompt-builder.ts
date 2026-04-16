@@ -217,10 +217,28 @@ export function buildDispatchPrompt(
     }
   }
 
-  // 5. Action hints
-  parts.push(
-    '## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。'
-  );
+  // 5. Action hints (role-specific)
+  if (role === Role.DEV) {
+    parts.push(
+      '## ⚠️ 执行要求（严格遵守）\n' +
+        '你必须严格按照 Phase 1 → 2 → 3 → 4 顺序执行，禁止跳过任何 Phase。\n\n' +
+        '**Phase 1 — 环境感知（必须先完成再做任何事）：**\n' +
+        '1. 执行 `git log --oneline -10` + `git status` 了解代码现状\n' +
+        '2. 查看近期工作回忆（系统注入的或查询 memory 表）\n' +
+        '3. 阅读上方注入的任务上下文（任务描述、验收标准）\n\n' +
+        '**Phase 2 — 消息分派：** 根据消息 type 选择对应分支\n\n' +
+        '**Phase 3 — 开发和自测：** 阅读 spec → 开发（按 development.md）→ 验证（按 validation.md），全部通过才能进入 Phase 4\n\n' +
+        '**Phase 4 — 收尾：** git commit → 更新状态为 done → 写交接记忆 → 经验归档 → 发验收报告给 PM\n\n' +
+        '**禁止行为：**\n' +
+        '- 禁止跳过 Phase 1 直接开始编码\n' +
+        '- 禁止跳过 Phase 3 的验证步骤（development.md + validation.md）直接提交验收\n' +
+        '- 禁止在 validation.md 验证未通过时进入 Phase 4'
+    );
+  } else {
+    parts.push(
+      '## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。'
+    );
+  }
 
   return parts.join('\n\n');
 }
