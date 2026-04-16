@@ -1,296 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
-import {
-  loadConfig,
-  saveConfig,
-  loadPresets,
-  upsertPreset,
-  type WinAgentConfig,
-  type ProviderPreset,
-} from '../config/index.js';
+import { loadConfig, saveConfig, type WinAgentConfig } from '../config/index.js';
 import { input, select } from '@inquirer/prompts';
-
-/**
- * Fetch model list from an OpenAI-compatible /models endpoint.
- */
-async function fetchModelsOpenAI(baseUrl: string, apiKey: string): Promise<string[]> {
-  try {
-    const url = baseUrl.replace(/\/+$/, '') + '/models';
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const body = (await res.json()) as { data?: Array<{ id: string }> };
-    return (body.data ?? []).map((m) => m.id).sort();
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Fetch available models from OpenCode Zen API.
- * Endpoint: https://opencode.ai/zen/v1/models
- */
-async function fetchZenModels(apiKey: string): Promise<string[]> {
-  try {
-    const res = await fetch('https://opencode.ai/zen/v1/models', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const body = (await res.json()) as { data?: Array<{ id: string }> };
-    return (body.data ?? []).map((m) => m.id).sort();
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Parse opencode-go models from `opencode models` CLI output.
- */
-export function parseGoModelsFromCli(output: string): string[] {
-  return output
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('opencode-go/'))
-    .map((line) => line.replace('opencode-go/', ''))
-    .sort();
-}
-
-/**
- * Parse opencode-go models from /config/providers JSON response.
- */
-export function parseGoModelsFromProviders(body: {
-  providers?: Array<{ id: string; models?: Record<string, { id: string }> }>;
-}): string[] {
-  const providers = body.providers ?? [];
-  const goProvider = providers.find((p) => p.id === 'opencode-go');
-  if (!goProvider?.models) return [];
-  return Object.keys(goProvider.models).sort();
-}
-
-/**
- * Fetch available OpenCode Go models.
- * 1. Try running opencode server's /config/providers endpoint.
- * 2. Fallback to `opencode models | grep opencode-go`.
- */
-export async function fetchGoModels(_apiKey: string): Promise<string[]> {
-  // Method 1: Try running opencode server
-  try {
-    const workspace = process.cwd();
-    const infoFile = `${workspace}/.win-agent/opencode-server.json`;
-    let serverUrl = 'http://localhost:4096';
-
-    if (fs.existsSync(infoFile)) {
-      const info = JSON.parse(fs.readFileSync(infoFile, 'utf-8'));
-      if (info.url) serverUrl = info.url;
-    }
-
-    const res = await fetch(`${serverUrl.replace(/\/+$/, '')}/config/providers`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      const body = (await res.json()) as {
-        providers?: Array<{ id: string; models?: Record<string, { id: string }> }>;
-      };
-      const models = parseGoModelsFromProviders(body);
-      if (models.length > 0) return models;
-    }
-  } catch {
-    // Server not available, try CLI fallback
-  }
-
-  // Method 2: Fallback to `opencode models`
-  try {
-    const output = execSync('opencode models 2>/dev/null', {
-      encoding: 'utf-8',
-      timeout: 15000,
-    });
-    const models = parseGoModelsFromCli(output);
-    if (models.length > 0) return models;
-  } catch {
-    // CLI not available
-  }
-
-  return [];
-}
-
-/**
- * Detect if a model supports reasoning by making a quick test call.
- * Checks if the response contains `reasoning_content` in the message.
- */
-async function detectReasoningOpenAI(
-  baseUrl: string,
-  apiKey: string,
-  model: string
-): Promise<boolean> {
-  const url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: 'say OK' }],
-      max_tokens: 100,
-    }),
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!res.ok) return false;
-  const body = (await res.json()) as {
-    choices?: Array<{ message?: { reasoning_content?: string } }>;
-  };
-  return body.choices?.[0]?.message?.reasoning_content !== undefined;
-}
-
-/**
- * Build a display label for a preset.
- */
-function presetLabel(p: ProviderPreset): string {
-  return `${p.name} (${p.provider.type} / ${p.provider.model})`;
-}
-
-/**
- * Prompt the user to configure a new provider interactively.
- * Returns a partial config with provider and embedding filled in.
- */
-export async function promptNewProvider(_existingProvider?: WinAgentConfig['provider']): Promise<{
-  provider: WinAgentConfig['provider'];
-  embedding: WinAgentConfig['embedding'];
-}> {
-  const type = await select({
-    message: '请选择 LLM Provider',
-    choices: [
-      { value: 'anthropic', name: 'Anthropic' },
-      { value: 'openai', name: 'OpenAI' },
-      { value: 'opencode-zen', name: 'OpenCode Zen（按量付费，多种精选模型）' },
-      { value: 'opencode-go', name: 'OpenCode Go（$10/月订阅，低成本模型）' },
-      { value: 'custom-openai', name: '自定义（OpenAI 兼容接口）' },
-      { value: 'custom-anthropic', name: '自定义（Anthropic 兼容接口）' },
-    ],
-  });
-  const isCustom = type === 'custom-openai' || type === 'custom-anthropic';
-  const isOpenCode = type === 'opencode-zen' || type === 'opencode-go';
-  let baseUrl: string | undefined;
-  if (isCustom) {
-    baseUrl = await input({ message: '请输入 API Base URL（如 https://api.example.com/v1）' });
-  }
-
-  let apiKey: string;
-  if (isOpenCode) {
-    console.log('   💡 请在 https://opencode.ai/auth 登录并获取 API Key');
-    apiKey = await input({ message: '请输入 OpenCode API Key' });
-  } else {
-    apiKey = await input({ message: '请输入 API Key' });
-  }
-
-  let model: string;
-  let reasoning = false;
-
-  if (type === 'opencode-zen') {
-    console.log('   → 获取 OpenCode Zen 可用模型列表...');
-    const models = await fetchZenModels(apiKey);
-
-    if (models.length > 0) {
-      model = await select({
-        message: '请选择模型',
-        choices: models.map((m) => ({ value: m, name: m })),
-      });
-    } else {
-      console.log('   ⚠️  无法获取模型列表，请手动输入');
-      console.log('   💡 模型 ID 格式参见 https://opencode.ai/docs/zen/');
-      model = await input({ message: '请输入模型 ID（如 claude-sonnet-4-6）' });
-    }
-    console.log(`   ✓ 已选择: ${model}`);
-  } else if (type === 'opencode-go') {
-    console.log('   → 获取 OpenCode Go 可用模型列表...');
-    const models = await fetchGoModels(apiKey);
-
-    if (models.length > 0) {
-      model = await select({
-        message: '请选择 Go 模型',
-        choices: models.map((m) => ({ value: m, name: m })),
-      });
-    } else {
-      console.log('   ⚠️  无法获取模型列表，请手动输入');
-      console.log('   💡 模型 ID 格式参见 https://opencode.ai/docs/go/');
-      model = await input({ message: '请输入模型 ID（如 kimi-k2.5）' });
-    }
-    console.log(`   ✓ 已选择: ${model}`);
-  } else if (type === 'custom-openai' && baseUrl) {
-    console.log('   → 获取可用模型列表...');
-    const models = await fetchModelsOpenAI(baseUrl, apiKey);
-
-    if (models.length > 0) {
-      model = await select({
-        message: '请选择模型',
-        choices: models.map((m) => ({ value: m, name: m })),
-      });
-    } else {
-      console.log('   ⚠️  无法获取模型列表，请手动输入');
-      model = await input({ message: '请输入模型名称' });
-    }
-
-    console.log('   → 检测模型类型...');
-    reasoning = await detectReasoningOpenAI(baseUrl, apiKey, model);
-  } else if (type === 'custom-anthropic') {
-    model = await input({ message: '请输入模型名称' });
-    if (reasoning) {
-      console.log(`   ✓ 检测到推理模型 (reasoning)`);
-    } else {
-      console.log(`   ✓ 普通模型`);
-    }
-  } else {
-    model = await input({
-      message: '请输入模型名称',
-      default:
-        type === 'anthropic'
-          ? 'claude-sonnet-4-20250514'
-          : type === 'openai'
-            ? 'gpt-4o'
-            : undefined,
-    });
-  }
-
-  const provider = {
-    type,
-    apiKey,
-    model,
-    ...(baseUrl ? { baseUrl } : {}),
-    ...(reasoning ? { reasoning } : {}),
-  };
-
-  // Embedding
-  console.log('\n2. Embedding 模型配置');
-  const embType = await select({
-    message: '请选择 Embedding Provider',
-    choices: [
-      { value: 'local', name: '本地模型 (bge-small-zh-v1.5, 无需 API)' },
-      { value: 'openai', name: 'OpenAI (text-embedding-3-small)' },
-    ],
-  });
-
-  let embedding: WinAgentConfig['embedding'];
-  if (embType === 'local') {
-    embedding = { type: 'local', apiKey: '', model: 'Xenova/bge-small-zh-v1.5' };
-  } else {
-    const embApiKey = await input({
-      message: '请输入 Embedding API Key（留空则复用 Provider 的 Key）',
-      default: '',
-    });
-    const embModel = await input({
-      message: '请选择 Embedding 模型',
-      default: 'text-embedding-3-small',
-    });
-    embedding = { type: embType, apiKey: embApiKey || apiKey, model: embModel };
-  }
-
-  return { provider, embedding };
-}
+import { fetchOpencodeModels } from './model.js';
 
 /**
  * Run interactive environment check. Prompts for missing config items.
@@ -312,61 +24,36 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
       `   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? ' (推理模型)' : ''}`
     );
   } else {
-    // Check global presets
-    const presets = loadPresets();
+    console.log('   → 获取可用 Provider 列表...');
+    const providerMap = fetchOpencodeModels();
 
-    if (presets.length > 0) {
-      const choice = await select({
-        message: '检测到已保存的 Provider 配置，请选择',
-        choices: [
-          ...presets.map((p) => ({ value: p.name, name: presetLabel(p) })),
-          { value: '__new__', name: '➕ 新建配置' },
-        ],
-      });
-
-      if (choice !== '__new__') {
-        const preset = presets.find((p) => p.name === choice)!;
-        config.provider = { ...preset.provider };
-        config.embedding = { ...preset.embedding };
-        changed = true;
-        console.log(`   ✓ 使用预设: ${presetLabel(preset)}`);
-      } else {
-        const result = await promptNewProvider(config.provider);
-        config.provider = result.provider;
-        config.embedding = result.embedding;
-        changed = true;
-
-        // Save to global presets
-        const presetName = await input({
-          message: '为此配置起个名字（方便下次复用）',
-          default: `${config.provider!.type}-${config.provider!.model}`,
-        });
-        upsertPreset({
-          name: presetName,
-          provider: config.provider!,
-          embedding: config.embedding!,
-        });
-        console.log(`   ✓ 已保存到全局预设: ${presetName}`);
-      }
-    } else {
-      // No presets — go through full setup
-      const result = await promptNewProvider(config.provider);
-      config.provider = result.provider;
-      config.embedding = result.embedding;
-      changed = true;
-
-      // Save to global presets
-      const presetName = await input({
-        message: '为此配置起个名字（方便下次复用）',
-        default: `${config.provider!.type}-${config.provider!.model}`,
-      });
-      upsertPreset({
-        name: presetName,
-        provider: config.provider!,
-        embedding: config.embedding!,
-      });
-      console.log(`   ✓ 已保存到全局预设: ${presetName}`);
+    if (!providerMap || providerMap.size === 0) {
+      console.log('   ❌ 未检测到可用的 opencode Provider');
+      console.log('   💡 请先运行 `opencode auth login` 配置认证信息');
+      process.exit(1);
     }
+
+    const providers = Array.from(providerMap.keys()).sort();
+    console.log(`   ✓ 找到 ${providers.length} 个可用 Provider`);
+
+    const selectedProvider = await select<string>({
+      message: '请选择 Provider',
+      choices: providers.map((p) => ({ value: p, name: p })),
+    });
+
+    const models = providerMap.get(selectedProvider)!;
+    const selectedModel = await select<string>({
+      message: `请选择 ${selectedProvider} 的模型`,
+      choices: models.map((m) => ({ value: m, name: m })),
+    });
+
+    config.provider = {
+      type: selectedProvider,
+      apiKey: '',
+      model: selectedModel,
+    };
+    changed = true;
+    console.log(`   ✓ 已选择: ${selectedProvider} / ${selectedModel}`);
   }
 
   // 2. Embedding (only prompt if not already set — may have been set via preset)
