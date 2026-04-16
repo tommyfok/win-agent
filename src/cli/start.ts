@@ -68,7 +68,7 @@ async function _startCommand(tailLog: boolean = false, password?: string) {
     config.serverPassword = serverPassword;
     saveConfig(config, workspace);
   }
-  console.log(`   → Server 密码: ${serverPassword}`);
+  console.log(`   → Server 认证: opencode / ${serverPassword}`);
   console.log('   💡 可通过 --password 参数指定密码，或修改 config.json');
 
   // Set embedding dimension before DB init (affects vector table schema)

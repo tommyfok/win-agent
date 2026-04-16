@@ -1,19 +1,56 @@
-import {
-  loadConfig,
-  saveConfig,
-  loadPresets,
-  upsertPreset,
-  checkEngineRunning,
-  type WinAgentConfig,
-} from '../config/index.js';
+import { execSync } from 'node:child_process';
+import { loadConfig, saveConfig, checkEngineRunning } from '../config/index.js';
 import { select, confirm, input } from '@inquirer/prompts';
-import { promptNewProvider } from './check.js';
+
+/**
+ * Parse `opencode models` output into provider → models map.
+ * Each line is in format: `provider/model-name`
+ */
+export function parseOpencodeModels(output: string): Map<string, string[]> {
+  const providerMap = new Map<string, string[]>();
+
+  output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.includes('/'))
+    .forEach((line) => {
+      const slashIndex = line.indexOf('/');
+      const provider = line.substring(0, slashIndex);
+      const model = line.substring(slashIndex + 1);
+
+      if (!providerMap.has(provider)) {
+        providerMap.set(provider, []);
+      }
+      providerMap.get(provider)!.push(model);
+    });
+
+  for (const models of providerMap.values()) {
+    models.sort();
+  }
+
+  return providerMap;
+}
+
+/**
+ * Fetch available models from `opencode models` CLI command.
+ * Returns a Map of provider → sorted model list, or null if command fails.
+ */
+export function fetchOpencodeModels(): Map<string, string[]> | null {
+  try {
+    const output = execSync('opencode models 2>/dev/null', {
+      encoding: 'utf-8',
+      timeout: 15000,
+    });
+    const models = parseOpencodeModels(output);
+    if (models.size > 0) return models;
+  } catch {
+    // CLI not available or failed
+  }
+  return null;
+}
 
 /**
  * `win-agent model` command — switch the LLM provider/model for the current workspace.
- *
- * If the engine is running, warns the user and requires confirmation (engine must
- * be restarted for changes to take effect).
  */
 export async function modelCommand() {
   try {
@@ -34,7 +71,6 @@ async function _modelCommand() {
   const workspace = process.cwd();
   const config = loadConfig(workspace);
 
-  // Show current configuration
   console.log('\n📦 当前模型配置');
   if (config.provider?.type && config.provider?.model) {
     console.log(
@@ -49,7 +85,6 @@ async function _modelCommand() {
     console.log('   Embedding: 未配置');
   }
 
-  // Warn if engine is running
   const { running, pid } = checkEngineRunning(workspace);
   if (running) {
     console.log(`\n⚠️  引擎正在运行中 (PID: ${pid})`);
@@ -61,7 +96,6 @@ async function _modelCommand() {
     }
   }
 
-  // Ask what to change
   const action = await select({
     message: '请选择操作',
     choices: [
@@ -76,70 +110,37 @@ async function _modelCommand() {
 
   if (changeProvider) {
     console.log('\n🔧 配置 LLM Provider');
+    console.log('   → 获取可用 Provider 列表...');
 
-    // Offer presets or new config
-    const presets = loadPresets();
-    let newProvider: WinAgentConfig['provider'];
-    let newEmbedding: WinAgentConfig['embedding'] | undefined;
+    const providerMap = fetchOpencodeModels();
 
-    if (presets.length > 0) {
-      const choice = await select({
-        message: '请选择 Provider 配置',
-        choices: [
-          ...presets.map((p) => ({
-            value: p.name,
-            name: `${p.name} (${p.provider.type} / ${p.provider.model})`,
-          })),
-          { value: '__new__', name: '➕ 新建配置' },
-        ],
-      });
-
-      if (choice !== '__new__') {
-        const preset = presets.find((p) => p.name === choice)!;
-        newProvider = { ...preset.provider };
-        if (changeEmbedding || action === 'switch') {
-          // When switching from preset, also apply its embedding
-          newEmbedding = { ...preset.embedding };
-        }
-      } else {
-        const result = await promptNewProvider(config.provider);
-        newProvider = result.provider;
-        newEmbedding = result.embedding;
-
-        // Save to global presets
-        const presetName = await input({
-          message: '为此配置起个名字（方便下次复用）',
-          default: `${newProvider!.type}-${newProvider!.model}`,
-        });
-        upsertPreset({
-          name: presetName,
-          provider: newProvider!,
-          embedding: newEmbedding!,
-        });
-        console.log(`   ✓ 已保存到全局预设: ${presetName}`);
-      }
-    } else {
-      const result = await promptNewProvider(config.provider);
-      newProvider = result.provider;
-      newEmbedding = result.embedding;
-
-      // Save to global presets
-      const presetName = await input({
-        message: '为此配置起个名字（方便下次复用）',
-        default: `${newProvider!.type}-${newProvider!.model}`,
-      });
-      upsertPreset({
-        name: presetName,
-        provider: newProvider!,
-        embedding: newEmbedding!,
-      });
-      console.log(`   ✓ 已保存到全局预设: ${presetName}`);
+    if (!providerMap || providerMap.size === 0) {
+      console.log('   ❌ 未检测到可用的 opencode Provider');
+      console.log('   💡 请先运行 `opencode auth login` 配置认证信息');
+      return;
     }
 
-    config.provider = newProvider;
-    if (newEmbedding) {
-      config.embedding = newEmbedding;
-    }
+    const providers = Array.from(providerMap.keys()).sort();
+    console.log(`   ✓ 找到 ${providers.length} 个可用 Provider`);
+
+    const selectedProvider = await select({
+      message: '请选择 Provider',
+      choices: providers.map((p) => ({ value: p, name: p })),
+    });
+
+    const models = providerMap.get(selectedProvider)!;
+    const selectedModel = await select({
+      message: `请选择 ${selectedProvider} 的模型`,
+      choices: models.map((m) => ({ value: m, name: m })),
+    });
+
+    config.provider = {
+      type: selectedProvider,
+      apiKey: '',
+      model: selectedModel,
+    };
+
+    console.log(`   ✓ 已选择: ${selectedProvider} / ${selectedModel}`);
   }
 
   if (changeEmbedding && !changeProvider) {
@@ -155,23 +156,35 @@ async function _modelCommand() {
     if (embType === 'local') {
       config.embedding = { type: 'local', apiKey: '', model: 'Xenova/bge-small-zh-v1.5' };
     } else {
-      const apiKey = await input({
-        message: '请输入 Embedding API Key（留空则复用 Provider 的 Key）',
-        default: '',
+      const apiKey = await select({
+        message: 'API Key 来源',
+        choices: [
+          { value: 'reuse', name: `复用当前 Provider 的 Key` },
+          { value: 'manual', name: '手动输入' },
+        ],
       });
-      const model = await input({
+
+      const finalApiKey =
+        apiKey === 'manual'
+          ? await input({ message: '请输入 Embedding API Key' })
+          : config.provider?.apiKey || '';
+
+      const model = await select({
         message: '请选择 Embedding 模型',
-        default: 'text-embedding-3-small',
+        choices: [
+          { value: 'text-embedding-3-small', name: 'text-embedding-3-small' },
+          { value: 'text-embedding-3-large', name: 'text-embedding-3-large' },
+        ],
       });
+
       config.embedding = {
         type: embType,
-        apiKey: apiKey || config.provider?.apiKey || '',
+        apiKey: finalApiKey,
         model,
       };
     }
   }
 
-  // Save
   saveConfig(config, workspace);
 
   console.log('\n✅ 模型配置已更新');
