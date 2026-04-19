@@ -171,8 +171,8 @@ async function stopEngine(workspace: string, pid: number): Promise<void> {
     return;
   }
 
-  // Wait up to 15s for graceful exit
-  const deadline = Date.now() + 15_000;
+  // Wait up to 90s for graceful exit
+  const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
     if (!isProcessRunning(pid)) {
@@ -184,7 +184,7 @@ async function stopEngine(workspace: string, pid: number): Promise<void> {
   }
 
   // Force kill
-  console.log('   ⚠️  引擎未及时退出，强制终止...');
+  console.log('   ⚠️  引擎未在 90s 内退出，强制终止...');
   try {
     process.kill(pid, 'SIGKILL');
   } catch {

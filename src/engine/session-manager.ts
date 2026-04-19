@@ -184,24 +184,27 @@ export class SessionManager {
   /**
    * Trigger all roles (PM + DEV task sessions) to write memory (used on engine stop).
    */
-  async writeAllMemories(trigger: string): Promise<void> {
+  async writeAllMemories(trigger: string, timeoutMs?: number): Promise<void> {
     const sessions: Array<[Role, string]> = [
       ...this.activeSessions.entries(),
       ...Array.from(this.taskSessions.entries()).map(([key, id]) => {
-        const role = key.split('-')[1] as Role; // e.g. "42-DEV" → "DEV"
+        const role = key.split('-')[1] as Role;
         return [role, id] as [Role, string];
       }),
     ];
 
-    for (const [role, sid] of sessions) {
-      try {
-        await writeMemory(this.client, role, sid, trigger);
-        console.log(`   ✓ ${role} 记忆已保存`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.log(`   ⚠️  ${role} 记忆写入失败: ${msg}`);
-      }
-    }
+    const results = await Promise.allSettled(
+      sessions.map(([role, sid]) =>
+        writeMemory(this.client, role, sid, trigger, timeoutMs).then(
+          () => console.log(`   ✓ ${role} 记忆已保存`),
+          (err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.log(`   ⚠️  ${role} 记忆写入失败: ${msg}`);
+          }
+        )
+      )
+    );
+    void results;
   }
 
   /**

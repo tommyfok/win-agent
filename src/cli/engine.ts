@@ -163,7 +163,7 @@ export async function engineCommand(workspace: string) {
     try {
       if (sessionManager) {
         console.log('→ 保存角色记忆...');
-        await sessionManager.writeAllMemories('engine_stop');
+        await sessionManager.writeAllMemories('engine_stop', 90_000);
       }
     } catch (err) {
       console.error(`⚠️  记忆保存失败: ${err}`);

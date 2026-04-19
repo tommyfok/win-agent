@@ -33,7 +33,8 @@ export async function writeMemory(
   client: OpencodeClient,
   role: Role,
   sessionId: string,
-  trigger: string
+  trigger: string,
+  timeoutMs: number = 3 * 60 * 1000
 ): Promise<void> {
   const result = await withTimeout(
     client.session.prompt({
@@ -42,7 +43,7 @@ export async function writeMemory(
         parts: [{ type: 'text', text: WRITE_MEMORY_PROMPT }],
       },
     }),
-    3 * 60 * 1000,
+    timeoutMs,
     `${role} memory write`
   );
 
