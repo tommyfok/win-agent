@@ -335,7 +335,7 @@ PM 角色
   "engine": {
     "tickIntervalMs": 1000,
     "pmCooldownMs": 3000,
-    "dispatchTimeoutMs": 300000,
+    "dispatchTimeoutMs": 3600000,
     "sessionInitTimeoutMs": 60000,
     "minTasksForRejectionStats": 3,
     "rejectionRateThreshold": 0.3
@@ -349,7 +349,7 @@ PM 角色
 |------|--------|------|
 | `tickIntervalMs` | 1000 | 调度循环间隔（ms） |
 | `pmCooldownMs` | 3000 | PM dispatch 后的冷却时间（ms） |
-| `dispatchTimeoutMs` | 300000 | 单次 dispatch 超时时间（ms） |
+| `dispatchTimeoutMs` | 3600000 | 单次 dispatch 超时时间（ms） |
 | `sessionInitTimeoutMs` | 60000 | 会话初始化等待超时（ms） |
 | `minTasksForRejectionStats` | 3 | 触发打回率告警的最少任务数 |
 | `rejectionRateThreshold` | 0.3 | 打回率告警阈值（30%） |

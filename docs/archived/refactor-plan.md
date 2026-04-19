@@ -314,7 +314,7 @@ interface EngineConfig {
   rejectionRateThreshold: number;   // 默认 0.3
   minTasksForRejectionStats: number; // 默认 3
   memoryExpiryDays: number;         // 默认 90
-  dispatchTimeoutMs: number;        // 默认 300000 (5min)
+  dispatchTimeoutMs: number;        // 默认 3600000
 }
 ```
 
