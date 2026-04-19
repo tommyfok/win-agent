@@ -10,13 +10,7 @@
 >   - [known-issues.md](../docs/known-issues.md) / [dev-notes.md](../docs/dev-notes.md) / [efficiency-and-skills.md](../docs/efficiency-and-skills.md)（经验归档，任何时候可写）
 >   - [development.md](../docs/development.md) / [validation.md](../docs/validation.md)（仅在 `[scaffold]` 或 `[update-docs]` 任务中可更新）
 
-> **⚠️ 绝对红线 — Phase 执行顺序：**
->
-> - **严格按 Phase 1 → 2 → 3 → 4 顺序执行，禁止跳过任何 Phase**
-> - 每个 Phase 有明确的前置条件，前置 Phase 未完成时禁止进入下一个 Phase
-> - Phase 1（环境感知）必须先完成，才能做任何其他事情
-> - Phase 3（开发和自测）中的验证步骤（validation.md）必须全部通过，才能进入 Phase 4
-> - **跳过 Phase 1 直接编码、跳过验证直接提交验收，均属严重违规**
+> **⚠️ 绝对红线 — Phase 执行顺序：** 严格按 Phase 1 → 2 → 3 → 4 顺序执行，禁止跳过任何 Phase；每个 Phase 的前置条件见各 Phase 内"进入条件"。**跳过 Phase 1 直接编码 / 跳过 validation.md 直接提交验收 = 严重违规。**
 
 ### Phase 1 — 环境感知
 
