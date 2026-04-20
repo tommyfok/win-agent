@@ -35,6 +35,7 @@ function getPmCooldownMs(): number {
   }
 }
 export let pmLastDispatchEnd = 0;
+export let devLastDispatchEnd = 0;
 export let lastDispatchedRole: Role | null = null;
 
 export function initDispatchState(client: OpencodeClient): void {
@@ -52,6 +53,8 @@ function loadDispatchState(): void {
     }
     if (m['engine.pmLastDispatchEnd'] !== undefined)
       pmLastDispatchEnd = parseInt(m['engine.pmLastDispatchEnd'], 10) || 0;
+    if (m['engine.devLastDispatchEnd'] !== undefined)
+      devLastDispatchEnd = parseInt(m['engine.devLastDispatchEnd'], 10) || 0;
   } catch {
     /* non-fatal */
   }
@@ -61,6 +64,7 @@ function saveDispatchState(): void {
   try {
     upsertProjectConfig('engine.lastDispatchedRole', lastDispatchedRole ?? '');
     upsertProjectConfig('engine.pmLastDispatchEnd', String(pmLastDispatchEnd));
+    upsertProjectConfig('engine.devLastDispatchEnd', String(devLastDispatchEnd));
   } catch {
     /* non-fatal */
   }
@@ -80,6 +84,14 @@ export function setPmLastDispatchEnd(ts: number): void {
  */
 export function getPmLastDispatchEnd(): number {
   return pmLastDispatchEnd;
+}
+
+/**
+ * Get DEV's last dispatch end timestamp.
+ * Used by PmIdleMonitor to check DEV activity before sending PM reminder.
+ */
+export function getDevLastDispatchEnd(): number {
+  return devLastDispatchEnd;
 }
 
 /**
@@ -216,6 +228,8 @@ export async function tryDispatchNormalRole(
       lastDispatchedRole = role;
       if (role === Role.PM) {
         pmLastDispatchEnd = Date.now();
+      } else if (role === Role.DEV) {
+        devLastDispatchEnd = Date.now();
       }
       saveDispatchState();
     }

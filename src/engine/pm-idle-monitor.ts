@@ -2,6 +2,7 @@ import { select, insert } from '../db/repository.js';
 import { MessageStatus, TaskStatus } from '../db/types.js';
 import { Role, type RoleManager } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
+import { getDevLastDispatchEnd } from './scheduler-dispatch.js';
 import { logger } from '../utils/logger.js';
 
 const DEFAULT_IDLE_THRESHOLD_MS = 10 * 60 * 1000;
@@ -63,10 +64,17 @@ export class PmIdleMonitor {
     // 4. Check reminder interval (continuous reminder mode)
     if (now - this.lastReminderAt < this.getReminderIntervalMs()) return;
 
-    // 5. Detect issues needing PM attention
+    // 5. Pre-check: DEV not busy AND DEV idle for threshold duration
+    // Only send reminder if DEV is idle or has been inactive for threshold time
+    const devBusy = roleManager.isBusy(Role.DEV);
+    const devLastActive = getDevLastDispatchEnd();
+    const devIdleMs = now - devLastActive;
+    if (devBusy && devIdleMs < this.getPmIdleThresholdMs()) return;
+
+    // 6. Detect issues needing PM attention
     const issues = detectPmAttentionNeeded(roleManager);
 
-    // 6. Has issues -> send reminder
+    // 7. Has issues -> send reminder
     if (issues.length > 0) {
       this.sendIdleReminder(issues, idleMs);
       this.lastReminderAt = now;

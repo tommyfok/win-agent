@@ -1,6 +1,6 @@
 /**
  * Tests for scheduler-dispatch.ts state persistence (P1-3).
- * Verifies that lastDispatchedRole and pmLastDispatchEnd are correctly
+ * Verifies that lastDispatchedRole, pmLastDispatchEnd, and devLastDispatchEnd are correctly
  * saved to project_config and restored on initDispatchState().
  *
  * Uses vi.resetModules() to get a fresh module with clean in-memory state
@@ -20,6 +20,7 @@ describe('initDispatchState — state restoration from project_config', () => {
     const { upsertProjectConfig } = await import('../../db/repository.js');
     upsertProjectConfig('engine.lastDispatchedRole', Role.DEV);
     upsertProjectConfig('engine.pmLastDispatchEnd', '0');
+    upsertProjectConfig('engine.devLastDispatchEnd', '0');
 
     const schedDispatch = await import('../scheduler-dispatch.js');
     schedDispatch.initDispatchState({} as never);
@@ -31,11 +32,24 @@ describe('initDispatchState — state restoration from project_config', () => {
     const { upsertProjectConfig } = await import('../../db/repository.js');
     upsertProjectConfig('engine.lastDispatchedRole', '');
     upsertProjectConfig('engine.pmLastDispatchEnd', '1700000000000');
+    upsertProjectConfig('engine.devLastDispatchEnd', '0');
 
     const schedDispatch = await import('../scheduler-dispatch.js');
     schedDispatch.initDispatchState({} as never);
 
     expect(schedDispatch.pmLastDispatchEnd).toBe(1700000000000);
+  });
+
+  it('restores devLastDispatchEnd when key exists in project_config', async () => {
+    const { upsertProjectConfig } = await import('../../db/repository.js');
+    upsertProjectConfig('engine.lastDispatchedRole', '');
+    upsertProjectConfig('engine.pmLastDispatchEnd', '0');
+    upsertProjectConfig('engine.devLastDispatchEnd', '1800000000000');
+
+    const schedDispatch = await import('../scheduler-dispatch.js');
+    schedDispatch.initDispatchState({} as never);
+
+    expect(schedDispatch.devLastDispatchEnd).toBe(1800000000000);
   });
 
   it('treats empty-string lastDispatchedRole as null', async () => {
@@ -54,6 +68,7 @@ describe('initDispatchState — state restoration from project_config', () => {
 
     expect(schedDispatch.lastDispatchedRole).toBeNull();
     expect(schedDispatch.pmLastDispatchEnd).toBe(0);
+    expect(schedDispatch.devLastDispatchEnd).toBe(0);
   });
 });
 
@@ -62,6 +77,7 @@ describe('saveDispatchState — written to project_config after dispatch', () =>
     const { upsertProjectConfig } = await import('../../db/repository.js');
     upsertProjectConfig('engine.lastDispatchedRole', '');
     upsertProjectConfig('engine.pmLastDispatchEnd', '0');
+    upsertProjectConfig('engine.devLastDispatchEnd', '0');
 
     const schedDispatch = await import('../scheduler-dispatch.js');
     schedDispatch.initDispatchState({} as never);

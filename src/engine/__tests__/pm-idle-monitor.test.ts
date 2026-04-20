@@ -4,11 +4,13 @@ import { select, insert } from '../../db/repository.js';
 import { PmIdleMonitor } from '../pm-idle-monitor.js';
 import { Role, RoleManager } from '../role-manager.js';
 import { MessageStatus, TaskStatus } from '../../db/types.js';
+import * as schedulerDispatch from '../scheduler-dispatch.js';
 
 let mockNow: ReturnType<typeof vi.spyOn>;
 let realNow: () => number;
 let monitor: PmIdleMonitor;
 let pmLastDispatchEnd: number;
+let mockGetDevLastDispatchEnd: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   setupTestDb();
@@ -19,10 +21,14 @@ beforeEach(() => {
   mockNow = vi.spyOn(Date, 'now');
   // Set default mock to return real time
   mockNow.mockImplementation(realNow);
+  // Mock getDevLastDispatchEnd - default to very old time (DEV idle)
+  mockGetDevLastDispatchEnd = vi.spyOn(schedulerDispatch, 'getDevLastDispatchEnd');
+  mockGetDevLastDispatchEnd.mockReturnValue(0);
 });
 
 afterEach(() => {
   mockNow.mockRestore();
+  mockGetDevLastDispatchEnd.mockRestore();
 });
 
 function createRoleManager(): RoleManager {
@@ -256,5 +262,55 @@ describe('checkPmIdle', () => {
     expect(msgs[0].content).toContain('待派发');
     expect(msgs[0].content).toContain('被阻塞');
     expect(msgs[0].content).toContain('未读消息');
+  });
+
+  it('does not trigger when DEV busy and recently active', () => {
+    const rm = createRoleManager();
+    createTask(TaskStatus.PendingDev, 'Pending Task');
+    rm.setBusy(Role.DEV, true);
+    const baseTime = realNow();
+    pmLastDispatchEnd = baseTime - 11 * 60 * 1000;
+    mockNow.mockReturnValue(baseTime);
+    // DEV was active 5 minutes ago (below threshold)
+    mockGetDevLastDispatchEnd.mockReturnValue(baseTime - 5 * 60 * 1000);
+
+    monitor.check(rm, pmLastDispatchEnd);
+
+    const msgs = select('messages', { to_role: Role.PM, from_role: Role.SYS });
+    expect(msgs.length).toBe(0);
+  });
+
+  it('triggers when DEV busy but idle for threshold', () => {
+    const rm = createRoleManager();
+    createTask(TaskStatus.PendingDev, 'Pending Task');
+    rm.setBusy(Role.DEV, true);
+    const baseTime = realNow();
+    pmLastDispatchEnd = baseTime - 11 * 60 * 1000;
+    mockNow.mockReturnValue(baseTime);
+    // DEV was active 11 minutes ago (above threshold)
+    mockGetDevLastDispatchEnd.mockReturnValue(baseTime - 11 * 60 * 1000);
+
+    monitor.check(rm, pmLastDispatchEnd);
+
+    const msgs = select<{ content: string }>('messages', { to_role: Role.PM, from_role: Role.SYS });
+    expect(msgs.length).toBe(1);
+    expect(msgs[0].content).toContain('待派发');
+  });
+
+  it('triggers when DEV not busy regardless of last activity', () => {
+    const rm = createRoleManager();
+    createTask(TaskStatus.PendingDev, 'Pending Task');
+    rm.setBusy(Role.DEV, false);
+    const baseTime = realNow();
+    pmLastDispatchEnd = baseTime - 11 * 60 * 1000;
+    mockNow.mockReturnValue(baseTime);
+    // DEV was active 1 minute ago - still triggers because DEV not busy
+    mockGetDevLastDispatchEnd.mockReturnValue(baseTime - 1 * 60 * 1000);
+
+    monitor.check(rm, pmLastDispatchEnd);
+
+    const msgs = select<{ content: string }>('messages', { to_role: Role.PM, from_role: Role.SYS });
+    expect(msgs.length).toBe(1);
+    expect(msgs[0].content).toContain('待派发');
   });
 });
