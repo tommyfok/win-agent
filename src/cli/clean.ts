@@ -14,6 +14,7 @@ import {
   removeServerInfo,
   loadServerPid,
   killProcessTree,
+  isProcessInWorkspace,
   type OpencodeServerHandle,
 } from '../engine/opencode-server.js';
 import { AGENT_ROLES } from '../engine/role-manager.js';
@@ -209,18 +210,20 @@ function cleanupOrphanedProcesses(workspace: string): void {
   }
 
   try {
+    // Only kill opencode servers that belong to THIS workspace, never others.
     const result = execSync("ps -eo pid,command | grep '[.]opencode serve' | grep -v grep", {
       encoding: 'utf-8',
       timeout: 5000,
     }).trim();
     for (const line of result.split('\n')) {
       const opPid = parseInt(line.trim().split(/\s+/)[0], 10);
-      if (opPid && !isNaN(opPid)) {
-        try {
-          process.kill(opPid, 'SIGTERM');
-        } catch {
-          /* already dead */
-        }
+      if (!opPid || isNaN(opPid)) continue;
+      if (opPid === process.pid) continue;
+      if (!isProcessInWorkspace(opPid, workspace)) continue;
+      try {
+        process.kill(opPid, 'SIGTERM');
+      } catch {
+        /* already dead */
       }
     }
   } catch {

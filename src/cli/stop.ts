@@ -1,6 +1,11 @@
 import { execSync } from 'node:child_process';
 import { checkEngineRunning, removePidFile, isProcessRunning } from '../config/index.js';
-import { removeServerInfo, loadServerPid, killProcessTree } from '../engine/opencode-server.js';
+import {
+  removeServerInfo,
+  loadServerPid,
+  killProcessTree,
+  isProcessInWorkspace,
+} from '../engine/opencode-server.js';
 
 export async function stopCommand() {
   const workspace = process.cwd();
@@ -69,7 +74,9 @@ function cleanupOrphanedProcesses(workspace: string): void {
   }
 
   try {
-    // Kill orphaned opencode servers started by win-agent
+    // Kill orphaned opencode servers — but ONLY those belonging to this workspace.
+    // We cannot rely on the command line alone (it's identical across workspaces),
+    // so each candidate PID is checked against its cwd / WIN_AGENT_WORKSPACE env.
     const result = execSync("ps -eo pid,command | grep '[.]opencode serve' | grep -v grep", {
       encoding: 'utf-8',
       timeout: 5000,
@@ -78,13 +85,14 @@ function cleanupOrphanedProcesses(workspace: string): void {
       for (const line of result.split('\n')) {
         const pidStr = line.trim().split(/\s+/)[0];
         const opPid = parseInt(pidStr, 10);
-        if (opPid && !isNaN(opPid)) {
-          try {
-            process.kill(opPid, 'SIGTERM');
-            console.log(`   ✓ 清理孤立 opencode 进程 (PID: ${opPid})`);
-          } catch {
-            /* already dead */
-          }
+        if (!opPid || isNaN(opPid)) continue;
+        if (opPid === process.pid) continue;
+        if (!isProcessInWorkspace(opPid, workspace)) continue; // skip other workspaces
+        try {
+          process.kill(opPid, 'SIGTERM');
+          console.log(`   ✓ 清理孤立 opencode 进程 (PID: ${opPid})`);
+        } catch {
+          /* already dead */
         }
       }
     }

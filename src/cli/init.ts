@@ -265,6 +265,26 @@ pnpm test          # 3. 单元测试（可能较慢）
 
 只写与本项目匹配的类型，给出 Agent 可直接执行的具体验收步骤和命令。
 
+**启动/关闭对称（强制）**：
+只要步骤中**启动了任何常驻后台进程**（dev server / API server / 预览服务等），验收章节必须：
+
+1. 启动时用如下模式记录 PID，便于后续清理：
+   \`\`\`bash
+   # 示例（按项目实际命令替换 CMD）
+   CMD & echo $! >> .win-agent/.dev-pids
+   \`\`\`
+2. 在本章结尾给出**清理步骤**（与启动对称），模板：
+   \`\`\`bash
+   if [ -f .win-agent/.dev-pids ]; then
+     while read -r P; do kill "$P" 2>/dev/null || true; done < .win-agent/.dev-pids
+     sleep 2
+     while read -r P; do kill -0 "$P" 2>/dev/null && kill -9 "$P" 2>/dev/null || true; done < .win-agent/.dev-pids
+     rm -f .win-agent/.dev-pids
+   fi
+   \`\`\`
+3. **禁止**使用 \`pkill -f '<模糊关键词>'\`、\`killall node\` 等会误伤用户其他进程的命令。
+4. Playwright MCP 内置 webServer 或由 MCP 自行管理的浏览器不需要写入 \`.dev-pids\`。
+
 ## 重要规则：TODO 标记
 无法确定的内容用此格式标记：
 > ⚠️ **TODO**: 说明需要补充什么

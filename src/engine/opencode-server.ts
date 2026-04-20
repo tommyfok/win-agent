@@ -103,6 +103,67 @@ export function killProcessTree(pid: number): void {
 }
 
 /**
+ * Check if a given PID belongs to the specified workspace.
+ *
+ * Uses two independent signals (both must match when applicable):
+ * 1. The process's working directory (via `lsof -p <pid> -a -d cwd -Fn`) equals workspace
+ * 2. The process's environment contains `WIN_AGENT_WORKSPACE=<workspace>`
+ *    (via `ps -E -p <pid>` on macOS, or `/proc/<pid>/environ` on Linux)
+ *
+ * If neither signal is obtainable, returns `false` (conservative — do NOT kill).
+ * This prevents cross-workspace process killing during `ps`-based orphan scans.
+ */
+export function isProcessInWorkspace(pid: number, workspace: string): boolean {
+  let cwdMatches: boolean | null = null;
+  let envMatches: boolean | null = null;
+
+  // 1. Check process's working directory (portable across macOS & Linux)
+  try {
+    const out = execSync(`lsof -p ${pid} -a -d cwd -Fn`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    // lsof -Fn output line for cwd starts with 'n'
+    const cwdLine = out.split('\n').find((l) => l.startsWith('n'));
+    if (cwdLine) {
+      const cwd = cwdLine.slice(1);
+      cwdMatches = cwd === workspace;
+    }
+  } catch {
+    /* lsof missing or permission denied */
+  }
+
+  // 2. Check process's environment for WIN_AGENT_WORKSPACE
+  const marker = `WIN_AGENT_WORKSPACE=${workspace}`;
+  try {
+    if (process.platform === 'linux') {
+      const environ = fs.readFileSync(`/proc/${pid}/environ`, 'utf-8');
+      const vars = environ.split('\0');
+      envMatches = vars.includes(marker);
+    } else if (process.platform === 'darwin') {
+      // ps -E prints command + environment on macOS
+      const out = execSync(`ps -E -p ${pid} -o command=`, {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      envMatches = out.includes(marker);
+    }
+  } catch {
+    /* ps/proc unavailable */
+  }
+
+  // Conservative: require at least one positive match, and no explicit negative
+  if (cwdMatches === true || envMatches === true) {
+    // If the other signal is explicitly false, that's a mismatch → not ours
+    if (cwdMatches === false || envMatches === false) return false;
+    return true;
+  }
+  return false;
+}
+
+/**
  * Try connecting to an existing opencode server.
  * Verifies ownership by checking that our persisted PM session ID exists on the server.
  */
@@ -166,9 +227,16 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
   const opcodeConfigWithLog = { ...opcodeConfig, logLevel: 'DEBUG' };
 
   const proc = spawn('opencode', ['serve', `--hostname=0.0.0.0`, `--port=0`, `--log-level=DEBUG`], {
+    // Explicit cwd so `lsof -p <pid> -d cwd` reports the workspace path —
+    // this (plus WIN_AGENT_WORKSPACE env) lets `stop`/`clean` scans identify
+    // orphaned opencode serve processes that belong to this workspace and skip
+    // those belonging to other workspaces.
+    cwd: workspace,
     env: {
       ...process.env,
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opcodeConfigWithLog),
+      // Tag the process env so scans can filter by workspace
+      WIN_AGENT_WORKSPACE: workspace,
       ...(config.serverPassword ? { OPENCODE_SERVER_PASSWORD: config.serverPassword } : {}),
     },
     detached: true,
