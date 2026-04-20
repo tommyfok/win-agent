@@ -9,7 +9,9 @@ import {
   initDispatchState,
   promoteDeferredTriggers,
   tryDispatchNormalRole,
+  getPmLastDispatchEnd,
 } from './scheduler-dispatch.js';
+import { PmIdleMonitor } from './pm-idle-monitor.js';
 import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
@@ -17,6 +19,7 @@ import { logger } from '../utils/logger.js';
 // Re-export for external callers (e.g. engine commands)
 export type { DispatchContext } from './scheduler-dispatch.js';
 export { getCurrentDispatchContext, abortCurrentDispatch } from './scheduler-dispatch.js';
+export { getPmLastDispatchEnd } from './scheduler-dispatch.js';
 
 /** Sleep helper */
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -46,12 +49,13 @@ export async function startSchedulerLoop(
   running = true;
   initDispatchState(client);
   const roleManager = new RoleManager();
+  const pmIdleMonitor = new PmIdleMonitor();
 
   logger.info('scheduler loop started');
 
   while (running) {
     try {
-      await schedulerTick(client, sessionManager, roleManager);
+      await schedulerTick(client, sessionManager, roleManager, pmIdleMonitor);
     } catch (err) {
       if (err instanceof AbortError) {
         logger.info({ message: err.message }, 'dispatch aborted');
@@ -96,7 +100,8 @@ export function stopSchedulerLoop(): void {
 async function schedulerTick(
   client: OpencodeClient,
   sessionManager: SessionManager,
-  roleManager: RoleManager
+  roleManager: RoleManager,
+  pmIdleMonitor: PmIdleMonitor
 ): Promise<void> {
   // Periodic health check (every 30s); suspend dispatch after 3 consecutive failures
   if (Date.now() - lastHealthCheckAt > HEALTH_CHECK_INTERVAL_MS) {
@@ -119,6 +124,7 @@ async function schedulerTick(
 
   checkAndUnblockDependencies();
   promoteDeferredTriggers(roleManager);
+  pmIdleMonitor.check(roleManager, getPmLastDispatchEnd());
 
   await tryDispatchNormalRole(client, sessionManager, roleManager);
 }

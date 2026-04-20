@@ -37,6 +37,10 @@ export interface EngineConfig {
   dispatchTimeoutMs?: number;
   /** session 初始化等待超时，默认 60000ms */
   sessionInitTimeoutMs?: number;
+  /** PM空闲提醒阈值，超过此时间才触发提醒检查（默认 600000ms = 10分钟） */
+  pmIdleThresholdMs?: number;
+  /** PM空闲提醒重复发送间隔（默认 600000ms = 10分钟） */
+  pmIdleReminderIntervalMs?: number;
 }
 
 export interface WinAgentConfig {

@@ -75,6 +75,14 @@ export function setPmLastDispatchEnd(ts: number): void {
 }
 
 /**
+ * Get PM's last dispatch end timestamp.
+ * Used by PmIdleMonitor to calculate PM idle duration for reminder logic.
+ */
+export function getPmLastDispatchEnd(): number {
+  return pmLastDispatchEnd;
+}
+
+/**
  * Get the context of the currently in-flight dispatch, if any.
  */
 export function getCurrentDispatchContext(): DispatchContext | null {
