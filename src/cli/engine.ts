@@ -95,12 +95,12 @@ export async function engineCommand(workspace: string) {
   initIterationChecker(sessionManager);
 
   // Check memories and active iterations
-  const memoryCount = rawQuery('SELECT COUNT(*) as cnt FROM memory')[0].cnt;
+  const [{ cnt: memoryCount }] = rawQuery<{ cnt: number }>('SELECT COUNT(*) as cnt FROM memory');
   if (memoryCount ?? 0 > 0) {
     console.log(`✓ 已回忆 ${memoryCount} 条近期记忆`);
   }
 
-  const activeIterations = dbSelect('iterations', { status: 'active' });
+  const activeIterations = dbSelect<{ id: number }>('iterations', { status: 'active' });
   if (activeIterations.length > 0) {
     dbInsert('messages', {
       from_role: Role.SYS,
