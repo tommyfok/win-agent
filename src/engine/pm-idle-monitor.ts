@@ -22,6 +22,8 @@ interface MessageRow {
   type: string;
   status: string;
   related_task_id: number | null;
+  retry_count: number;
+  last_retry_at: number | null;
 }
 
 export interface PmIssue {
@@ -64,12 +66,11 @@ export class PmIdleMonitor {
     // 4. Check reminder interval (continuous reminder mode)
     if (now - this.lastReminderAt < this.getReminderIntervalMs()) return;
 
-    // 5. Pre-check: DEV not busy AND DEV idle for threshold duration
-    // Only send reminder if DEV is idle or has been inactive for threshold time
+    // 5. Pre-check: DEV busy OR DEV recently active → don't disturb PM
     const devBusy = roleManager.isBusy(Role.DEV);
     const devLastActive = getDevLastDispatchEnd();
     const devIdleMs = now - devLastActive;
-    if (devBusy && devIdleMs < this.getPmIdleThresholdMs()) return;
+    if (devBusy || devIdleMs < this.getPmIdleThresholdMs()) return;
 
     // 6. Detect issues needing PM attention
     const issues = detectPmAttentionNeeded(roleManager);

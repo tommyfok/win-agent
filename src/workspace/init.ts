@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../db/connection.js';
-import { createAllTables, patchMissingTables } from '../db/schema.js';
+import { createAllTables, patchMissingTables, runMigrations } from '../db/schema.js';
 import { seedPermissions } from '../db/permissions.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,8 +55,9 @@ export function initWorkspace(workspace: string): InitResult {
   const db = openDb(dbPath);
 
   if (alreadyExists) {
-    // Patch mode: only add missing tables
+    // Patch mode: only add missing tables + run column migrations
     const patched = patchMissingTables(db);
+    runMigrations(db);
     // Ensure permissions exist (INSERT OR IGNORE)
     seedPermissions(db);
     return { created: false, patched };

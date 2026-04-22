@@ -6,7 +6,6 @@ import { MessageStatus } from '../db/types.js';
 import { queryRelevantKnowledge, type KnowledgeEntry } from '../embedding/knowledge.js';
 import { match } from 'ts-pattern';
 import { withRetry, withTimeout } from './retry.js';
-import { checkAndRotate } from './memory-rotator.js';
 import { filterMessagesForRole } from './dispatch-filter.js';
 import type { MessageRow } from './dispatch-filter.js';
 import { buildDispatchPrompt, getTaskContext } from './prompt-builder.js';
@@ -14,7 +13,6 @@ import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 
-// Re-export MessageRow for callers that previously imported from here
 export type { MessageRow };
 
 /** Options for dispatch functions */
@@ -23,53 +21,6 @@ export interface DispatchOptions {
   signal?: AbortSignal;
   /** Callback invoked with sessionId once the session is resolved, before prompt is sent. */
   onSessionResolved?: (sessionId: string) => void;
-}
-
-/**
- * Dispatch messages to a role, grouped by related_task_id.
- * Each task group is dispatched separately to ensure correct session & context.
- * Non-task messages (related_task_id = null) are dispatched together.
- */
-export async function dispatchToRoleGrouped(
-  client: OpencodeClient,
-  sessionManager: SessionManager,
-  role: Role,
-  messages: MessageRow[],
-  options?: DispatchOptions
-): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
-  const groups = new Map<number | null, MessageRow[]>();
-  for (const msg of messages) {
-    const key = msg.related_task_id;
-    let group = groups.get(key);
-    if (!group) {
-      group = [];
-      groups.set(key, group);
-    }
-    group.push(msg);
-  }
-
-  let lastSessionId: string | null = null;
-  let totalInput = 0;
-  let totalOutput = 0;
-
-  for (const [taskKey, group] of groups) {
-    const result = await dispatchToRole(client, sessionManager, role, group, options);
-    if (result.sessionId) {
-      await checkAndRotate(
-        sessionManager,
-        role,
-        result.sessionId,
-        result.inputTokens,
-        result.outputTokens,
-        taskKey ?? undefined
-      );
-      lastSessionId = result.sessionId;
-    }
-    totalInput += result.inputTokens;
-    totalOutput += result.outputTokens;
-  }
-
-  return { sessionId: lastSessionId, inputTokens: totalInput, outputTokens: totalOutput };
 }
 
 /**
@@ -193,7 +144,13 @@ async function getSessionForRole(
 ): Promise<string | null> {
   return match(role)
     .with(Role.DEV, (devRole) => {
-      const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
+      const taskIds = new Set(messages.map((m) => m.related_task_id));
+      if (taskIds.size > 1) {
+        throw new Error(
+          `dispatchToRole received messages from multiple tasks: ${[...taskIds].join(',')}`
+        );
+      }
+      const taskId = messages[0].related_task_id;
       if (taskId) {
         return sessionManager.getTaskSession(taskId, devRole);
       } else {

@@ -53,6 +53,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 
@@ -77,6 +79,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 
@@ -99,6 +103,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 
@@ -121,6 +127,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 
@@ -143,6 +151,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 
@@ -167,6 +177,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 
@@ -190,6 +202,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 
@@ -214,6 +228,8 @@ describe('filterMessagesForRole', () => {
           related_iteration_id: null,
           attachments: null,
           created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
         },
       ]);
 

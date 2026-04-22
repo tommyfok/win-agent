@@ -280,32 +280,44 @@ describe('checkPmIdle', () => {
     expect(msgs.length).toBe(0);
   });
 
-  it('triggers when DEV busy but idle for threshold', () => {
+  it('does not trigger when DEV busy even if idle for threshold', () => {
     const rm = createRoleManager();
     createTask(TaskStatus.PendingDev, 'Pending Task');
     rm.setBusy(Role.DEV, true);
     const baseTime = realNow();
     pmLastDispatchEnd = baseTime - 11 * 60 * 1000;
     mockNow.mockReturnValue(baseTime);
-    // DEV was active 11 minutes ago (above threshold)
     mockGetDevLastDispatchEnd.mockReturnValue(baseTime - 11 * 60 * 1000);
 
     monitor.check(rm, pmLastDispatchEnd);
 
-    const msgs = select<{ content: string }>('messages', { to_role: Role.PM, from_role: Role.SYS });
-    expect(msgs.length).toBe(1);
-    expect(msgs[0].content).toContain('待派发');
+    const msgs = select('messages', { to_role: Role.PM, from_role: Role.SYS });
+    expect(msgs.length).toBe(0);
   });
 
-  it('triggers when DEV not busy regardless of last activity', () => {
+  it('does not trigger when DEV not busy but recently active', () => {
     const rm = createRoleManager();
     createTask(TaskStatus.PendingDev, 'Pending Task');
     rm.setBusy(Role.DEV, false);
     const baseTime = realNow();
     pmLastDispatchEnd = baseTime - 11 * 60 * 1000;
     mockNow.mockReturnValue(baseTime);
-    // DEV was active 1 minute ago - still triggers because DEV not busy
     mockGetDevLastDispatchEnd.mockReturnValue(baseTime - 1 * 60 * 1000);
+
+    monitor.check(rm, pmLastDispatchEnd);
+
+    const msgs = select('messages', { to_role: Role.PM, from_role: Role.SYS });
+    expect(msgs.length).toBe(0);
+  });
+
+  it('triggers when DEV not busy and idle beyond threshold', () => {
+    const rm = createRoleManager();
+    createTask(TaskStatus.PendingDev, 'Pending Task');
+    rm.setBusy(Role.DEV, false);
+    const baseTime = realNow();
+    pmLastDispatchEnd = baseTime - 11 * 60 * 1000;
+    mockNow.mockReturnValue(baseTime);
+    mockGetDevLastDispatchEnd.mockReturnValue(baseTime - 11 * 60 * 1000);
 
     monitor.check(rm, pmLastDispatchEnd);
 

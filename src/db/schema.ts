@@ -13,7 +13,9 @@ const TABLE_SCHEMAS: Record<string, string> = {
       related_task_id INTEGER REFERENCES tasks(id),
       related_iteration_id INTEGER REFERENCES iterations(id),
       attachments  TEXT,
-      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_retry_at INTEGER
     )`,
 
   tasks: `
@@ -248,4 +250,18 @@ export function patchMissingTables(db: Database.Database): string[] {
     db.exec(stmt);
   }
   return missing;
+}
+
+export function runMigrations(db: Database.Database): void {
+  const columns = db
+    .prepare("PRAGMA table_info(messages)")
+    .all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((c) => c.name));
+
+  if (!columnNames.has('retry_count')) {
+    db.exec('ALTER TABLE messages ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!columnNames.has('last_retry_at')) {
+    db.exec('ALTER TABLE messages ADD COLUMN last_retry_at INTEGER');
+  }
 }

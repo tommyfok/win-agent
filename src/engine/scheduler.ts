@@ -7,7 +7,7 @@ import { checkAndUnblockDependencies } from './dependency-checker.js';
 import { checkHealth } from './opencode-server.js';
 import {
   initDispatchState,
-  promoteDeferredTriggers,
+  promoteDeferredPmMessages,
   tryDispatchNormalRole,
   getPmLastDispatchEnd,
 } from './scheduler-dispatch.js';
@@ -103,17 +103,12 @@ async function schedulerTick(
   roleManager: RoleManager,
   pmIdleMonitor: PmIdleMonitor
 ): Promise<void> {
-  // Periodic health check (every 30s); suspend dispatch after 3 consecutive failures
   if (Date.now() - lastHealthCheckAt > HEALTH_CHECK_INTERVAL_MS) {
     lastHealthCheckAt = Date.now();
     const healthy = await checkHealth(client);
     if (!healthy) {
       healthFailCount++;
       logger.error({ healthFailCount }, 'opencode server health check failed');
-      if (healthFailCount >= MAX_HEALTH_FAILURES) {
-        logger.error('opencode server unreachable, suspending dispatch');
-        return;
-      }
     } else {
       if (healthFailCount >= MAX_HEALTH_FAILURES) {
         logger.info('opencode server recovered, resuming dispatch');
@@ -122,9 +117,13 @@ async function schedulerTick(
     }
   }
 
+  if (healthFailCount >= MAX_HEALTH_FAILURES) {
+    return;
+  }
+
   checkAndUnblockDependencies();
-  promoteDeferredTriggers(roleManager);
+  promoteDeferredPmMessages(roleManager);
   pmIdleMonitor.check(roleManager, getPmLastDispatchEnd());
 
-  await tryDispatchNormalRole(client, sessionManager, roleManager);
+  await tryDispatchNormalRole(client, sessionManager, roleManager, pmIdleMonitor);
 }

@@ -15,6 +15,8 @@ export interface MessageRow {
   related_iteration_id: number | null;
   attachments: string | null;
   created_at: string;
+  retry_count: number;
+  last_retry_at: number | null;
 }
 
 const DEV_SKIP_STATUSES: TaskStatus[] = [

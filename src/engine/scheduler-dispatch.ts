@@ -1,11 +1,12 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
 import type { RoleManager } from './role-manager.js';
+import type { PmIdleMonitor } from './pm-idle-monitor.js';
 import { AGENT_ROLES, Role } from './role-manager.js';
 import { dispatchToRole, type MessageRow } from './dispatcher.js';
 import { AbortError } from './retry.js';
 import { checkAndRotate } from './memory-rotator.js';
-import { select, insert, update, rawRun, upsertProjectConfig } from '../db/repository.js';
+import { select, insert, update, rawRun, rawQuery, upsertProjectConfig } from '../db/repository.js';
 import { MessageStatus } from '../db/types.js';
 import { engineBus, EngineEvents } from './event-bus.js';
 import { loadConfig } from '../config/index.js';
@@ -123,7 +124,7 @@ export async function abortCurrentDispatch(): Promise<DispatchContext | null> {
   return ctx;
 }
 
-export function promoteDeferredTriggers(roleManager: RoleManager): void {
+export function promoteDeferredPmMessages(roleManager: RoleManager): void {
   if (!roleManager.isBusy(Role.PM)) {
     const pmUnread = select<MessageRow>('messages', {
       to_role: Role.PM,
@@ -131,20 +132,26 @@ export function promoteDeferredTriggers(roleManager: RoleManager): void {
     });
     if (pmUnread.length === 0) {
       rawRun(
-        `UPDATE messages SET status = '${MessageStatus.Unread}' WHERE status = '${MessageStatus.Deferred}' AND to_role = '${Role.PM}'`
+        `UPDATE messages SET status = ? WHERE status = ? AND to_role = ?`,
+        [MessageStatus.Unread, MessageStatus.Deferred, Role.PM]
       );
     }
   }
 }
 
+const MAX_DISPATCH_RETRIES = 3;
+const DISPATCH_BACKOFF_MS = 30_000;
+
 /**
  * Try to dispatch normal role messages (round-robin across AGENT_ROLES).
  * Dispatches at most one role per call (V1 serial strategy).
+ * Each tick dispatches only one task group per role (Option B).
  */
 export async function tryDispatchNormalRole(
   client: OpencodeClient,
   sessionManager: SessionManager,
-  roleManager: RoleManager
+  roleManager: RoleManager,
+  pmIdleMonitor?: PmIdleMonitor
 ): Promise<void> {
   const roleOrder =
     lastDispatchedRole && AGENT_ROLES.includes(lastDispatchedRole)
@@ -160,18 +167,28 @@ export async function tryDispatchNormalRole(
       continue;
     }
 
-    const messages = select<MessageRow>(
-      'messages',
-      { to_role: role, status: MessageStatus.Unread },
-      { orderBy: 'created_at ASC' }
+    const cutoff = Date.now() - DISPATCH_BACKOFF_MS;
+    const messages = rawQuery<MessageRow>(
+      `SELECT * FROM messages
+       WHERE to_role = ? AND status = ?
+         AND (last_retry_at IS NULL OR last_retry_at < ?)
+       ORDER BY created_at ASC`,
+      [role, MessageStatus.Unread, cutoff]
     );
     if (messages.length === 0) continue;
 
-    logger.info({ role, messageCount: messages.length }, 'dispatch start');
+    const groupTaskId = messages[0].related_task_id;
+    const batch = messages.filter((m) => m.related_task_id === groupTaskId);
+
+    logger.info(
+      { role, groupTaskId, batchSize: batch.length, totalUnread: messages.length },
+      'dispatch start'
+    );
+
     roleManager.setBusy(role, true);
     const abortController = new AbortController();
     currentAbortController = abortController;
-    const dispatchTaskId = messages.find((m) => m.related_task_id)?.related_task_id ?? null;
+    const dispatchTaskId = groupTaskId;
     currentDispatch = {
       role,
       taskId: dispatchTaskId,
@@ -179,12 +196,15 @@ export async function tryDispatchNormalRole(
       startedAt: new Date().toISOString(),
     };
 
+    let completedNormally = false;
+    let dispatchSucceeded = false;
+
     try {
       const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
         client,
         sessionManager,
         role,
-        messages,
+        batch,
         {
           signal: abortController.signal,
           onSessionResolved: (sid) => {
@@ -206,34 +226,55 @@ export async function tryDispatchNormalRole(
         engineBus.emit(EngineEvents.DISPATCH_COMPLETE, { role, inputTokens, outputTokens });
       }
       logger.info({ role }, 'dispatch done');
+      completedNormally = true;
+      dispatchSucceeded = true;
     } catch (err) {
-      if (err instanceof AbortError) throw err;
-      logger.error(
-        { role, messageCount: messages.length, err },
-        'dispatch failed — messages marked read to prevent replay'
-      );
-      for (const msg of messages) {
-        update('messages', { id: msg.id }, { status: MessageStatus.Read });
+      if (err instanceof AbortError) {
+        throw err;
       }
+      completedNormally = true;
+
+      const now = Date.now();
+      for (const msg of batch) {
+        const next = (msg.retry_count ?? 0) + 1;
+        if (next >= MAX_DISPATCH_RETRIES) {
+          update('messages', { id: msg.id }, {
+            status: MessageStatus.Read,
+            retry_count: next,
+            last_retry_at: now,
+          });
+        } else {
+          update('messages', { id: msg.id }, {
+            retry_count: next,
+            last_retry_at: now,
+          });
+        }
+      }
+
       insert('logs', {
         role: Role.SYS,
         action: 'dispatch_failed',
-        content: `${role} dispatch failed, ${messages.length} messages marked read: ${String(err).slice(0, 200)}`,
+        content: `${role} dispatch failed (group=${dispatchTaskId ?? 'none'}), batch=${batch.length}: ${String(err).slice(0, 200)}`,
         related_task_id: dispatchTaskId,
       });
     } finally {
       currentDispatch = null;
       currentAbortController = null;
       roleManager.setBusy(role, false);
-      lastDispatchedRole = role;
-      if (role === Role.PM) {
-        pmLastDispatchEnd = Date.now();
-      } else if (role === Role.DEV) {
-        devLastDispatchEnd = Date.now();
+      if (completedNormally) {
+        lastDispatchedRole = role;
+        if (role === Role.PM) {
+          pmLastDispatchEnd = Date.now();
+        } else if (role === Role.DEV) {
+          devLastDispatchEnd = Date.now();
+        }
+        saveDispatchState();
       }
-      saveDispatchState();
+      if (dispatchSucceeded && role === Role.PM && pmIdleMonitor) {
+        pmIdleMonitor.resetReminder();
+      }
     }
 
-    break; // V1: only one role per tick
+    break; // V1: at most one dispatch per tick
   }
 }
