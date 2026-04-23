@@ -131,7 +131,7 @@ export async function tryDispatchNormalRole(
   intents?: DispatchIntent[]
 ): Promise<void> {
   const intentRoles = intents && intents.length > 0
-    ? intents.map((i) => i.role)
+    ? [...new Set(intents.map((i) => i.role))]
     : (lastDispatchedRole && AGENT_ROLES.includes(lastDispatchedRole)
         ? [...AGENT_ROLES].sort((a, b) =>
             a === lastDispatchedRole ? 1 : b === lastDispatchedRole ? -1 : 0

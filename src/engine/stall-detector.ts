@@ -41,7 +41,8 @@ interface MessageRow {
 export class StallDetector {
   private lastCheckAt = 0;
   private lastReminderAt = 0;
-  private lastStuckCheckAt = 0;
+  private lastDevReminderAt = 0;
+  private lastStuckCheckAt = new Map<string, number>();
 
   async detect(
     states: Map<Role, RoleRuntimeState>,
@@ -70,8 +71,9 @@ export class StallDetector {
       }
 
       if (state.serverBusy && client && state.sessionId) {
-        if (now - this.lastStuckCheckAt >= STUCK_CHECK_INTERVAL_MS) {
-          this.lastStuckCheckAt = now;
+        const lastCheck = this.lastStuckCheckAt.get(state.sessionId) ?? 0;
+        if (now - lastCheck >= STUCK_CHECK_INTERVAL_MS) {
+          this.lastStuckCheckAt.set(state.sessionId, now);
           const isStuck = await this.checkStuckSession(client, state.sessionId, now);
           if (isStuck) {
             intents.push({ role, reason: 'stuck_session', details: { sessionId: state.sessionId } });
@@ -106,7 +108,10 @@ export class StallDetector {
       if (devState && !devState.serverBusy) {
         const devPendingWork = detectDevPendingWork();
         if (devPendingWork) {
-          this.sendDevPendingWorkReminder(devPendingWork);
+          if (now - this.lastDevReminderAt >= this.getReminderIntervalMs()) {
+            this.sendDevPendingWorkReminder(devPendingWork);
+            this.lastDevReminderAt = now;
+          }
           intents.push({ role: Role.DEV, reason: 'pending_work', details: devPendingWork });
         }
       }
