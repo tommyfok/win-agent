@@ -1,17 +1,17 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
+import type { DispatchIntent } from './stall-detector.js';
 import { RoleManager } from './role-manager.js';
 import { AbortError } from './retry.js';
 import { insert } from '../db/repository.js';
 import { checkAndUnblockDependencies } from './dependency-checker.js';
-import { checkHealth } from './opencode-server.js';
 import {
   initDispatchState,
   promoteDeferredPmMessages,
   tryDispatchNormalRole,
-  getPmLastDispatchEnd,
 } from './scheduler-dispatch.js';
-import { PmIdleMonitor } from './pm-idle-monitor.js';
+import { SessionStateReconciler } from './session-reconciler.js';
+import { StallDetector } from './stall-detector.js';
 import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
@@ -21,27 +21,13 @@ export type { DispatchContext } from './scheduler-dispatch.js';
 export { getCurrentDispatchContext, abortCurrentDispatch } from './scheduler-dispatch.js';
 export { getPmLastDispatchEnd } from './scheduler-dispatch.js';
 
-/** Sleep helper */
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Engine running flag — set to false to stop the main loop */
 let running = false;
 
-// ── Health check state ──
 let healthFailCount = 0;
-const HEALTH_CHECK_INTERVAL_MS = 30_000;
-const MAX_HEALTH_FAILURES = 3;
-let lastHealthCheckAt = 0;
+const MAX_HEALTH_FAILURES = 30;
 
-/**
- * Start the scheduler main loop.
- *
- * V1 serial strategy:
- * - Each cycle iterates through AGENT_ROLES (round-robin with PM cooldown)
- * - Only one role is dispatched per cycle
- * - After dispatch, check auto-triggers and iteration review
- * - Sleep 1s between cycles to avoid tight polling
- */
 export async function startSchedulerLoop(
   client: OpencodeClient,
   sessionManager: SessionManager
@@ -49,13 +35,14 @@ export async function startSchedulerLoop(
   running = true;
   initDispatchState(client);
   const roleManager = new RoleManager();
-  const pmIdleMonitor = new PmIdleMonitor();
+  const reconciler = new SessionStateReconciler();
+  const stallDetector = new StallDetector();
 
   logger.info('scheduler loop started');
 
   while (running) {
     try {
-      await schedulerTick(client, sessionManager, roleManager, pmIdleMonitor);
+      await schedulerTick(client, sessionManager, roleManager, reconciler, stallDetector);
     } catch (err) {
       if (err instanceof AbortError) {
         logger.info({ message: err.message }, 'dispatch aborted');
@@ -80,50 +67,61 @@ export async function startSchedulerLoop(
   logger.info('scheduler loop stopped');
 }
 
-/**
- * Stop the scheduler loop gracefully.
- */
 export function stopSchedulerLoop(): void {
   running = false;
 }
 
-/**
- * Single tick of the scheduler.
- *
- * 1. Periodic opencode health check (may return early if unhealthy)
- * 2. Auto-unblock tasks whose dependencies are satisfied
- * 3. Promote deferred PM messages when PM is idle and has no unread inbox
- * 4. Round-robin dispatch (at most one role per tick)
- *
- * Auto-triggers fire on DISPATCH_COMPLETE; iteration review uses its own checker.
- */
+async function handleStuckSessions(
+  intents: DispatchIntent[],
+  client: OpencodeClient
+): Promise<void> {
+  for (const intent of intents) {
+    if (intent.reason !== 'stuck_session') continue;
+    const sessionId = (intent.details as { sessionId: string })?.sessionId;
+    if (!sessionId) continue;
+
+    try {
+      logger.info({ role: intent.role, sessionId }, 'handleStuckSessions: aborting stuck session');
+      await client.session.abort({ path: { id: sessionId } });
+      insert('logs', {
+        role: Role.SYS,
+        action: 'stuck_session_aborted',
+        content: `${intent.role} session ${sessionId} was stuck and has been aborted`,
+      });
+    } catch (err) {
+      logger.warn({ err, sessionId }, 'handleStuckSessions: abort failed');
+    }
+  }
+}
+
 async function schedulerTick(
   client: OpencodeClient,
   sessionManager: SessionManager,
   roleManager: RoleManager,
-  pmIdleMonitor: PmIdleMonitor
+  reconciler: SessionStateReconciler,
+  stallDetector: StallDetector
 ): Promise<void> {
-  if (Date.now() - lastHealthCheckAt > HEALTH_CHECK_INTERVAL_MS) {
-    lastHealthCheckAt = Date.now();
-    const healthy = await checkHealth(client);
-    if (!healthy) {
-      healthFailCount++;
-      logger.error({ healthFailCount }, 'opencode server health check failed');
-    } else {
-      if (healthFailCount >= MAX_HEALTH_FAILURES) {
-        logger.info('opencode server recovered, resuming dispatch');
-      }
-      healthFailCount = 0;
-    }
-  }
+  const { states, healthy } = await reconciler.reconcile(client, sessionManager, roleManager);
 
-  if (healthFailCount >= MAX_HEALTH_FAILURES) {
-    return;
+  if (!healthy) {
+    healthFailCount++;
+    logger.error({ healthFailCount }, 'opencode server health check failed (via reconcile)');
+    if (healthFailCount >= MAX_HEALTH_FAILURES) {
+      return;
+    }
+  } else {
+    if (healthFailCount >= MAX_HEALTH_FAILURES) {
+      logger.info('opencode server recovered, resuming dispatch');
+    }
+    healthFailCount = 0;
   }
 
   checkAndUnblockDependencies();
-  promoteDeferredPmMessages(roleManager);
-  pmIdleMonitor.check(roleManager, getPmLastDispatchEnd());
+  promoteDeferredPmMessages(roleManager, states.get(Role.PM));
 
-  await tryDispatchNormalRole(client, sessionManager, roleManager, pmIdleMonitor);
+  const intents = await stallDetector.detect(states, roleManager, client);
+
+  await handleStuckSessions(intents, client);
+
+  await tryDispatchNormalRole(client, sessionManager, roleManager, () => stallDetector.resetReminder(), states, intents);
 }

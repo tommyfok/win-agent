@@ -221,4 +221,17 @@ export class SessionManager {
   getAllSessionIds(): string[] {
     return [...this.activeSessions.values(), ...this.taskSessions.values()];
   }
+
+  getRoleSessionId(role: Role, taskId?: number): string | null {
+    if (role === Role.PM) {
+      return this.activeSessions.get(Role.PM) ?? null;
+    }
+    if (role === Role.DEV) {
+      if (taskId !== undefined) {
+        return this.taskSessions.get(`${taskId}-${Role.DEV}`) ?? null;
+      }
+      return null;
+    }
+    return null;
+  }
 }

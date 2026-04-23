@@ -1,7 +1,8 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
 import type { RoleManager } from './role-manager.js';
-import type { PmIdleMonitor } from './pm-idle-monitor.js';
+import type { RoleRuntimeState } from './session-reconciler.js';
+import type { DispatchIntent } from './stall-detector.js';
 import { AGENT_ROLES, Role } from './role-manager.js';
 import { dispatchToRole, type MessageRow } from './dispatcher.js';
 import { AbortError } from './retry.js';
@@ -12,7 +13,6 @@ import { engineBus, EngineEvents } from './event-bus.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 
-/** Context of a currently active dispatch (for interrupt & resume) */
 export interface DispatchContext {
   role: Role;
   taskId: number | null;
@@ -20,14 +20,10 @@ export interface DispatchContext {
   startedAt: string;
 }
 
-// ── Shared mutable state ──
-
 let currentDispatch: DispatchContext | null = null;
 let currentAbortController: AbortController | null = null;
-/** Stored opencode client ref for session.abort */
 let storedClient: OpencodeClient | null = null;
 
-/** Read PM cooldown from config, falling back to 3000ms. */
 function getPmCooldownMs(): number {
   try {
     return loadConfig().engine?.pmCooldownMs ?? 3000;
@@ -79,41 +75,24 @@ export function setPmLastDispatchEnd(ts: number): void {
   pmLastDispatchEnd = ts;
 }
 
-/**
- * Get PM's last dispatch end timestamp.
- * Used by PmIdleMonitor to calculate PM idle duration for reminder logic.
- */
 export function getPmLastDispatchEnd(): number {
   return pmLastDispatchEnd;
 }
 
-/**
- * Get DEV's last dispatch end timestamp.
- * Used by PmIdleMonitor to check DEV activity before sending PM reminder.
- */
 export function getDevLastDispatchEnd(): number {
   return devLastDispatchEnd;
 }
 
-/**
- * Get the context of the currently in-flight dispatch, if any.
- */
 export function getCurrentDispatchContext(): DispatchContext | null {
   return currentDispatch;
 }
 
-/**
- * Abort the currently in-flight dispatch and return its context.
- * Also calls session.abort on the opencode server to stop LLM processing.
- * Returns the dispatch context (for persisting interrupted state), or null if idle.
- */
 export async function abortCurrentDispatch(): Promise<DispatchContext | null> {
   const ctx = currentDispatch;
   if (currentAbortController) {
     currentAbortController.abort();
     currentAbortController = null;
   }
-  // Tell opencode server to stop the in-flight LLM call
   if (ctx?.sessionId && storedClient) {
     try {
       await storedClient.session.abort({ path: { id: ctx.sessionId } });
@@ -124,8 +103,9 @@ export async function abortCurrentDispatch(): Promise<DispatchContext | null> {
   return ctx;
 }
 
-export function promoteDeferredPmMessages(roleManager: RoleManager): void {
-  if (!roleManager.isBusy(Role.PM)) {
+export function promoteDeferredPmMessages(roleManager: RoleManager, pmState?: RoleRuntimeState): void {
+  const pmIdle = pmState ? !pmState.serverBusy : !roleManager.isBusy(Role.PM);
+  if (pmIdle) {
     const pmUnread = select<MessageRow>('messages', {
       to_role: Role.PM,
       status: MessageStatus.Unread,
@@ -142,26 +122,26 @@ export function promoteDeferredPmMessages(roleManager: RoleManager): void {
 const MAX_DISPATCH_RETRIES = 3;
 const DISPATCH_BACKOFF_MS = 30_000;
 
-/**
- * Try to dispatch normal role messages (round-robin across AGENT_ROLES).
- * Dispatches at most one role per call (V1 serial strategy).
- * Each tick dispatches only one task group per role (Option B).
- */
 export async function tryDispatchNormalRole(
   client: OpencodeClient,
   sessionManager: SessionManager,
   roleManager: RoleManager,
-  pmIdleMonitor?: PmIdleMonitor
+  onPmDispatchSuccess?: () => void,
+  states?: Map<Role, RoleRuntimeState>,
+  intents?: DispatchIntent[]
 ): Promise<void> {
-  const roleOrder =
-    lastDispatchedRole && AGENT_ROLES.includes(lastDispatchedRole)
-      ? [...AGENT_ROLES].sort((a, b) =>
-          a === lastDispatchedRole ? 1 : b === lastDispatchedRole ? -1 : 0
-        )
-      : [...AGENT_ROLES];
+  const intentRoles = intents && intents.length > 0
+    ? intents.map((i) => i.role)
+    : (lastDispatchedRole && AGENT_ROLES.includes(lastDispatchedRole)
+        ? [...AGENT_ROLES].sort((a, b) =>
+            a === lastDispatchedRole ? 1 : b === lastDispatchedRole ? -1 : 0
+          )
+        : [...AGENT_ROLES]);
 
-  for (const role of roleOrder) {
-    if (roleManager.isBusy(role)) continue;
+  for (const role of intentRoles) {
+    const state = states?.get(role);
+    const isBusy = state ? state.serverBusy : roleManager.isBusy(role);
+    if (isBusy) continue;
 
     if (role === Role.PM && Date.now() - pmLastDispatchEnd < getPmCooldownMs()) {
       continue;
@@ -270,11 +250,11 @@ export async function tryDispatchNormalRole(
         }
         saveDispatchState();
       }
-      if (dispatchSucceeded && role === Role.PM && pmIdleMonitor) {
-        pmIdleMonitor.resetReminder();
+      if (dispatchSucceeded && role === Role.PM && onPmDispatchSuccess) {
+        onPmDispatchSuccess();
       }
     }
 
-    break; // V1: at most one dispatch per tick
+    break;
   }
 }

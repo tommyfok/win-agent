@@ -55,19 +55,6 @@ export function removeServerInfo(workspace: string): void {
   if (fs.existsSync(file)) fs.unlinkSync(file);
 }
 
-/**
- * Check if the opencode server is reachable by listing sessions.
- * Returns true if healthy, false if unreachable or erroring.
- */
-export async function checkHealth(client: OpencodeClient): Promise<boolean> {
-  try {
-    await client.session.list();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Read the opencode server PID from persisted info (for use by stop command). */
 export function loadServerPid(workspace: string): number | null {
   return loadServerInfo(workspace)?.pid ?? null;

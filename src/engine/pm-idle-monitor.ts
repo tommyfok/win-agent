@@ -1,3 +1,8 @@
+/**
+ * @deprecated Replaced by StallDetector (stall-detector.ts).
+ * This module is kept for backward compatibility with existing tests only.
+ * All new code should use StallDetector instead.
+ */
 import { select, insert } from '../db/repository.js';
 import { MessageStatus, TaskStatus } from '../db/types.js';
 import { Role, type RoleManager } from './role-manager.js';
