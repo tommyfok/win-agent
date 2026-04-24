@@ -123,12 +123,23 @@ export class SessionManager {
   }
 
   /**
-   * Create a fresh session for DEV on every dispatch.
-   * Each dispatch gets a clean context with role identity and memory recall.
+   * Get the DEV session for a task, reusing the existing one if present.
+   *
+   * A fresh session is created only when:
+   * - The task has no session yet (first dispatch for this task), OR
+   * - The previous session was cleared via `releaseTaskSession` (task done / iteration reviewed), OR
+   * - `rotateSession` replaced it due to context-limit rotation.
+   *
+   * Reusing the session preserves the DEV's working context (files read, commands run, partial
+   * progress) across dispatches on the same task, instead of spinning up a new "DEV worker"
+   * each time PM sends a follow-up message.
    */
   async getTaskSession(taskId: number, role: Role.DEV): Promise<string> {
     const key = `${taskId}-${role}`;
-    this.taskSessions.delete(key);
+    const existing = this.taskSessions.get(key);
+    if (existing) {
+      return existing;
+    }
 
     const sessionId = await createRoleSession(
       this.client,
