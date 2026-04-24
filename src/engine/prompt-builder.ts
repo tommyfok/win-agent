@@ -236,7 +236,11 @@ export function buildDispatchPrompt(
     );
   } else {
     parts.push(
-      '## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要），并通过 database_update 更新任务状态（如适用）。'
+      '## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要）。任务状态更新仅限以下场景：\n' +
+        '- 取消任务：将未开始任务（pending_dev）设为 cancelled\n' +
+        '- 验收审核：将 InReview 任务设为 done 或 rejected\n' +
+        '- 阻塞处理：必要时将任务设为 blocked\n' +
+        '**禁止将任务设为 in_dev**，该状态由 DEV 收到 directive 后自行设置。'
     );
   }
 

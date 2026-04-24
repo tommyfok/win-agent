@@ -23,6 +23,16 @@ const TASK_STATUS_VALUES = [
   'blocked',
 ] as const;
 
+/**
+ * 状态转换的角色白名单。结构与 src/db/state-machine.ts 的 TASK_TRANSITION_ROLES 一致。
+ * 未在此映射中的转换表示所有角色均可执行。
+ */
+const TASK_TRANSITION_ROLES: Partial<Record<string, Partial<Record<string, string[]>>>> = {
+  pending_dev: {
+    in_dev: ['DEV', 'system'],
+  },
+};
+
 const z = tool.schema;
 
 /** Minimal SQLite surface (bun:sqlite or better-sqlite3). */
@@ -358,6 +368,20 @@ export const update: ToolDefinition = tool({
         return JSON.stringify({
           error: `无效的任务状态: ${String(data.status)}，有效值: ${TASK_STATUS_VALUES.join(', ')}`,
         });
+      }
+      // Role-based transition check
+      if (where.id != null) {
+        const prev = db.prepare('SELECT status FROM tasks WHERE id = ?').get(where.id) as
+          | { status: string }
+          | undefined;
+        if (prev) {
+          const allowedRoles = TASK_TRANSITION_ROLES[prev.status]?.[String(data.status)];
+          if (allowedRoles && !allowedRoles.includes(ROLE)) {
+            return JSON.stringify({
+              error: `角色 ${ROLE} 无权将任务状态从 ${prev.status} 更改为 ${String(data.status)}，允许的角色: ${allowedRoles.join(', ')}`,
+            });
+          }
+        }
       }
     }
 

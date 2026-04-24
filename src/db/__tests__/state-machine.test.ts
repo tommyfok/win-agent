@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { setupTestDb } from './test-helpers.js';
 import { insert, update, select } from '../repository.js';
-import { transitionTaskStatus, TASK_TRANSITIONS } from '../state-machine.js';
+import { transitionTaskStatus, TASK_TRANSITIONS, TASK_TRANSITION_ROLES } from '../state-machine.js';
 import { Role } from '../../engine/role-manager.js';
 import { TaskStatus } from '../types.js';
 
@@ -139,5 +139,34 @@ describe('transitionTaskStatus — illegal transitions', () => {
     ).toThrow();
     expect(select<{ status: string }>('tasks', { id })[0].status).toBe(TaskStatus.PendingDev);
     expect(select('task_events', { task_id: id })).toHaveLength(0);
+  });
+});
+
+describe('TASK_TRANSITION_ROLES', () => {
+  it('PendingDev → InDev is restricted to DEV and system', () => {
+    const id = createTask(TaskStatus.PendingDev);
+    expect(() =>
+      transitionTaskStatus(id, TaskStatus.PendingDev, TaskStatus.InDev, Role.PM, 'pm starts dev')
+    ).toThrow('无权执行状态转换');
+    // status unchanged
+    expect(select<{ status: string }>('tasks', { id })[0].status).toBe(TaskStatus.PendingDev);
+  });
+
+  it('DEV can transition PendingDev → InDev', () => {
+    const id = createTask(TaskStatus.PendingDev);
+    transitionTaskStatus(id, TaskStatus.PendingDev, TaskStatus.InDev, Role.DEV, 'dev starts');
+    expect(select<{ status: string }>('tasks', { id })[0].status).toBe(TaskStatus.InDev);
+  });
+
+  it('system can transition PendingDev → InDev', () => {
+    const id = createTask(TaskStatus.PendingDev);
+    transitionTaskStatus(id, TaskStatus.PendingDev, TaskStatus.InDev, Role.SYS, 'auto');
+    expect(select<{ status: string }>('tasks', { id })[0].status).toBe(TaskStatus.InDev);
+  });
+
+  it('unrestricted transitions allow any role', () => {
+    const id = createTask(TaskStatus.InReview);
+    transitionTaskStatus(id, TaskStatus.InReview, TaskStatus.Done, Role.PM, 'accepted');
+    expect(select<{ status: string }>('tasks', { id })[0].status).toBe(TaskStatus.Done);
   });
 });

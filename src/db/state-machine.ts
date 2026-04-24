@@ -3,6 +3,17 @@ import { TaskStatus } from './types.js';
 import type { Role } from '../engine/role-manager.js';
 
 /**
+ * 状态转换的角色白名单。
+ * 外层 key = from 状态，内层 key = to 状态，value = 允许执行该转换的角色列表。
+ * 未在此映射中的转换表示所有角色均可执行（受 TASK_TRANSITIONS 约束）。
+ */
+export const TASK_TRANSITION_ROLES: Partial<Record<TaskStatus, Partial<Record<TaskStatus, Role[]>>>> = {
+  [TaskStatus.PendingDev]: {
+    [TaskStatus.InDev]: ['DEV', 'system'],
+  },
+};
+
+/**
  * 合法的任务状态流转图
  *
  * 所有 "活跃" 状态均可被阻塞（blocked），阻塞后可恢复到任意活跃状态。
@@ -57,6 +68,13 @@ export function transitionTaskStatus(
   const allowed = TASK_TRANSITIONS[from];
   if (!allowed?.includes(to)) {
     throw new Error(`非法任务状态转换: ${from} → ${to} (task #${taskId})`);
+  }
+
+  const roleAllowlist = TASK_TRANSITION_ROLES[from]?.[to];
+  if (roleAllowlist && !roleAllowlist.includes(changedBy)) {
+    throw new Error(
+      `角色 ${changedBy} 无权执行状态转换 ${from} → ${to} (task #${taskId})，允许的角色: ${roleAllowlist.join(', ')}`
+    );
   }
   update('tasks', { id: taskId }, {
     status: to,
