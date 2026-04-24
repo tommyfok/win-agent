@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { setupTestDb } from './test-helpers.js';
 import { insert, update, select } from '../repository.js';
-import { transitionTaskStatus, TASK_TRANSITIONS, TASK_TRANSITION_ROLES } from '../state-machine.js';
+import { transitionTaskStatus, TASK_TRANSITIONS } from '../state-machine.js';
 import { Role } from '../../engine/role-manager.js';
 import { TaskStatus } from '../types.js';
 

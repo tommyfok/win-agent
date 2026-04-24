@@ -1,6 +1,6 @@
 import { update, insert } from './repository.js';
 import { TaskStatus } from './types.js';
-import type { Role } from '../engine/role-manager.js';
+import { Role } from '../engine/role-manager.js';
 
 /**
  * 状态转换的角色白名单。
@@ -9,7 +9,7 @@ import type { Role } from '../engine/role-manager.js';
  */
 export const TASK_TRANSITION_ROLES: Partial<Record<TaskStatus, Partial<Record<TaskStatus, Role[]>>>> = {
   [TaskStatus.PendingDev]: {
-    [TaskStatus.InDev]: ['DEV', 'system'],
+    [TaskStatus.InDev]: [Role.DEV, Role.SYS],
   },
 };
 
