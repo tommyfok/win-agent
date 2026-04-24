@@ -14,6 +14,7 @@
     "lint:fix": "tsc --noEmit && eslint src --fix",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
+    "inspect:sessions": "tsx scripts/inspect-opencode-sessions.ts",
     "test": "vitest run",
     "deploy:local": "pnpm lint && pnpm test && pnpm build && npm link"
   },
