@@ -46,6 +46,8 @@ export interface EngineConfig {
 export interface WinAgentConfig {
   workspaceId?: string;
   provider?: ProviderConfig;
+  /** Optional per-role LLM overrides. Falls back to `provider` when omitted. */
+  roleProviders?: Partial<Record<'PM' | 'DEV', ProviderConfig>>;
   embedding?: EmbeddingConfig;
   serverPassword?: string;
   contextRotation?: ContextRotationConfig;

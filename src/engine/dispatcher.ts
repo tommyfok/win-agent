@@ -12,6 +12,7 @@ import { buildDispatchPrompt, getTaskContext } from './prompt-builder.js';
 import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { getModelForRole } from './role-model.js';
 
 export type { MessageRow };
 
@@ -74,6 +75,7 @@ export async function dispatchToRole(
   const prompt =
     (pendingContext ? pendingContext + '\n\n---\n\n' : '') +
     buildDispatchPrompt(role, messages, knowledge, taskContext);
+  const model = getModelForRole(role, sessionManager.getWorkspace());
 
   const result = await withRetry(
     () =>
@@ -81,10 +83,11 @@ export async function dispatchToRole(
         client.session.prompt({
           path: { id: sessionId },
           body: {
+            ...(model ? { model } : {}),
             parts: [{ type: 'text', text: prompt }],
           },
         }),
-        loadConfig().engine?.dispatchTimeoutMs ?? 60 * 60 * 1000, // 1 hour
+        loadConfig(sessionManager.getWorkspace()).engine?.dispatchTimeoutMs ?? 60 * 60 * 1000, // 1 hour
         `${role} session.prompt`
       ),
     { maxAttempts: 3, label: `${role} dispatch`, signal: options?.signal }

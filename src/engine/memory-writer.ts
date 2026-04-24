@@ -3,6 +3,7 @@ import { insertMemory } from '../embedding/memory.js';
 import { withTimeout } from './retry.js';
 import { insert as dbInsert } from '../db/repository.js';
 import type { Role } from './role-manager.js';
+import { getModelForRole } from './role-model.js';
 
 export const WRITE_MEMORY_PROMPT = `你即将被轮转到一个新的 session。请总结你当前的工作状态，包括：
 
@@ -36,10 +37,12 @@ export async function writeMemory(
   trigger: string,
   timeoutMs: number = 3 * 60 * 1000
 ): Promise<void> {
+  const model = getModelForRole(role);
   const result = await withTimeout(
     client.session.prompt({
       path: { id: sessionId },
       body: {
+        ...(model ? { model } : {}),
         parts: [{ type: 'text', text: WRITE_MEMORY_PROMPT }],
       },
     }),

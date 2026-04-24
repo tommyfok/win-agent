@@ -3,6 +3,7 @@ import type { OpencodeClient } from '@opencode-ai/sdk';
 import { withRetry } from './retry.js';
 import { buildRecallPrompt } from '../embedding/memory.js';
 import { Role } from './role-manager.js';
+import { getModelForRole } from './role-model.js';
 
 function getRoleFilePath(workspace: string, role: Role): string {
   return path.join(workspace, '.win-agent', 'roles', `${role}.md`);
@@ -51,6 +52,7 @@ export async function createRoleSession(
     { maxAttempts: 3, label: `${role} session.create` }
   );
   const sessionId = sessionResult.data!.id;
+  const model = getModelForRole(role, workspace);
 
   const parts: string[] = [];
 
@@ -68,6 +70,7 @@ export async function createRoleSession(
       client.session.promptAsync({
         path: { id: sessionId },
         body: {
+          ...(model ? { model } : {}),
           parts: [
             {
               type: 'text',

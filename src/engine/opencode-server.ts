@@ -207,10 +207,10 @@ export async function startOpencodeServer(workspace: string): Promise<OpencodeSe
   }
 
   // 2. Ensure all opencode packages are installed
-  ensureOpencodePackages(workspace, config.provider);
+  ensureOpencodePackages(workspace, [config.provider, ...Object.values(config.roleProviders ?? {})]);
 
   // 3. Start a new server (port=0 lets the OS assign a free port)
-  const opcodeConfig = buildOpencodeConfig(config.provider);
+  const opcodeConfig = buildOpencodeConfig(config.provider, config.roleProviders);
   const opcodeConfigWithLog = { ...opcodeConfig, logLevel: 'DEBUG' };
 
   const proc = spawn('opencode', ['serve', `--hostname=0.0.0.0`, `--port=0`, `--log-level=DEBUG`], {

@@ -323,8 +323,23 @@ PM 角色
 ```json
 {
   "workspaceId": "a1b2c3d4",
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-6",
+  "provider": {
+    "type": "anthropic",
+    "apiKey": "",
+    "model": "claude-sonnet-4-6"
+  },
+  "roleProviders": {
+    "PM": {
+      "type": "opencode-zen",
+      "apiKey": "",
+      "model": "gpt-5.4"
+    },
+    "DEV": {
+      "type": "opencode-go",
+      "apiKey": "",
+      "model": "qwen3.6-plus"
+    }
+  },
   "embedding": {
     "type": "local"
   },
@@ -342,6 +357,8 @@ PM 角色
   }
 }
 ```
+
+`roleProviders` 可选；未配置的角色会回退到全局 `provider`。如果同一个 provider（例如 `opencode-zen`）被多个角色复用，API Key 必须一致。
 
 `engine` 字段所有项均有默认值，缺省时行为不变。各项说明：
 

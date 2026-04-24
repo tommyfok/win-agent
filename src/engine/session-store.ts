@@ -4,6 +4,7 @@ import type { OpencodeClient } from '@opencode-ai/sdk';
 import { withRetry } from './retry.js';
 import { loadConfig } from '../config/index.js';
 import { Role } from './role-manager.js';
+import { getModelForRole } from './role-model.js';
 
 // Re-export for callers that import session creation from this module
 export { createRoleSession } from './session-factory.js';
@@ -121,11 +122,13 @@ export async function checkAndResumeInterrupted(
     (taskId ? `\n\n被中断的任务 ID: task#${taskId}` : '');
 
   try {
+    const model = getModelForRole(role, workspace);
     await withRetry(
       () =>
         client.session.promptAsync({
           path: { id: sessionId },
           body: {
+            ...(model ? { model } : {}),
             parts: [{ type: 'text', text: resumePrompt }],
           },
         }),

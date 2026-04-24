@@ -1,5 +1,10 @@
 import { execSync } from 'node:child_process';
-import { loadConfig, saveConfig, checkEngineRunning } from '../config/index.js';
+import {
+  loadConfig,
+  saveConfig,
+  checkEngineRunning,
+  type ProviderConfig,
+} from '../config/index.js';
 import { select, confirm, input } from '@inquirer/prompts';
 
 /**
@@ -49,6 +54,33 @@ export function fetchOpencodeModels(): Map<string, string[]> | null {
   return null;
 }
 
+function formatProvider(provider?: ProviderConfig): string {
+  if (!provider?.type || !provider.model) return '未配置';
+  return `${provider.type} / ${provider.model}${provider.reasoning ? ' (推理模型)' : ''}`;
+}
+
+async function selectProvider(providerMap: Map<string, string[]>): Promise<ProviderConfig> {
+  const providers = Array.from(providerMap.keys()).sort();
+  console.log(`   ✓ 找到 ${providers.length} 个可用 Provider`);
+
+  const selectedProvider = await select({
+    message: '请选择 Provider',
+    choices: providers.map((p) => ({ value: p, name: p })),
+  });
+
+  const models = providerMap.get(selectedProvider)!;
+  const selectedModel = await select({
+    message: `请选择 ${selectedProvider} 的模型`,
+    choices: models.map((m) => ({ value: m, name: m })),
+  });
+
+  return {
+    type: selectedProvider,
+    apiKey: '',
+    model: selectedModel,
+  };
+}
+
 /**
  * `win-agent model` command — switch the LLM provider/model for the current workspace.
  */
@@ -72,13 +104,9 @@ async function _modelCommand() {
   const config = loadConfig(workspace);
 
   console.log('\n📦 当前模型配置');
-  if (config.provider?.type && config.provider?.model) {
-    console.log(
-      `   Provider: ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? ' (推理模型)' : ''}`
-    );
-  } else {
-    console.log('   Provider: 未配置');
-  }
+  console.log(`   默认 Provider: ${formatProvider(config.provider)}`);
+  console.log(`   PM Provider: ${formatProvider(config.roleProviders?.PM)}`);
+  console.log(`   DEV Provider: ${formatProvider(config.roleProviders?.DEV)}`);
   if (config.embedding?.type && config.embedding?.model) {
     console.log(`   Embedding: ${config.embedding.type} / ${config.embedding.model}`);
   } else {
@@ -120,27 +148,32 @@ async function _modelCommand() {
       return;
     }
 
-    const providers = Array.from(providerMap.keys()).sort();
-    console.log(`   ✓ 找到 ${providers.length} 个可用 Provider`);
-
-    const selectedProvider = await select({
-      message: '请选择 Provider',
-      choices: providers.map((p) => ({ value: p, name: p })),
+    const target = await select({
+      message: '请选择配置范围',
+      choices: [
+        { value: 'global', name: '全局默认模型（未单独配置的角色使用）' },
+        { value: 'PM', name: '仅 PM 角色' },
+        { value: 'DEV', name: '仅 DEV 角色' },
+        { value: 'clear-PM', name: '清除 PM 角色覆盖' },
+        { value: 'clear-DEV', name: '清除 DEV 角色覆盖' },
+      ],
     });
 
-    const models = providerMap.get(selectedProvider)!;
-    const selectedModel = await select({
-      message: `请选择 ${selectedProvider} 的模型`,
-      choices: models.map((m) => ({ value: m, name: m })),
-    });
-
-    config.provider = {
-      type: selectedProvider,
-      apiKey: '',
-      model: selectedModel,
-    };
-
-    console.log(`   ✓ 已选择: ${selectedProvider} / ${selectedModel}`);
+    if (target === 'clear-PM' || target === 'clear-DEV') {
+      const role = target === 'clear-PM' ? 'PM' : 'DEV';
+      if (config.roleProviders) delete config.roleProviders[role];
+      console.log(`   ✓ 已清除 ${role} 角色模型覆盖`);
+    } else {
+      const selected = await selectProvider(providerMap);
+      if (target === 'global') {
+        config.provider = selected;
+      } else {
+        const role = target as 'PM' | 'DEV';
+        config.roleProviders = config.roleProviders ?? {};
+        config.roleProviders[role] = selected;
+      }
+      console.log(`   ✓ 已选择: ${target} → ${selected.type} / ${selected.model}`);
+    }
   }
 
   if (changeEmbedding && !changeProvider) {
@@ -188,9 +221,9 @@ async function _modelCommand() {
   saveConfig(config, workspace);
 
   console.log('\n✅ 模型配置已更新');
-  console.log(
-    `   Provider: ${config.provider?.type} / ${config.provider?.model}${config.provider?.reasoning ? ' (推理模型)' : ''}`
-  );
+  console.log(`   默认 Provider: ${formatProvider(config.provider)}`);
+  console.log(`   PM Provider: ${formatProvider(config.roleProviders?.PM)}`);
+  console.log(`   DEV Provider: ${formatProvider(config.roleProviders?.DEV)}`);
   console.log(`   Embedding: ${config.embedding?.type} / ${config.embedding?.model}`);
 
   if (running) {

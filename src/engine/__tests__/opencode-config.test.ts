@@ -320,4 +320,96 @@ describe('buildOpencodeConfig', () => {
       expect(providerConfig['opencode']?.env?.[0]).toBe('OPENCODE_API_KEY=key');
     });
   });
+
+  describe('role provider overrides', () => {
+    it('registers role-specific models while keeping the global default model', () => {
+      const config = buildOpencodeConfig(
+        {
+          type: 'opencode-zen',
+          apiKey: 'shared-key',
+          model: 'claude-sonnet-4-6',
+        },
+        {
+          PM: {
+            type: 'opencode-zen',
+            apiKey: 'shared-key',
+            model: 'gpt-5.4',
+          },
+          DEV: {
+            type: 'opencode-go',
+            apiKey: 'go-key',
+            model: 'qwen3.6-plus',
+          },
+        }
+      );
+
+      expect(config.model).toBe('opencode/claude-sonnet-4-6');
+      expect(config.provider).toEqual({
+        opencode: {
+          env: ['OPENCODE_API_KEY=shared-key'],
+        },
+        'opencode-go': {
+          env: ['OPENCODE_API_KEY=go-key'],
+        },
+      });
+    });
+
+    it('merges compatible custom role models into one custom provider', () => {
+      const config = buildOpencodeConfig(
+        {
+          type: 'custom-openai',
+          apiKey: 'custom-key',
+          model: 'default-model',
+          baseUrl: 'https://api.example.com/v1',
+        },
+        {
+          DEV: {
+            type: 'custom-openai',
+            apiKey: 'custom-key',
+            model: 'dev-model',
+            baseUrl: 'https://api.example.com/v1',
+          },
+        }
+      );
+
+      expect(config.provider).toEqual({
+        custom: {
+          npm: '@ai-sdk/openai-compatible',
+          models: {
+            'default-model': {
+              name: 'default-model',
+              tool_call: true,
+            },
+            'dev-model': {
+              name: 'dev-model',
+              tool_call: true,
+            },
+          },
+          options: {
+            baseURL: 'https://api.example.com/v1',
+            apiKey: 'custom-key',
+          },
+        },
+      });
+    });
+
+    it('rejects conflicting same-provider credentials', () => {
+      expect(() =>
+        buildOpencodeConfig(
+          {
+            type: 'opencode-zen',
+            apiKey: 'key-a',
+            model: 'claude-sonnet-4-6',
+          },
+          {
+            PM: {
+              type: 'opencode-zen',
+              apiKey: 'key-b',
+              model: 'gpt-5.4',
+            },
+          }
+        )
+      ).toThrow('Conflicting opencode provider config');
+    });
+  });
 });

@@ -23,6 +23,18 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
     console.log(
       `   ✓ 已配置 → ${config.provider.type} / ${config.provider.model}${config.provider.reasoning ? ' (推理模型)' : ''}`
     );
+    if (config.roleProviders?.PM || config.roleProviders?.DEV) {
+      if (config.roleProviders.PM) {
+        console.log(
+          `   PM 覆盖 → ${config.roleProviders.PM.type} / ${config.roleProviders.PM.model}`
+        );
+      }
+      if (config.roleProviders.DEV) {
+        console.log(
+          `   DEV 覆盖 → ${config.roleProviders.DEV.type} / ${config.roleProviders.DEV.model}`
+        );
+      }
+    }
   } else {
     console.log('   → 获取可用 Provider 列表...');
     const providerMap = fetchOpencodeModels();
@@ -98,6 +110,14 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
   console.log(
     `   Provider: ${config.provider?.type} / ${config.provider?.model}${config.provider?.reasoning ? ' (推理模型)' : ''}`
   );
+  if (config.roleProviders?.PM) {
+    console.log(`   PM Provider: ${config.roleProviders.PM.type} / ${config.roleProviders.PM.model}`);
+  }
+  if (config.roleProviders?.DEV) {
+    console.log(
+      `   DEV Provider: ${config.roleProviders.DEV.type} / ${config.roleProviders.DEV.model}`
+    );
+  }
   console.log(`   Embedding: ${config.embedding?.type} / ${config.embedding?.model}`);
 
   // P1: docs/knowledge DB consistency lint
