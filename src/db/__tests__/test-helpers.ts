@@ -50,7 +50,9 @@ export function setupTestDb(): Database.Database {
       related_task_id INTEGER REFERENCES tasks(id),
       related_iteration_id INTEGER REFERENCES iterations(id),
       attachments  TEXT,
-      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_retry_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS logs (

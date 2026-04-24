@@ -164,7 +164,7 @@ async function getSessionForRole(
         return sessionManager.getTaskSession(-1, devRole);
       }
     })
-    .with(Role.PM, (pmRole) => sessionManager.getSession(pmRole))
+    .with(Role.PM, (pmRole) => sessionManager.ensureSession(pmRole))
     .with(Role.USER, Role.SYS, Role.ASSISTANT, () => {
       logger.warn(
         { role },

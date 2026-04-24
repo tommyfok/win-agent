@@ -74,7 +74,8 @@ export function stopSchedulerLoop(): void {
 async function handleStuckSessions(
   intents: DispatchIntent[],
   client: OpencodeClient
-): Promise<void> {
+): Promise<boolean> {
+  let aborted = false;
   for (const intent of intents) {
     if (intent.reason !== 'stuck_session') continue;
     const sessionId = (intent.details as { sessionId: string })?.sessionId;
@@ -88,10 +89,12 @@ async function handleStuckSessions(
         action: 'stuck_session_aborted',
         content: `${intent.role} session ${sessionId} was stuck and has been aborted`,
       });
+      aborted = true;
     } catch (err) {
       logger.warn({ err, sessionId }, 'handleStuckSessions: abort failed');
     }
   }
+  return aborted;
 }
 
 async function schedulerTick(
@@ -106,9 +109,7 @@ async function schedulerTick(
   if (!healthy) {
     healthFailCount++;
     logger.error({ healthFailCount }, 'opencode server health check failed (via reconcile)');
-    if (healthFailCount >= MAX_HEALTH_FAILURES) {
-      return;
-    }
+    return;
   } else {
     if (healthFailCount >= MAX_HEALTH_FAILURES) {
       logger.info('opencode server recovered, resuming dispatch');
@@ -121,7 +122,18 @@ async function schedulerTick(
 
   const intents = await stallDetector.detect(states, roleManager, client);
 
-  await handleStuckSessions(intents, client);
+  const abortedStuckSession = await handleStuckSessions(intents, client);
+  if (abortedStuckSession) {
+    return;
+  }
 
-  await tryDispatchNormalRole(client, sessionManager, roleManager, () => stallDetector.resetReminder(), states, intents);
+  const dispatchIntents = intents.filter((intent) => intent.reason !== 'stuck_session');
+  await tryDispatchNormalRole(
+    client,
+    sessionManager,
+    roleManager,
+    () => stallDetector.resetReminder(),
+    states,
+    dispatchIntents
+  );
 }

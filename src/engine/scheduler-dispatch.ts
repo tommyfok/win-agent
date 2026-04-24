@@ -103,7 +103,10 @@ export async function abortCurrentDispatch(): Promise<DispatchContext | null> {
   return ctx;
 }
 
-export function promoteDeferredPmMessages(roleManager: RoleManager, pmState?: RoleRuntimeState): void {
+export function promoteDeferredPmMessages(
+  roleManager: RoleManager,
+  pmState?: RoleRuntimeState
+): void {
   const pmIdle = pmState ? !pmState.serverBusy : !roleManager.isBusy(Role.PM);
   if (pmIdle) {
     const pmUnread = select<MessageRow>('messages', {
@@ -111,16 +114,50 @@ export function promoteDeferredPmMessages(roleManager: RoleManager, pmState?: Ro
       status: MessageStatus.Unread,
     });
     if (pmUnread.length === 0) {
-      rawRun(
-        `UPDATE messages SET status = ? WHERE status = ? AND to_role = ?`,
-        [MessageStatus.Unread, MessageStatus.Deferred, Role.PM]
-      );
+      rawRun(`UPDATE messages SET status = ? WHERE status = ? AND to_role = ?`, [
+        MessageStatus.Unread,
+        MessageStatus.Deferred,
+        Role.PM,
+      ]);
     }
   }
 }
 
 const MAX_DISPATCH_RETRIES = 3;
 const DISPATCH_BACKOFF_MS = 30_000;
+
+const INTENT_PRIORITY: Record<DispatchIntent['reason'], number> = {
+  unread_messages: 0,
+  stuck_session: 1,
+  pending_work: 2,
+};
+
+function rotateRolesAfterLastDispatched(roles: Role[]): Role[] {
+  if (!lastDispatchedRole) return roles;
+  const idx = roles.indexOf(lastDispatchedRole);
+  if (idx === -1) return roles;
+  return [...roles.slice(idx + 1), ...roles.slice(0, idx + 1)];
+}
+
+function orderRolesForDispatch(intents?: DispatchIntent[]): Role[] {
+  if (!intents || intents.length === 0) {
+    return rotateRolesAfterLastDispatched([...AGENT_ROLES]);
+  }
+
+  const ordered: Role[] = [];
+  const priorities = [...new Set(intents.map((i) => INTENT_PRIORITY[i.reason]))].sort(
+    (a, b) => a - b
+  );
+
+  for (const priority of priorities) {
+    const rolesAtPriority = [
+      ...new Set(intents.filter((i) => INTENT_PRIORITY[i.reason] === priority).map((i) => i.role)),
+    ];
+    ordered.push(...rotateRolesAfterLastDispatched(rolesAtPriority));
+  }
+
+  return ordered;
+}
 
 export async function tryDispatchNormalRole(
   client: OpencodeClient,
@@ -130,13 +167,7 @@ export async function tryDispatchNormalRole(
   states?: Map<Role, RoleRuntimeState>,
   intents?: DispatchIntent[]
 ): Promise<void> {
-  const intentRoles = intents && intents.length > 0
-    ? [...new Set(intents.map((i) => i.role))]
-    : (lastDispatchedRole && AGENT_ROLES.includes(lastDispatchedRole)
-        ? [...AGENT_ROLES].sort((a, b) =>
-            a === lastDispatchedRole ? 1 : b === lastDispatchedRole ? -1 : 0
-          )
-        : [...AGENT_ROLES]);
+  const intentRoles = orderRolesForDispatch(intents);
 
   for (const role of intentRoles) {
     const state = states?.get(role);
@@ -218,16 +249,24 @@ export async function tryDispatchNormalRole(
       for (const msg of batch) {
         const next = (msg.retry_count ?? 0) + 1;
         if (next >= MAX_DISPATCH_RETRIES) {
-          update('messages', { id: msg.id }, {
-            status: MessageStatus.Read,
-            retry_count: next,
-            last_retry_at: now,
-          });
+          update(
+            'messages',
+            { id: msg.id },
+            {
+              status: MessageStatus.Read,
+              retry_count: next,
+              last_retry_at: now,
+            }
+          );
         } else {
-          update('messages', { id: msg.id }, {
-            retry_count: next,
-            last_retry_at: now,
-          });
+          update(
+            'messages',
+            { id: msg.id },
+            {
+              retry_count: next,
+              last_retry_at: now,
+            }
+          );
         }
       }
 

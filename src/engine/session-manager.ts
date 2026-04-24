@@ -116,6 +116,27 @@ export class SessionManager {
   }
 
   /**
+   * Get or recreate the session for a persistent role.
+   *
+   * Used after reconciliation invalidates a stale local mapping whose session
+   * no longer exists on the opencode server.
+   */
+  async ensureSession(role: Role.PM): Promise<string> {
+    const existing = this.activeSessions.get(role);
+    if (existing) return existing;
+
+    const sessionId = await createRoleSession(
+      this.client,
+      this.sessionPrefix,
+      this.workspace,
+      role
+    );
+    this.activeSessions.set(role, sessionId);
+    this.persist();
+    return sessionId;
+  }
+
+  /**
    * Get PM session ID (convenience method for talk command).
    */
   getPmSessionId(): string {
@@ -157,6 +178,27 @@ export class SessionManager {
    */
   releaseTaskSession(taskId: number): void {
     this.taskSessions.delete(`${taskId}-${Role.DEV}`);
+  }
+
+  /**
+   * Drop any local role/task mapping that points at a server-missing session.
+   * The next dispatch will create a fresh session instead of reusing a stale id.
+   */
+  invalidateSessionId(sessionId: string): void {
+    let changed = false;
+    for (const [role, id] of this.activeSessions) {
+      if (id === sessionId) {
+        this.activeSessions.delete(role);
+        changed = true;
+      }
+    }
+    for (const [key, id] of this.taskSessions) {
+      if (id === sessionId) {
+        this.taskSessions.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) this.persist();
   }
 
   /**

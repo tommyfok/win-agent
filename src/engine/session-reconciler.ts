@@ -7,6 +7,7 @@ import { getCurrentDispatchContext } from './scheduler-dispatch.js';
 import { logger } from '../utils/logger.js';
 
 const RECONCILE_TIMEOUT_MS = 3_000;
+const SESSION_GET_TIMEOUT_MS = 1_000;
 
 export interface RoleRuntimeState {
   role: Role;
@@ -20,6 +21,21 @@ export interface RoleRuntimeState {
 function isServerBusy(status: SessionStatus | 'no-session' | 'unknown'): boolean {
   if (status === 'no-session' || status === 'unknown') return false;
   return status.type === 'busy' || status.type === 'retry';
+}
+
+async function sessionExists(client: OpencodeClient, sessionId: string): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('session.get timeout')), SESSION_GET_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([client.session.get({ path: { id: sessionId } }), timeoutPromise]);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export interface ReconcileResult {
@@ -44,10 +60,7 @@ export class SessionStateReconciler {
         timer = setTimeout(() => reject(new Error('reconcile timeout')), RECONCILE_TIMEOUT_MS);
       });
       try {
-        const result = await Promise.race([
-          client.session.status(),
-          timeoutPromise,
-        ]);
+        const result = await Promise.race([client.session.status(), timeoutPromise]);
         statusMap = result.data ?? {};
         this.lastStatusMap = statusMap;
       } finally {
@@ -58,7 +71,7 @@ export class SessionStateReconciler {
       for (const role of AGENT_ROLES) {
         const localBusy = roleManager.isBusy(role);
         const currentTaskId =
-          role === Role.DEV ? getCurrentDispatchContext()?.taskId ?? undefined : undefined;
+          role === Role.DEV ? (getCurrentDispatchContext()?.taskId ?? undefined) : undefined;
         const sessionId =
           sessionManager.getRoleSessionId(role, currentTaskId) ??
           sessionManager.getAllRoleSessionIds(role)[0] ??
@@ -84,11 +97,11 @@ export class SessionStateReconciler {
       // for the "no sessions registered" case.
       const allSessionIds = sessionManager.getAllRoleSessionIds(role);
       const currentTaskId =
-        role === Role.DEV ? getCurrentDispatchContext()?.taskId ?? undefined : undefined;
+        role === Role.DEV ? (getCurrentDispatchContext()?.taskId ?? undefined) : undefined;
       const fallbackSessionId = sessionManager.getRoleSessionId(role, currentTaskId);
 
-      let sessionId: string | null = null;
-      let serverStatus: SessionStatus | 'no-session' | 'unknown' = 'no-session';
+      let sessionId: string | null;
+      let serverStatus: SessionStatus | 'no-session' | 'unknown';
       let serverBusy = false;
 
       if (allSessionIds.length === 0) {
@@ -110,6 +123,22 @@ export class SessionStateReconciler {
         let idleStatus: SessionStatus | 'no-session' | 'unknown' = 'no-session';
         for (const sid of allSessionIds) {
           const status = sid in statusMap ? statusMap[sid] : null;
+          if (!status) {
+            const exists = await sessionExists(client, sid);
+            if (!exists) {
+              sessionManager.invalidateSessionId(sid);
+              logger.info(
+                { role, sessionId: sid },
+                'reconcile: no-session — invalidating local session mapping'
+              );
+              continue;
+            }
+            if (!idleId) {
+              idleId = sid;
+              idleStatus = { type: 'idle' };
+            }
+            continue;
+          }
           if (status && isServerBusy(status)) {
             busyId = sid;
             busyStatus = status;
@@ -141,7 +170,10 @@ export class SessionStateReconciler {
       } else if (!localBusy && serverBusy) {
         drift = 'phantom-busy';
         roleManager.setBusy(role, true);
-        logger.info({ role, sessionId, serverStatus }, 'reconcile: phantom-busy — setting local busy flag');
+        logger.info(
+          { role, sessionId, serverStatus },
+          'reconcile: phantom-busy — setting local busy flag'
+        );
       }
 
       states.set(role, {
