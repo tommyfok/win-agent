@@ -92,7 +92,7 @@ export class StallDetector {
           const devBusy = devState?.serverBusy ?? false;
           const devIdleMs = now - getDevLastDispatchEnd();
           if (!devBusy && devIdleMs >= this.getIdleThresholdMs()) {
-            const issues = detectPmAttentionNeeded();
+            const issues = detectPmAttentionNeeded(devBusy);
             if (issues.length > 0) {
               if (now - this.lastReminderAt >= this.getReminderIntervalMs()) {
                 this.sendIdleReminder(issues, idleMs);
@@ -245,7 +245,7 @@ export interface PmIssue {
   count?: number;
 }
 
-function detectPmAttentionNeeded(): PmIssue[] {
+function detectPmAttentionNeeded(devBusy: boolean): PmIssue[] {
   const issues: PmIssue[] = [];
 
   const pendingDev = select<TaskRow>('tasks', { status: TaskStatus.PendingDev });
@@ -266,9 +266,14 @@ function detectPmAttentionNeeded(): PmIssue[] {
     issues.push({ type: 'task_blocked', task });
   }
 
-  const inDevTasks = select<TaskRow>('tasks', { status: TaskStatus.InDev });
-  for (const task of inDevTasks) {
-    issues.push({ type: 'dev_idle_with_task', task });
+  // Only surface "DEV 空闲但 task InDev" when DEV is actually idle, matching
+  // PmIdleMonitor's behaviour and preventing the reminder from ever nudging PM
+  // to re-dispatch while DEV is still working.
+  if (!devBusy) {
+    const inDevTasks = select<TaskRow>('tasks', { status: TaskStatus.InDev });
+    for (const task of inDevTasks) {
+      issues.push({ type: 'dev_idle_with_task', task });
+    }
   }
 
   const pendingReview = select<TaskRow>('tasks', { status: TaskStatus.PendingReview });

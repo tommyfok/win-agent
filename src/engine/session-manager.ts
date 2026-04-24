@@ -245,4 +245,28 @@ export class SessionManager {
     }
     return null;
   }
+
+  /**
+   * Enumerate every known session id for a role across the workspace.
+   *
+   * - PM: the single persistent session (0 or 1 entry).
+   * - DEV: every task-scoped session currently registered in `taskSessions`
+   *   (keys of the form `${taskId}-DEV`). Used by the reconciler to detect a
+   *   busy DEV session even when no dispatch is in-flight in this process.
+   */
+  getAllRoleSessionIds(role: Role): string[] {
+    if (role === Role.PM) {
+      const id = this.activeSessions.get(Role.PM);
+      return id ? [id] : [];
+    }
+    if (role === Role.DEV) {
+      const ids: string[] = [];
+      const suffix = `-${Role.DEV}`;
+      for (const [key, id] of this.taskSessions) {
+        if (key.endsWith(suffix)) ids.push(id);
+      }
+      return ids;
+    }
+    return [];
+  }
 }
