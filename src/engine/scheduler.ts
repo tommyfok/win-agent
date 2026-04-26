@@ -1,17 +1,16 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
-import type { DispatchIntent } from './stall-detector.js';
 import { RoleManager } from './role-manager.js';
 import { AbortError } from './retry.js';
 import { insert } from '../db/repository.js';
-import { checkAndUnblockDependencies } from './dependency-checker.js';
 import {
   initDispatchState,
   promoteDeferredPmMessages,
   tryDispatchNormalRole,
 } from './scheduler-dispatch.js';
 import { SessionStateReconciler } from './session-reconciler.js';
-import { StallDetector } from './stall-detector.js';
+import { SchedulerMaintenance } from './scheduler-maintenance.js';
+import { findRolesReadyForDispatch } from './message-scheduler.js';
 import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
@@ -36,13 +35,13 @@ export async function startSchedulerLoop(
   initDispatchState(client);
   const roleManager = new RoleManager();
   const reconciler = new SessionStateReconciler();
-  const stallDetector = new StallDetector();
+  const maintenance = new SchedulerMaintenance();
 
   logger.info('scheduler loop started');
 
   while (running) {
     try {
-      await schedulerTick(client, sessionManager, roleManager, reconciler, stallDetector);
+      await schedulerTick(client, sessionManager, roleManager, reconciler, maintenance);
     } catch (err) {
       if (err instanceof AbortError) {
         logger.info({ message: err.message }, 'dispatch aborted');
@@ -71,38 +70,12 @@ export function stopSchedulerLoop(): void {
   running = false;
 }
 
-async function handleStuckSessions(
-  intents: DispatchIntent[],
-  client: OpencodeClient
-): Promise<boolean> {
-  let aborted = false;
-  for (const intent of intents) {
-    if (intent.reason !== 'stuck_session') continue;
-    const sessionId = (intent.details as { sessionId: string })?.sessionId;
-    if (!sessionId) continue;
-
-    try {
-      logger.info({ role: intent.role, sessionId }, 'handleStuckSessions: aborting stuck session');
-      await client.session.abort({ path: { id: sessionId } });
-      insert('logs', {
-        role: Role.SYS,
-        action: 'stuck_session_aborted',
-        content: `${intent.role} session ${sessionId} was stuck and has been aborted`,
-      });
-      aborted = true;
-    } catch (err) {
-      logger.warn({ err, sessionId }, 'handleStuckSessions: abort failed');
-    }
-  }
-  return aborted;
-}
-
 async function schedulerTick(
   client: OpencodeClient,
   sessionManager: SessionManager,
   roleManager: RoleManager,
   reconciler: SessionStateReconciler,
-  stallDetector: StallDetector
+  maintenance: SchedulerMaintenance
 ): Promise<void> {
   const { states, healthy } = await reconciler.reconcile(client, sessionManager, roleManager);
 
@@ -117,23 +90,20 @@ async function schedulerTick(
     healthFailCount = 0;
   }
 
-  checkAndUnblockDependencies();
   promoteDeferredPmMessages(roleManager, states.get(Role.PM));
 
-  const intents = await stallDetector.detect(states, roleManager, client);
-
-  const abortedStuckSession = await handleStuckSessions(intents, client);
+  const { abortedStuckSession } = await maintenance.maybeRun(client, states);
   if (abortedStuckSession) {
     return;
   }
 
-  const dispatchIntents = intents.filter((intent) => intent.reason !== 'stuck_session');
+  const rolesReadyForDispatch = findRolesReadyForDispatch(states);
   await tryDispatchNormalRole(
     client,
     sessionManager,
     roleManager,
-    () => stallDetector.resetReminder(),
+    () => maintenance.resetPmReminder(),
     states,
-    dispatchIntents
+    rolesReadyForDispatch
   );
 }

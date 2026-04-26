@@ -22,7 +22,7 @@ beforeEach(async () => {
 });
 
 describe('tryDispatchNormalRole', () => {
-  it('rotates roles within the same intent priority', async () => {
+  it('rotates candidate roles after the last dispatched role', async () => {
     const { insert } = await import('../../db/repository.js');
     const { dispatchToRole } = await import('../dispatcher.js');
     const schedulerDispatch = await import('../scheduler-dispatch.js');
@@ -78,10 +78,7 @@ describe('tryDispatchNormalRole', () => {
           },
         ],
       ]),
-      [
-        { role: Role.PM, reason: 'unread_messages' },
-        { role: Role.DEV, reason: 'unread_messages' },
-      ]
+      [Role.PM, Role.DEV]
     );
 
     expect(dispatchToRole).toHaveBeenCalledWith(

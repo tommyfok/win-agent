@@ -2,7 +2,6 @@ import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
 import type { RoleManager } from './role-manager.js';
 import type { RoleRuntimeState } from './session-reconciler.js';
-import type { DispatchIntent } from './stall-detector.js';
 import { AGENT_ROLES, Role } from './role-manager.js';
 import { dispatchToRole, type MessageRow } from './dispatcher.js';
 import { AbortError } from './retry.js';
@@ -126,12 +125,6 @@ export function promoteDeferredPmMessages(
 const MAX_DISPATCH_RETRIES = 3;
 const DISPATCH_BACKOFF_MS = 30_000;
 
-const INTENT_PRIORITY: Record<DispatchIntent['reason'], number> = {
-  unread_messages: 0,
-  stuck_session: 1,
-  pending_work: 2,
-};
-
 function rotateRolesAfterLastDispatched(roles: Role[]): Role[] {
   if (!lastDispatchedRole) return roles;
   const idx = roles.indexOf(lastDispatchedRole);
@@ -139,24 +132,13 @@ function rotateRolesAfterLastDispatched(roles: Role[]): Role[] {
   return [...roles.slice(idx + 1), ...roles.slice(0, idx + 1)];
 }
 
-function orderRolesForDispatch(intents?: DispatchIntent[]): Role[] {
-  if (!intents || intents.length === 0) {
+function orderRolesForDispatch(roles?: Role[]): Role[] {
+  if (!roles || roles.length === 0) {
     return rotateRolesAfterLastDispatched([...AGENT_ROLES]);
   }
 
-  const ordered: Role[] = [];
-  const priorities = [...new Set(intents.map((i) => INTENT_PRIORITY[i.reason]))].sort(
-    (a, b) => a - b
-  );
-
-  for (const priority of priorities) {
-    const rolesAtPriority = [
-      ...new Set(intents.filter((i) => INTENT_PRIORITY[i.reason] === priority).map((i) => i.role)),
-    ];
-    ordered.push(...rotateRolesAfterLastDispatched(rolesAtPriority));
-  }
-
-  return ordered;
+  const candidateRoles = [...new Set(roles)];
+  return rotateRolesAfterLastDispatched(candidateRoles);
 }
 
 export async function tryDispatchNormalRole(
@@ -165,11 +147,11 @@ export async function tryDispatchNormalRole(
   roleManager: RoleManager,
   onPmDispatchSuccess?: () => void,
   states?: Map<Role, RoleRuntimeState>,
-  intents?: DispatchIntent[]
+  candidateRoles?: Role[]
 ): Promise<void> {
-  const intentRoles = orderRolesForDispatch(intents);
+  const orderedRoles = orderRolesForDispatch(candidateRoles);
 
-  for (const role of intentRoles) {
+  for (const role of orderedRoles) {
     const state = states?.get(role);
     const isBusy = state ? state.serverBusy : roleManager.isBusy(role);
     if (isBusy) continue;
