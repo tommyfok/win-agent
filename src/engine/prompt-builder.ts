@@ -1,5 +1,5 @@
 import { select } from '../db/repository.js';
-import { MessageStatus } from '../db/types.js';
+import { MessageStatus, TaskStatus } from '../db/types.js';
 import type { KnowledgeEntry } from '../embedding/knowledge.js';
 import type { MessageRow } from './dispatch-filter.js';
 import { Role } from './role-manager.js';
@@ -18,6 +18,13 @@ export interface TaskContext {
   specContent: string | null;
   constitutionContent: string | null;
 }
+
+const DEV_NON_ACTIONABLE_STATUSES = new Set<TaskStatus>([
+  TaskStatus.Paused,
+  TaskStatus.Cancelled,
+  TaskStatus.Blocked,
+  TaskStatus.Done,
+]);
 
 /**
  * Get task context for DEV role.
@@ -103,7 +110,7 @@ function getConstitutionContent(workspace: string): string | null {
  * Build the dispatch prompt injected into the role's session.
  *
  * Sections:
- * 1. 待处理消息 (pending messages)
+ * 1. 本次派发消息 (messages for this dispatch)
  * 2. 当前任务 (task context, DEV only)
  * 3. 相关知识库 (relevant knowledge, if any)
  * 4. DEV 待处理队列 (PM only, dedup guard)
@@ -117,8 +124,8 @@ export function buildDispatchPrompt(
 ): string {
   const parts: string[] = [];
 
-  // 1. Pending messages
-  parts.push('## 待处理消息');
+  // 1. Messages delivered in this dispatch
+  parts.push('## 本次派发消息');
   for (const msg of messages) {
     const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : '';
     parts.push(`来自 ${msg.from_role} [type: ${msg.type}]${taskRef}：\n${msg.content}`);
@@ -180,7 +187,7 @@ export function buildDispatchPrompt(
       'messages',
       { to_role: Role.DEV, status: MessageStatus.Unread },
       { orderBy: 'created_at ASC' }
-    );
+    ).filter(isActionableDevPendingMessage);
 
     if (pendingDevMsgs.length > 0) {
       const currentTaskIds = new Set(
@@ -245,4 +252,17 @@ export function buildDispatchPrompt(
   }
 
   return parts.join('\n\n');
+}
+
+function isActionableDevPendingMessage(message: MessageRow): boolean {
+  if (
+    !message.related_task_id ||
+    message.type === 'cancel_task' ||
+    message.type === 'feedback'
+  ) {
+    return true;
+  }
+
+  const task = select<{ status: TaskStatus }>('tasks', { id: message.related_task_id })[0];
+  return !task || !DEV_NON_ACTIONABLE_STATUSES.has(task.status);
 }

@@ -23,6 +23,7 @@ const DEV_SKIP_STATUSES: TaskStatus[] = [
   TaskStatus.Paused,
   TaskStatus.Cancelled,
   TaskStatus.Blocked,
+  TaskStatus.Done,
 ];
 
 /**

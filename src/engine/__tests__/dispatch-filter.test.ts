@@ -111,6 +111,32 @@ describe('filterMessagesForRole', () => {
       expect(filtered).toHaveLength(0);
     });
 
+    it('skips stale directive messages for done tasks', () => {
+      const taskId = createTask('Task', TaskStatus.Done);
+      const msgId = createMessage(Role.PM, Role.DEV, 'directive', taskId);
+
+      const filtered = filterMessagesForRole(Role.DEV, [
+        {
+          id: msgId,
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          content: 'test',
+          status: 'unread',
+          related_task_id: taskId,
+          related_iteration_id: null,
+          attachments: null,
+          created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
+        },
+      ]);
+
+      expect(filtered).toHaveLength(0);
+      const msg = select<{ status: string }>('messages', { id: msgId })[0];
+      expect(msg.status).toBe(MessageStatus.Read);
+    });
+
     it('delivers cancel_task messages even for done tasks', () => {
       const taskId = createTask('Task', TaskStatus.Done);
       const msgId = createMessage(Role.PM, Role.DEV, 'cancel_task', taskId);
