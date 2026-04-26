@@ -33,10 +33,16 @@ export interface EngineConfig {
   minTasksForRejectionStats?: number;
   /** 打回率告警阈值，默认 0.3（30%） */
   rejectionRateThreshold?: number;
-  /** 单次 dispatch 超时时间，默认3600000ms */
+  /** 单次 dispatch 超时时间，默认 600000ms */
   dispatchTimeoutMs?: number;
   /** session 初始化等待超时，默认 60000ms */
   sessionInitTimeoutMs?: number;
+  /** DEV session 无进展多久后发送轻量继续提醒，默认 300000ms */
+  devSessionStalledThresholdMs?: number;
+  /** 同一 DEV session 继续提醒最小间隔，默认 300000ms */
+  devSessionNudgeCooldownMs?: number;
+  /** DEV session 停滞检查间隔，默认 60000ms */
+  devSessionStallCheckIntervalMs?: number;
   /** PM空闲提醒阈值，超过此时间才触发提醒检查（默认 600000ms = 10分钟） */
   pmIdleThresholdMs?: number;
   /** PM空闲提醒重复发送间隔（默认 600000ms = 10分钟） */

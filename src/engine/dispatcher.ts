@@ -13,6 +13,7 @@ import { Role } from './role-manager.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { getModelForRole } from './role-model.js';
+import { startDevSessionStallMonitor } from './dev-session-nudger.js';
 
 export type { MessageRow };
 
@@ -77,6 +78,10 @@ export async function dispatchToRole(
     buildDispatchPrompt(role, messages, knowledge, taskContext);
   const model = getModelForRole(role, sessionManager.getWorkspace());
 
+  const stopStallMonitor =
+    role === Role.DEV
+      ? startDevSessionStallMonitor(client, sessionManager.getWorkspace(), sessionId)
+      : () => undefined;
   const result = await withRetry(
     () =>
       withAbortableTimeout(
@@ -89,12 +94,12 @@ export async function dispatchToRole(
               parts: [{ type: 'text', text: prompt }],
             },
           }),
-        loadConfig(sessionManager.getWorkspace()).engine?.dispatchTimeoutMs ?? 60 * 60 * 1000, // 1 hour
+        loadConfig(sessionManager.getWorkspace()).engine?.dispatchTimeoutMs ?? 10 * 60 * 1000,
         `${role} session.prompt`,
         options?.signal
       ),
     { maxAttempts: 3, label: `${role} dispatch`, signal: options?.signal }
-  );
+  ).finally(stopStallMonitor);
 
   // 5+6. Extract token usage, then atomically: mark messages read + persist output + write log
   const inputTokens = result.data?.info?.tokens?.input ?? 0;

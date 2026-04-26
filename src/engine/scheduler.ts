@@ -35,7 +35,7 @@ export async function startSchedulerLoop(
   initDispatchState(client);
   const roleManager = new RoleManager();
   const reconciler = new SessionStateReconciler();
-  const maintenance = new SchedulerMaintenance();
+  const maintenance = new SchedulerMaintenance(sessionManager.getWorkspace());
 
   logger.info('scheduler loop started');
 
@@ -92,8 +92,8 @@ async function schedulerTick(
 
   promoteDeferredPmMessages(roleManager, states.get(Role.PM));
 
-  const { abortedStuckSession } = await maintenance.maybeRun(client, states);
-  if (abortedStuckSession) {
+  const { recoveredStuckSession } = await maintenance.maybeRun(client, states);
+  if (recoveredStuckSession) {
     return;
   }
 

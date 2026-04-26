@@ -478,11 +478,11 @@ async function _onboardingCommand() {
       );
       console.log('   ✓ 已写入 .win-agent/docs/overview.md');
 
-      // 7a-2. Generate root AGENTS.md for DEV cold-start context
-      console.log(`   → 生成项目概览 (${AGENTS_MD_FILENAME})...`);
+      // 7a-2. Generate root AGENTS.md for agent working rules
+      console.log(`   → 生成 Agent 工作规范 (${AGENTS_MD_FILENAME})...`);
       const agentMdContent = buildAgentsMd(projectName, projectDescription, overview);
       fs.writeFileSync(path.join(workspace, AGENTS_MD_FILENAME), agentMdContent, 'utf-8');
-      console.log(`   ✓ 已写入 ${AGENTS_MD_FILENAME}（根目录，DEV 冷启动参考）`);
+      console.log(`   ✓ 已写入 ${AGENTS_MD_FILENAME}（根目录，Agent 工作规范）`);
 
       // 7b. development.md
       const devPath = path.join(docsDir, 'development.md');
@@ -944,22 +944,59 @@ export function snapshotDocsMtimes(workspace: string): void {
 // ─── AGENTS.md 生成 ─────────────────────────────────────────────────────────
 
 /**
- * Build root AGENTS.md content from overview + project info.
- * This file gives DEV a stable cold-start context without relying on
- * git log or vector search.
+ * Build root AGENTS.md content from project info.
+ * This file defines stable agent behavior and points to overview.md for
+ * project background instead of duplicating the overview content.
  */
 export function buildAgentsMd(
   projectName: string,
   projectDescription: string,
   overviewContent: string
 ): string {
-  return `# ${projectName}
+  const overviewStatus = overviewContent.trim()
+    ? '`.win-agent/docs/overview.md` 已生成，先阅读它来建立项目认知。'
+    : '`.win-agent/docs/overview.md` 暂未生成或为空，如任务需要项目背景，请先补充该文档。';
 
-> ${projectDescription}
+  return `# AGENTS.md
 
-_此文件由 \`win-agent init\` 自动生成，供 AI Agent 冷启动时快速了解项目全貌。_
+_此文件由 \`win-agent\` 自动生成，定义 AI Agent 在本仓库中的工作规范。_
 
-${overviewContent}
+## 项目背景
+
+- **项目名称**: ${projectName || '未命名项目'}
+- **项目描述**: ${projectDescription || '暂无描述'}
+- **技术概览**: ${overviewStatus}
+
+## 启动流程
+
+每次开始处理任务前，先按顺序完成以下步骤：
+
+1. 阅读本文件，确认本仓库对 Agent 的工作约束。
+2. 阅读 \`.win-agent/docs/overview.md\`，了解项目定位、技术栈、核心模块和架构要点。
+3. 执行 \`git status\` 和 \`git log --oneline -10\`，确认当前工作区状态和近期变更。
+4. 根据任务类型阅读相关源码、文档和已有测试，不要只依赖历史记忆或文件名猜测。
+
+## 工作规范
+
+- 优先遵循用户当前指令；如指令与本文件冲突，先向用户确认。
+- 不要回滚、覆盖或整理与你当前任务无关的既有改动。
+- 修改代码前先理解现有模式，尽量沿用项目已有架构、命名和工具链。
+- 保持变更聚焦，只改动完成任务所必需的文件。
+- 涉及用户可见行为、接口契约、数据结构或运维流程变化时，同步更新相关文档。
+
+## 文件边界
+
+- 根目录 \`AGENTS.md\` 负责 Agent 行为规范，不承载完整项目概览。
+- \`.win-agent/docs/overview.md\` 负责项目认知地图，包括项目定位、技术栈、模块职责和架构要点。
+- \`.win-agent/docs/development.md\` 负责开发命令、构建方式和本地调试流程。
+- \`.win-agent/docs/validation.md\` 负责测试、验收和发布前检查流程。
+- 除任务明确要求，或代码变更必须同步更新上述文档外，不要修改 \`.win-agent/\` 内部文件。
+
+## 验证要求
+
+- 完成代码修改后，运行与变更范围匹配的检查或测试。
+- 如果无法运行验证，说明原因，并给出你已经完成的替代检查。
+- 提交结果时，简要说明改动内容、验证命令和剩余风险。
 `;
 }
 

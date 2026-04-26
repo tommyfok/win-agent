@@ -6,6 +6,7 @@ import { IdleNudger } from './idle-nudger.js';
 import { SessionWatchdog } from './session-watchdog.js';
 import { insert } from '../db/repository.js';
 import { logger } from '../utils/logger.js';
+import { nudgeDevSessionIfStalled } from './dev-session-nudger.js';
 
 const MAINTENANCE_INTERVAL_MS = 30_000;
 
@@ -18,13 +19,15 @@ export class SchedulerMaintenance {
   private idleNudger = new IdleNudger();
   private sessionWatchdog = new SessionWatchdog();
 
+  constructor(private workspace: string = process.cwd()) {}
+
   async maybeRun(
     client: OpencodeClient,
     states: ReadonlyMap<Role, RoleRuntimeState>
-  ): Promise<{ abortedStuckSession: boolean }> {
+  ): Promise<{ recoveredStuckSession: boolean }> {
     const now = Date.now();
     if (now - this.lastRunAt < MAINTENANCE_INTERVAL_MS) {
-      return { abortedStuckSession: false };
+      return { recoveredStuckSession: false };
     }
     this.lastRunAt = now;
 
@@ -32,21 +35,38 @@ export class SchedulerMaintenance {
     this.idleNudger.detect(states);
 
     const stuckSessions = await this.sessionWatchdog.detectStuckSessions(states, client);
-    const abortedStuckSession = await this.abortStuckSessions(stuckSessions, client);
-    return { abortedStuckSession };
+    const recoveredStuckSession = await this.recoverStuckSessions(stuckSessions, client);
+    return { recoveredStuckSession };
   }
 
   resetPmReminder(): void {
     this.idleNudger.resetReminder();
   }
 
-  private async abortStuckSessions(
+  private async recoverStuckSessions(
     stuckSessions: Array<{ role: Role; sessionId: string }>,
     client: OpencodeClient
   ): Promise<boolean> {
-    let aborted = false;
+    let recovered = false;
     for (const stuckSession of stuckSessions) {
       try {
+        if (stuckSession.role === Role.DEV) {
+          const nudged = await nudgeDevSessionIfStalled(
+            client,
+            this.workspace,
+            stuckSession.sessionId
+          );
+          if (nudged) {
+            insert('logs', {
+              role: Role.SYS,
+              action: 'stuck_dev_session_nudged',
+              content: `DEV session ${stuckSession.sessionId} was stalled and received a continue nudge`,
+            });
+            recovered = true;
+          }
+          continue;
+        }
+
         logger.info(
           { role: stuckSession.role, sessionId: stuckSession.sessionId },
           'maintenance: aborting stuck session'
@@ -57,11 +77,14 @@ export class SchedulerMaintenance {
           action: 'stuck_session_aborted',
           content: `${stuckSession.role} session ${stuckSession.sessionId} was stuck and has been aborted`,
         });
-        aborted = true;
+        recovered = true;
       } catch (err) {
-        logger.warn({ err, sessionId: stuckSession.sessionId }, 'maintenance: abort failed');
+        logger.warn(
+          { err, sessionId: stuckSession.sessionId },
+          'maintenance: stuck recovery failed'
+        );
       }
     }
-    return aborted;
+    return recovered;
   }
 }

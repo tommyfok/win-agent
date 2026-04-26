@@ -350,8 +350,11 @@ PM 角色
   "engine": {
     "tickIntervalMs": 1000,
     "pmCooldownMs": 3000,
-    "dispatchTimeoutMs": 3600000,
+    "dispatchTimeoutMs": 600000,
     "sessionInitTimeoutMs": 60000,
+    "devSessionStalledThresholdMs": 300000,
+    "devSessionNudgeCooldownMs": 300000,
+    "devSessionStallCheckIntervalMs": 60000,
     "minTasksForRejectionStats": 3,
     "rejectionRateThreshold": 0.3
   }
@@ -366,8 +369,11 @@ PM 角色
 |------|--------|------|
 | `tickIntervalMs` | 1000 | 调度循环间隔（ms） |
 | `pmCooldownMs` | 3000 | PM dispatch 后的冷却时间（ms） |
-| `dispatchTimeoutMs` | 3600000 | 单次 dispatch 超时时间（ms） |
+| `dispatchTimeoutMs` | 600000 | 单次 dispatch 超时时间（ms） |
 | `sessionInitTimeoutMs` | 60000 | 会话初始化等待超时（ms） |
+| `devSessionStalledThresholdMs` | 300000 | DEV session 无进展多久后发送一次轻量 `继续`（ms） |
+| `devSessionNudgeCooldownMs` | 300000 | 同一 DEV session 两次 `继续` 的最小间隔（ms） |
+| `devSessionStallCheckIntervalMs` | 60000 | 当前 DEV dispatch 的停滞检查间隔（ms） |
 | `minTasksForRejectionStats` | 3 | 触发打回率告警的最少任务数 |
 | `rejectionRateThreshold` | 0.3 | 打回率告警阈值（30%） |
 
