@@ -178,17 +178,27 @@ describe('IdleNudger', () => {
   });
 
   it('sends DEV pending-work reminder when in_dev task has no directive', async () => {
-    createTask(TaskStatus.InDev, 'In Dev Task');
+    const taskId = createTask(TaskStatus.InDev, 'In Dev Task');
     const nudger = createNudger(baseTime - 11 * 60 * 1000);
 
     nudger.detect(states(false, false));
 
-    const msgs = select<{ content: string }>('messages', {
+    const msgs = select<{ content: string; related_task_id: number }>('messages', {
       to_role: Role.DEV,
       from_role: Role.SYS,
     });
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toContain('In Dev Task');
+    expect(msgs[0].related_task_id).toBe(taskId);
     expect(select('logs', { action: 'dev_pending_work_reminder' })).toHaveLength(1);
+  });
+
+  it('does not send DEV pending-work reminder when DEV was recently active', async () => {
+    createTask(TaskStatus.InDev, 'In Dev Task');
+    const nudger = createNudger(baseTime - 5 * 60 * 1000);
+
+    nudger.detect(states(false, false));
+
+    expect(select('messages', { to_role: Role.DEV, from_role: Role.SYS })).toHaveLength(0);
   });
 });

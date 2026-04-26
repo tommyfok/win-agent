@@ -75,11 +75,14 @@ export class IdleNudger {
 
     const devState = states.get(Role.DEV);
     if (devState && !devState.serverBusy) {
-      const devPendingWork = detectDevPendingWork();
-      if (devPendingWork) {
-        if (now - this.lastDevReminderAt >= this.getReminderIntervalMs()) {
-          this.sendDevPendingWorkReminder(devPendingWork);
-          this.lastDevReminderAt = now;
+      const devIdleMs = now - this.deps.getDevLastDispatchEnd();
+      if (devIdleMs >= this.getIdleThresholdMs()) {
+        const devPendingWork = detectDevPendingWork();
+        if (devPendingWork) {
+          if (now - this.lastDevReminderAt >= this.getReminderIntervalMs()) {
+            this.sendDevPendingWorkReminder(devPendingWork);
+            this.lastDevReminderAt = now;
+          }
         }
       }
     }
@@ -105,6 +108,7 @@ export class IdleNudger {
         type: 'system',
         content: `⚠️ 你在处理任务「${work.taskTitle}」(Task #${work.taskId}) 期间没有收到任何指令，请检查当前任务状态并继续工作。`,
         status: MessageStatus.Unread,
+        related_task_id: work.taskId,
       });
       insert('logs', {
         role: Role.SYS,
