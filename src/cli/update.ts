@@ -12,9 +12,10 @@ import {
   cleanOverviewOutput,
   buildDevelopmentDocPrompt,
   buildValidationDocPrompt,
-  buildAgentMd,
+  buildAgentsMd,
 } from './init.js';
 import { detectExistingCode, detectSubProjects } from '../workspace/init.js';
+import { AGENTS_MD_FILENAME, LEGACY_AGENT_MD_FILENAME } from './constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -206,7 +207,7 @@ async function updateDocs(workspace: string) {
       );
       console.log(`   ✓ 已写入 .win-agent/docs/${spec.file}`);
 
-      // When overview.md is regenerated, also update root AGENT.md
+      // When overview.md is regenerated, also update root AGENTS.md
       if (spec.file === 'overview.md') {
         const projectName =
           dbSelect<{ key: string; value: string }>('project_config', { key: 'projectName' })[0]
@@ -215,19 +216,27 @@ async function updateDocs(workspace: string) {
           dbSelect<{ key: string; value: string }>('project_config', {
             key: 'projectDescription',
           })[0]?.value ?? '';
-        const agentMdPath = path.join(workspace, 'AGENT.md');
-        if (fs.existsSync(agentMdPath)) {
+        const agentMdPath = path.join(workspace, AGENTS_MD_FILENAME);
+        const legacyAgentMdPath = path.join(workspace, LEGACY_AGENT_MD_FILENAME);
+        const backupRootAgentMd = (filePath: string, backupPrefix: string) => {
           const agentBackupsDir = path.join(workspace, '.win-agent', 'backups');
           fs.mkdirSync(agentBackupsDir, { recursive: true });
           const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          fs.copyFileSync(agentMdPath, path.join(agentBackupsDir, `AGENT.${ts}.md`));
+          fs.copyFileSync(filePath, path.join(agentBackupsDir, `${backupPrefix}.${ts}.md`));
+        };
+        if (fs.existsSync(agentMdPath)) {
+          backupRootAgentMd(agentMdPath, 'AGENTS');
+        }
+        if (fs.existsSync(legacyAgentMdPath)) {
+          backupRootAgentMd(legacyAgentMdPath, 'AGENT');
+          fs.unlinkSync(legacyAgentMdPath);
         }
         fs.writeFileSync(
           agentMdPath,
-          buildAgentMd(projectName, projectDescription, content),
+          buildAgentsMd(projectName, projectDescription, content),
           'utf-8'
         );
-        console.log(`   ✓ 已同步更新 AGENT.md（根目录）`);
+        console.log(`   ✓ 已同步更新 ${AGENTS_MD_FILENAME}（根目录）`);
       }
     }
   } catch (err: unknown) {

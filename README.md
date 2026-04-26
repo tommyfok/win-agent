@@ -122,7 +122,7 @@ win-agent talk
 | `win-agent cancel <id>` | 取消指定迭代 |
 | `win-agent skills` | 根据技术栈推荐并安装 Skills |
 | `win-agent update` | 更新角色模板到最新版本 |
-| `win-agent clean` | 清理 `.win-agent/` 和 `.opencode/` 目录 |
+| `win-agent clean` | 清理 `.win-agent/`、`.opencode/` 和 Skills 安装产物 |
 
 ---
 

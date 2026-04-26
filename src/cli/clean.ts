@@ -18,6 +18,17 @@ import {
   type OpencodeServerHandle,
 } from '../engine/opencode-server.js';
 import { AGENT_ROLES } from '../engine/role-manager.js';
+import { AGENTS_MD_FILENAME, LEGACY_AGENT_MD_FILENAME } from './constants.js';
+
+const SKILLS_ARTIFACTS = [
+  '.agents',
+  '.claude',
+  '.codebuddy',
+  '.continue',
+  '.trae',
+  'skills',
+  'skills-lock.json',
+] as const;
 
 export async function cleanCommand() {
   try {
@@ -37,9 +48,19 @@ export async function cleanCommand() {
 async function _cleanCommand() {
   const cwd = process.cwd();
   const winAgentDir = path.join(cwd, '.win-agent');
+  const opencodeDir = path.join(cwd, '.opencode');
+  const agentMdPaths = [AGENTS_MD_FILENAME, LEGACY_AGENT_MD_FILENAME]
+    .map((file) => path.join(cwd, file))
+    .filter((file) => fs.existsSync(file));
+  const skillsArtifacts = getExistingSkillsArtifacts(cwd);
 
-  if (!fs.existsSync(winAgentDir)) {
-    console.log('当前目录下没有 .win-agent 目录，无需清理。');
+  const hasWinAgent = fs.existsSync(winAgentDir);
+  const hasOpencode = fs.existsSync(opencodeDir);
+  const hasAgentMd = agentMdPaths.length > 0;
+  const hasSkillsArtifacts = skillsArtifacts.length > 0;
+
+  if (!hasWinAgent && !hasOpencode && !hasAgentMd && !hasSkillsArtifacts) {
+    console.log('当前目录下没有 win-agent 相关文件，无需清理。');
     return;
   }
 
@@ -63,16 +84,20 @@ async function _cleanCommand() {
   const wsId = config.workspaceId;
   const sessionPrefix = wsId ? `wa-${wsId}` : null;
 
-  const opencodeDir = path.join(cwd, '.opencode');
-
-  const agentMdPath = path.join(cwd, 'AGENT.md');
-  const hasAgentMd = fs.existsSync(agentMdPath);
-
   console.log('\n将清理以下内容：');
-  console.log(`  - ${winAgentDir}/`);
-  if (hasAgentMd) console.log('  - AGENT.md（根目录）');
-  console.log(`  - .opencode/tools/database_{PM,DEV}.ts`);
-  console.log(`  - .opencode/opencode.json 中的 permission 字段`);
+  if (hasWinAgent) console.log(`  - ${winAgentDir}/`);
+  for (const agentMdPath of agentMdPaths) {
+    console.log(`  - ${path.basename(agentMdPath)}（根目录）`);
+  }
+  if (hasOpencode) {
+    console.log(`  - .opencode/tools/database_{PM,DEV}.ts`);
+    console.log(`  - .opencode/opencode.json 中的 permission 字段`);
+  }
+  for (const artifact of skillsArtifacts) {
+    console.log(
+      `  - ${path.relative(cwd, artifact)}${fs.statSync(artifact).isDirectory() ? '/' : ''}`
+    );
+  }
   if (sessionPrefix) {
     console.log(`  - opencode 中 ${sessionPrefix}-* 相关 session`);
   }
@@ -89,19 +114,39 @@ async function _cleanCommand() {
   }
 
   // Delete .win-agent directory
-  fs.rmSync(winAgentDir, { recursive: true, force: true });
-  console.log('  ✓ 已删除 .win-agent/');
+  if (hasWinAgent) {
+    fs.rmSync(winAgentDir, { recursive: true, force: true });
+    console.log('  ✓ 已删除 .win-agent/');
+  }
 
-  // Delete root AGENT.md
-  if (hasAgentMd) {
+  // Delete root agent context files
+  for (const agentMdPath of agentMdPaths) {
     fs.unlinkSync(agentMdPath);
-    console.log('  ✓ 已删除 AGENT.md');
+    console.log(`  ✓ 已删除 ${path.basename(agentMdPath)}`);
   }
 
   // Clean only win-agent-managed files in .opencode/
   cleanOpencodeFiles(opencodeDir);
 
+  cleanSkillsArtifacts(skillsArtifacts, cwd);
+
   console.log('\n✅ 清理完成');
+}
+
+function getExistingSkillsArtifacts(workspace: string): string[] {
+  return SKILLS_ARTIFACTS.map((entry) => path.join(workspace, entry)).filter((entry) =>
+    fs.existsSync(entry)
+  );
+}
+
+function cleanSkillsArtifacts(artifacts: string[], workspace: string): void {
+  if (artifacts.length === 0) return;
+
+  for (const artifact of artifacts) {
+    fs.rmSync(artifact, { recursive: true, force: true });
+    const rel = path.relative(workspace, artifact);
+    console.log(`  ✓ 已删除 ${rel}${path.extname(rel) ? '' : '/'}`);
+  }
 }
 
 /**

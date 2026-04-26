@@ -60,7 +60,7 @@ program
 
 program
   .command('clean')
-  .description('Clean .win-agent and .opencode from current directory')
+  .description('Clean win-agent, opencode, and skills artifacts from current directory')
   .action(cleanCommand);
 
 program

@@ -13,6 +13,7 @@ import { getDbPath } from '../config/index.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
 import { Role } from '../engine/role-manager.js';
 import { checkAndInstallSkills } from './skills.js';
+import { AGENTS_MD_FILENAME } from './constants.js';
 
 /** Machine-detectable marker for content that needs user review */
 export const TODO_MARKER_REGEX = /⚠️ \*\*TODO\*\*/;
@@ -477,11 +478,11 @@ async function _onboardingCommand() {
       );
       console.log('   ✓ 已写入 .win-agent/docs/overview.md');
 
-      // 7a-2. Generate root AGENT.md for DEV cold-start context
-      console.log('   → 生成项目概览 (AGENT.md)...');
-      const agentMdContent = buildAgentMd(projectName, projectDescription, overview);
-      fs.writeFileSync(path.join(workspace, 'AGENT.md'), agentMdContent, 'utf-8');
-      console.log('   ✓ 已写入 AGENT.md（根目录，DEV 冷启动参考）');
+      // 7a-2. Generate root AGENTS.md for DEV cold-start context
+      console.log(`   → 生成项目概览 (${AGENTS_MD_FILENAME})...`);
+      const agentMdContent = buildAgentsMd(projectName, projectDescription, overview);
+      fs.writeFileSync(path.join(workspace, AGENTS_MD_FILENAME), agentMdContent, 'utf-8');
+      console.log(`   ✓ 已写入 ${AGENTS_MD_FILENAME}（根目录，DEV 冷启动参考）`);
 
       // 7b. development.md
       const devPath = path.join(docsDir, 'development.md');
@@ -634,7 +635,9 @@ async function importProjectContext(workspace: string) {
       });
       knowledgeCount++;
 
-      console.log(`   ✓ ${Object.keys(constraints).length} 条约束已记录（project_config + knowledge）`);
+      console.log(
+        `   ✓ ${Object.keys(constraints).length} 条约束已记录（project_config + knowledge）`
+      );
     }
   }
 
@@ -938,14 +941,14 @@ export function snapshotDocsMtimes(workspace: string): void {
   }
 }
 
-// ─── AGENT.md 生成 ──────────────────────────────────────────────────────────
+// ─── AGENTS.md 生成 ─────────────────────────────────────────────────────────
 
 /**
- * Build root AGENT.md content from overview + project info.
+ * Build root AGENTS.md content from overview + project info.
  * This file gives DEV a stable cold-start context without relying on
  * git log or vector search.
  */
-export function buildAgentMd(
+export function buildAgentsMd(
   projectName: string,
   projectDescription: string,
   overviewContent: string
