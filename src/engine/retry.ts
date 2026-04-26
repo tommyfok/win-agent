@@ -79,3 +79,48 @@ export async function withTimeout<T>(
     clearTimeout(timer!);
   }
 }
+
+/**
+ * Run an operation with a timeout-backed AbortSignal.
+ * Unlike withTimeout(), this aborts the underlying SDK/fetch request when time
+ * expires or when a parent signal is aborted.
+ */
+export async function withAbortableTimeout<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  label = 'operation',
+  parentSignal?: AbortSignal
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  let rejectAbort: ((err: Error) => void) | undefined;
+
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason);
+    rejectAbort?.(new AbortError(label));
+  };
+  if (parentSignal?.aborted) {
+    controller.abort(parentSignal.reason);
+  } else {
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+    if (parentSignal?.aborted) reject(new AbortError(label));
+  });
+
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`${label} 超时 (${ms}ms)`));
+    }, ms);
+  });
+
+  try {
+    return await Promise.race([fn(controller.signal), timeout, aborted]);
+  } finally {
+    clearTimeout(timer!);
+    parentSignal?.removeEventListener('abort', abortFromParent);
+  }
+}

@@ -1,9 +1,10 @@
 import path from 'node:path';
 import type { OpencodeClient } from '@opencode-ai/sdk';
-import { withRetry } from './retry.js';
+import { withAbortableTimeout, withRetry } from './retry.js';
 import { buildRecallPrompt } from '../embedding/memory.js';
 import { Role } from './role-manager.js';
 import { getModelForRole } from './role-model.js';
+import { loadConfig } from '../config/index.js';
 
 function getRoleFilePath(workspace: string, role: Role): string {
   return path.join(workspace, '.win-agent', 'roles', `${role}.md`);
@@ -65,20 +66,27 @@ export async function createRoleSession(
     // Memory recall failed — non-fatal
   }
 
+  const timeoutMs = loadConfig(workspace).engine?.sessionInitTimeoutMs ?? 120_000;
   await withRetry(
     () =>
-      client.session.promptAsync({
-        path: { id: sessionId },
-        body: {
-          ...(model ? { model } : {}),
-          parts: [
-            {
-              type: 'text',
-              text: parts.join('\n\n---\n\n'),
+      withAbortableTimeout(
+        (signal) =>
+          client.session.promptAsync({
+            path: { id: sessionId },
+            signal,
+            body: {
+              ...(model ? { model } : {}),
+              parts: [
+                {
+                  type: 'text',
+                  text: parts.join('\n\n---\n\n'),
+                },
+              ],
             },
-          ],
-        },
-      }),
+          }),
+        timeoutMs,
+        `${role} agent bind`
+      ),
     { maxAttempts: 2, label: `${role} agent bind` }
   );
 

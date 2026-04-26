@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { OpencodeClient } from '@opencode-ai/sdk';
-import { withRetry } from './retry.js';
+import { withAbortableTimeout, withRetry } from './retry.js';
 import { loadConfig } from '../config/index.js';
 import { Role } from './role-manager.js';
 import { getModelForRole } from './role-model.js';
@@ -123,15 +123,22 @@ export async function checkAndResumeInterrupted(
 
   try {
     const model = getModelForRole(role, workspace);
+    const timeoutMs = loadConfig(workspace).engine?.sessionInitTimeoutMs ?? 120_000;
     await withRetry(
       () =>
-        client.session.promptAsync({
-          path: { id: sessionId },
-          body: {
-            ...(model ? { model } : {}),
-            parts: [{ type: 'text', text: resumePrompt }],
-          },
-        }),
+        withAbortableTimeout(
+          (signal) =>
+            client.session.promptAsync({
+              path: { id: sessionId },
+              signal,
+              body: {
+                ...(model ? { model } : {}),
+                parts: [{ type: 'text', text: resumePrompt }],
+              },
+            }),
+          timeoutMs,
+          `${role} resume`
+        ),
       { maxAttempts: 2, label: `${role} resume` }
     );
     console.log(`   ✓ 已恢复 ${role} session (${sessionId})，发送继续指令`);
@@ -164,8 +171,8 @@ export async function waitForSessionsReady(
     for (const [, sessionId] of activeSessions) {
       try {
         const msgs = await client.session.messages({ path: { id: sessionId } });
-        const messages = (msgs.data ?? []) as Array<{ role?: Role }>;
-        const hasAssistantResponse = messages.some((m) => m.role === Role.ASSISTANT);
+        const messages = msgs.data ?? [];
+        const hasAssistantResponse = messages.some((m) => m.info.role === Role.ASSISTANT);
         if (!hasAssistantResponse) {
           allIdle = false;
           break;

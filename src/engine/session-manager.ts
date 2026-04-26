@@ -226,6 +226,7 @@ export class SessionManager {
     // 3. Update mapping
     if (taskId !== undefined) {
       this.taskSessions.set(`${taskId}-${role}`, newSessionId);
+      this.persist();
     } else {
       this.activeSessions.set(role, newSessionId);
       this.persist();

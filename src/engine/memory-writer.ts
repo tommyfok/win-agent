@@ -1,6 +1,6 @@
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import { insertMemory } from '../embedding/memory.js';
-import { withTimeout } from './retry.js';
+import { withAbortableTimeout } from './retry.js';
 import { insert as dbInsert } from '../db/repository.js';
 import type { Role } from './role-manager.js';
 import { getModelForRole } from './role-model.js';
@@ -38,14 +38,16 @@ export async function writeMemory(
   timeoutMs: number = 3 * 60 * 1000
 ): Promise<void> {
   const model = getModelForRole(role);
-  const result = await withTimeout(
-    client.session.prompt({
-      path: { id: sessionId },
-      body: {
-        ...(model ? { model } : {}),
-        parts: [{ type: 'text', text: WRITE_MEMORY_PROMPT }],
-      },
-    }),
+  const result = await withAbortableTimeout(
+    (signal) =>
+      client.session.prompt({
+        path: { id: sessionId },
+        signal,
+        body: {
+          ...(model ? { model } : {}),
+          parts: [{ type: 'text', text: WRITE_MEMORY_PROMPT }],
+        },
+      }),
     timeoutMs,
     `${role} memory write`
   );

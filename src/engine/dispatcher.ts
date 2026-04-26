@@ -5,7 +5,7 @@ import { update, insert as dbInsert, withTransaction } from '../db/repository.js
 import { MessageStatus } from '../db/types.js';
 import { queryRelevantKnowledge, type KnowledgeEntry } from '../embedding/knowledge.js';
 import { match } from 'ts-pattern';
-import { withRetry, withTimeout } from './retry.js';
+import { withAbortableTimeout, withRetry } from './retry.js';
 import { filterMessagesForRole } from './dispatch-filter.js';
 import type { MessageRow } from './dispatch-filter.js';
 import { buildDispatchPrompt, getTaskContext } from './prompt-builder.js';
@@ -79,16 +79,19 @@ export async function dispatchToRole(
 
   const result = await withRetry(
     () =>
-      withTimeout(
-        client.session.prompt({
-          path: { id: sessionId },
-          body: {
-            ...(model ? { model } : {}),
-            parts: [{ type: 'text', text: prompt }],
-          },
-        }),
+      withAbortableTimeout(
+        (signal) =>
+          client.session.prompt({
+            path: { id: sessionId },
+            signal,
+            body: {
+              ...(model ? { model } : {}),
+              parts: [{ type: 'text', text: prompt }],
+            },
+          }),
         loadConfig(sessionManager.getWorkspace()).engine?.dispatchTimeoutMs ?? 60 * 60 * 1000, // 1 hour
-        `${role} session.prompt`
+        `${role} session.prompt`,
+        options?.signal
       ),
     { maxAttempts: 3, label: `${role} dispatch`, signal: options?.signal }
   );
