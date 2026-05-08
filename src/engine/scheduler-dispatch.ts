@@ -205,14 +205,14 @@ export async function tryDispatchNormalRole(
           },
         }
       );
-      if (role === Role.PM && sessionId) {
+      if (sessionId && (role === Role.PM || role === Role.DEV)) {
         await checkAndRotate(
           sessionManager,
           role,
           sessionId,
           inputTokens,
           outputTokens,
-          dispatchTaskId ?? undefined
+          role === Role.DEV ? (dispatchTaskId ?? undefined) : undefined
         );
       }
       if (sessionId) {

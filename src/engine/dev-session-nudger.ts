@@ -5,7 +5,8 @@ import { Role } from './role-manager.js';
 import { getModelForRole } from './role-model.js';
 import { logger } from '../utils/logger.js';
 
-export const DEV_CONTINUE_PROMPT = '继续';
+export const DEV_CONTINUE_PROMPT =
+  '如果你仍在处理当前任务，请不要重复执行已完成动作。请先检查当前状态、最近命令结果和任务状态，然后从未完成处继续。';
 
 const DEFAULT_STALLED_THRESHOLD_MS = 5 * 60 * 1000;
 const DEFAULT_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
@@ -16,8 +17,32 @@ const NUDGE_TIMEOUT_MS = 10_000;
 const lastNudgedAt = new Map<string, number>();
 
 interface MessageWithTimes {
-  info?: { time?: { created?: number; completed?: number } };
+  info?: { role?: string; time?: { created?: number; completed?: number } };
   parts?: Array<{ time?: { start?: number; end?: number } }>;
+}
+
+interface MessageInspection {
+  latestUpdate: number | null;
+  hasUnfinishedWork: boolean;
+}
+
+interface NudgeOptions {
+  shouldNudge?: () => boolean;
+  onNudged?: () => void;
+}
+
+interface StatusLike {
+  type?: string;
+}
+
+interface SessionStatusResult {
+  data?: Record<string, StatusLike>;
+}
+
+interface ClientWithOptionalStatus extends OpencodeClient {
+  session: OpencodeClient['session'] & {
+    status?: () => Promise<SessionStatusResult>;
+  };
 }
 
 function getStalledThresholdMs(workspace?: string): number {
@@ -50,6 +75,13 @@ export async function getLatestSessionUpdateTime(
   client: OpencodeClient,
   sessionId: string
 ): Promise<number | null> {
+  return (await inspectRecentSessionMessages(client, sessionId)).latestUpdate;
+}
+
+async function inspectRecentSessionMessages(
+  client: OpencodeClient,
+  sessionId: string
+): Promise<MessageInspection> {
   const msgs = await withAbortableTimeout(
     (signal) =>
       client.session.messages({
@@ -63,6 +95,7 @@ export async function getLatestSessionUpdateTime(
 
   const messages = (msgs.data ?? []) as MessageWithTimes[];
   let latest = 0;
+  let hasUnfinishedWork = false;
   for (const message of messages) {
     latest = Math.max(
       latest,
@@ -70,19 +103,59 @@ export async function getLatestSessionUpdateTime(
     );
     for (const part of message.parts ?? []) {
       latest = Math.max(latest, maxTime([part.time?.start, part.time?.end]));
+      if (part.time?.start !== undefined && part.time?.end === undefined) {
+        hasUnfinishedWork = true;
+      }
+    }
+    if (
+      message.info?.role === Role.ASSISTANT &&
+      message.info?.time?.created !== undefined &&
+      message.info?.time?.completed === undefined
+    ) {
+      hasUnfinishedWork = true;
     }
   }
-  return latest > 0 ? latest : null;
+  return { latestUpdate: latest > 0 ? latest : null, hasUnfinishedWork };
+}
+
+async function isSessionBusyOnServer(
+  client: OpencodeClient,
+  sessionId: string
+): Promise<boolean> {
+  const maybeStatus = (client as ClientWithOptionalStatus).session.status;
+  if (!maybeStatus) return false;
+
+  try {
+    const sessionApi = (client as ClientWithOptionalStatus).session;
+    const statusResult = await withAbortableTimeout(
+      () => maybeStatus.call(sessionApi),
+      MESSAGE_QUERY_TIMEOUT_MS,
+      'DEV session status check'
+    );
+    const status = statusResult.data?.[sessionId];
+    return status?.type === 'busy' || status?.type === 'retry';
+  } catch {
+    return false;
+  }
 }
 
 export async function nudgeDevSessionIfStalled(
   client: OpencodeClient,
   workspace: string,
   sessionId: string,
-  now = Date.now()
+  now = Date.now(),
+  options: NudgeOptions = {}
 ): Promise<boolean> {
-  const latestUpdate = await getLatestSessionUpdateTime(client, sessionId);
+  if (options.shouldNudge && !options.shouldNudge()) return false;
+
+  if (await isSessionBusyOnServer(client, sessionId)) return false;
+
+  const { latestUpdate, hasUnfinishedWork } = await inspectRecentSessionMessages(
+    client,
+    sessionId
+  );
   if (!latestUpdate) return false;
+  if (hasUnfinishedWork) return false;
 
   const stalledMs = now - latestUpdate;
   if (stalledMs < getStalledThresholdMs(workspace)) return false;
@@ -105,6 +178,7 @@ export async function nudgeDevSessionIfStalled(
     'DEV session continue nudge'
   );
   lastNudgedAt.set(sessionId, now);
+  options.onNudged?.();
   logger.info({ sessionId, stalledMs }, 'DEV session nudged to continue');
   return true;
 }
@@ -115,8 +189,14 @@ export function startDevSessionStallMonitor(
   sessionId: string
 ): () => void {
   const intervalMs = getCheckIntervalMs(workspace);
+  let nudgedInThisDispatch = false;
   const timer = setInterval(() => {
-    nudgeDevSessionIfStalled(client, workspace, sessionId).catch((err) => {
+    nudgeDevSessionIfStalled(client, workspace, sessionId, Date.now(), {
+      shouldNudge: () => !nudgedInThisDispatch,
+      onNudged: () => {
+        nudgedInThisDispatch = true;
+      },
+    }).catch((err) => {
       logger.warn({ err, sessionId }, 'DEV session continue nudge failed');
     });
   }, intervalMs);

@@ -118,7 +118,13 @@ export async function checkAndResumeInterrupted(
 
   // Send "continue" prompt to the interrupted session
   const resumePrompt =
-    `你的上一次操作因引擎重启被中断。请检查当前工作目录和任务状态，然后继续完成未完成的工作。` +
+    `你的上一次操作因引擎重启被中断。请先检查当前状态，不要直接重复上一次动作。\n\n` +
+    `恢复步骤：\n` +
+    `1. 执行 git status，并检查最近提交\n` +
+    `2. 查询当前任务状态\n` +
+    `3. 查询最近 messages / role_outputs / logs\n` +
+    `4. 判断上次动作是否已经完成\n` +
+    `5. 只继续未完成的部分，避免重复提交、重复改状态、重复发送验收报告` +
     (taskId ? `\n\n被中断的任务 ID: task#${taskId}` : '');
 
   try {

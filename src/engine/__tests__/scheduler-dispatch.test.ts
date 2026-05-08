@@ -25,11 +25,13 @@ describe('tryDispatchNormalRole', () => {
   it('rotates candidate roles after the last dispatched role', async () => {
     const { insert } = await import('../../db/repository.js');
     const { dispatchToRole } = await import('../dispatcher.js');
+    const { checkAndRotate } = await import('../memory-rotator.js');
     const schedulerDispatch = await import('../scheduler-dispatch.js');
 
     const task = insert('tasks', {
       title: 'task',
     });
+    const taskId = Number(task.lastInsertRowid);
 
     insert('messages', {
       from_role: Role.USER,
@@ -44,7 +46,7 @@ describe('tryDispatchNormalRole', () => {
       type: 'directive',
       content: 'dev work',
       status: MessageStatus.Unread,
-      related_task_id: Number(task.lastInsertRowid),
+      related_task_id: taskId,
     });
 
     schedulerDispatch.setLastDispatchedRole(Role.PM);
@@ -87,6 +89,14 @@ describe('tryDispatchNormalRole', () => {
       Role.DEV,
       expect.any(Array),
       expect.any(Object)
+    );
+    expect(checkAndRotate).toHaveBeenCalledWith(
+      expect.anything(),
+      Role.DEV,
+      'session-1',
+      0,
+      0,
+      taskId
     );
   });
 });

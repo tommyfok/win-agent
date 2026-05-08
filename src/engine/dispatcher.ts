@@ -25,6 +25,13 @@ export interface DispatchOptions {
   onSessionResolved?: (sessionId: string) => void;
 }
 
+const DEV_TASK_REQUIRED_MESSAGE_TYPES = new Set([
+  'directive',
+  'feedback',
+  'cancel_task',
+  'notification',
+]);
+
 /**
  * Dispatch a batch of unread messages to a role.
  *
@@ -47,6 +54,7 @@ export async function dispatchToRole(
 
   // 1. Filter messages (DEV skips paused/blocked/cancelled/done tasks)
   messages = filterMessagesForRole(role, messages);
+  messages = filterInvalidDevFallbackMessages(role, messages, log);
   if (messages.length === 0) {
     log.warn({ role }, 'no messages to dispatch');
     return { sessionId: null, inputTokens: 0, outputTokens: 0 };
@@ -142,6 +150,52 @@ export async function dispatchToRole(
   });
 
   return { sessionId, inputTokens, outputTokens };
+}
+
+function filterInvalidDevFallbackMessages(
+  role: Role,
+  messages: MessageRow[],
+  log: { warn: (obj: unknown, msg?: string) => void }
+): MessageRow[] {
+  if (role !== Role.DEV) return messages;
+
+  const valid: MessageRow[] = [];
+  const invalid: MessageRow[] = [];
+  for (const msg of messages) {
+    if (!msg.related_task_id && DEV_TASK_REQUIRED_MESSAGE_TYPES.has(msg.type)) {
+      invalid.push(msg);
+    } else {
+      valid.push(msg);
+    }
+  }
+
+  if (invalid.length === 0) return valid;
+
+  withTransaction(() => {
+    for (const msg of invalid) {
+      update('messages', { id: msg.id }, { status: MessageStatus.Read });
+      dbInsert('messages', {
+        from_role: Role.SYS,
+        to_role: Role.PM,
+        type: 'system',
+        content:
+          `DEV 消息 msg#${msg.id} 缺少 related_task_id，已跳过，避免污染 DEV fallback session。` +
+          `请重新创建带 task 关联的 ${msg.type} 消息。`,
+        status: MessageStatus.Unread,
+      });
+      dbInsert('logs', {
+        role: Role.SYS,
+        action: 'dev_message_missing_task',
+        content: `Skipped DEV ${msg.type} message msg#${msg.id} without related_task_id`,
+      });
+    }
+  });
+
+  log.warn(
+    { invalidMessageIds: invalid.map((m) => m.id) },
+    'skipped DEV task-bound messages without related_task_id'
+  );
+  return valid;
 }
 
 /**
