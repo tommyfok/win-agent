@@ -74,12 +74,24 @@
 
 向用户一次性展示最终 Spec 与任务拆分方案，等待明确确认。
 
+**任务颗粒度红线（必须先拆分，再派发）：**
+
+- 禁止把一个完整需求、一个页面、一个端到端流程直接塞进单个大 task，除非它只涉及一个文件/模块且可在一次小改动内完成
+- 每个 task 必须是 DEV 可以独立交付、独立验证、独立回滚的最小有价值变更
+- 单个 task 建议只覆盖一个主要目标；如果同时包含数据模型/API/UI/迁移/重构/测试基建中的两类及以上，优先拆成多个 task
+- 单个 task 的验收标准建议控制在 3-6 条；超过 6 条、需要跨 2 个以上模块、或无法用一句话说明完成边界时，必须继续拆分
+- 技术基础设施、数据迁移、接口契约、前端接入、回归修复、文档更新应优先拆成独立 task，并用 `task_dependencies` 声明顺序
+- 拆分后每个 task 的 description 必须写清“只做什么 / 不做什么”，防止 DEV 把后续 task 一并实现
+
 任务拆分需包含：
 
 - 每个 task 的标题与简要描述
 - task 间依赖关系
 - 建议执行顺序
 - 每个 task 的验收标准概要
+- 每个 task 的范围边界（明确不包含哪些后续工作）
+
+> **大 task 自检：** 如果你准备只创建 1 个 task，必须先在回复用户的方案中说明“为何无需继续拆分”。若无法给出明确理由，说明拆分不充分，必须回到本步骤重新拆分。
 
 > **⚠️ 确认规则（严格执行）：**
 >
@@ -93,8 +105,9 @@
 1. 写入 `.win-agent/docs/spec/${date}-<feature-slug>.md`（格式见 [PM-reference.md](./PM-reference.md)「Feature Spec 格式」）
 2. 写入知识库（category='requirement'，附 spec 路径）
 3. 写入 tasks 表，如 task 间存在依赖则同时写入 `task_dependencies` 表（格式见 [PM-reference.md](./PM-reference.md)「Task 依赖格式」）
-4. **验收标准自检（发 directive 前的最后关卡）**：逐条检查每个 task 的验收标准是否满足 [PM-reference.md](./PM-reference.md)「验收标准质量要求」中的四个条件（可执行、可判定、自包含、有边界），不满足则先修正再派发
-5. 发 directive 给 DEV（格式见 [PM-reference.md](./PM-reference.md)「Directive 格式」）
+4. **任务颗粒度自检（发 directive 前的前置关卡）**：逐个 task 检查是否满足上方“任务颗粒度红线”。发现大 task 时，先拆分并补齐 `task_dependencies`，不得把大 task 直接派发给 DEV
+5. **验收标准自检（发 directive 前的最后关卡）**：逐条检查每个 task 的验收标准是否满足 [PM-reference.md](./PM-reference.md)「验收标准质量要求」中的四个条件（可执行、可判定、自包含、有边界），不满足则先修正再派发
+6. 发 directive 给 DEV（格式见 [PM-reference.md](./PM-reference.md)「Directive 格式」）
 
 > **依赖调度机制（系统自动处理，PM 无需手动管理）：**
 >
