@@ -141,6 +141,21 @@ function orderRolesForDispatch(roles?: Role[]): Role[] {
   return rotateRolesAfterLastDispatched(candidateRoles);
 }
 
+function claimMessagesForDispatch(messages: MessageRow[]): boolean {
+  if (messages.length === 0) return false;
+
+  const placeholders = messages.map(() => '?').join(', ');
+  const result = rawRun(
+    `UPDATE messages
+     SET status = ?
+     WHERE status = ?
+       AND id IN (${placeholders})`,
+    [MessageStatus.Dispatching, MessageStatus.Unread, ...messages.map((m) => m.id)]
+  );
+
+  return result.changes === messages.length;
+}
+
 export async function tryDispatchNormalRole(
   client: OpencodeClient,
   sessionManager: SessionManager,
@@ -172,6 +187,14 @@ export async function tryDispatchNormalRole(
 
     const groupTaskId = messages[0].related_task_id;
     const batch = messages.filter((m) => m.related_task_id === groupTaskId);
+
+    if (!claimMessagesForDispatch(batch)) {
+      logger.info(
+        { role, groupTaskId, batchSize: batch.length },
+        'dispatch skipped because messages were claimed by another scheduler'
+      );
+      continue;
+    }
 
     logger.info(
       { role, groupTaskId, batchSize: batch.length, totalUnread: messages.length },
@@ -247,6 +270,7 @@ export async function tryDispatchNormalRole(
             {
               retry_count: next,
               last_retry_at: now,
+              status: MessageStatus.Unread,
             }
           );
         }

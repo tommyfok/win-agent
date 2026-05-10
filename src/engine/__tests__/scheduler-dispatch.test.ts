@@ -99,4 +99,137 @@ describe('tryDispatchNormalRole', () => {
       taskId
     );
   });
+
+  it('claims unread messages before dispatch so a second scheduler cannot resend them', async () => {
+    const { insert, select } = await import('../../db/repository.js');
+    const { dispatchToRole } = await import('../dispatcher.js');
+    const schedulerDispatch = await import('../scheduler-dispatch.js');
+
+    const task = insert('tasks', {
+      title: 'task',
+    });
+    const taskId = Number(task.lastInsertRowid);
+
+    const message = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'dev work',
+      status: MessageStatus.Unread,
+      related_task_id: taskId,
+    });
+    const msgId = Number(message.lastInsertRowid);
+
+    let resolveDispatch: (() => void) | undefined;
+    vi.mocked(dispatchToRole).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDispatch = () =>
+            resolve({
+              sessionId: 'session-1',
+              inputTokens: 0,
+              outputTokens: 0,
+            });
+        })
+    );
+
+    const firstDispatch = schedulerDispatch.tryDispatchNormalRole(
+      {} as never,
+      {} as never,
+      new RoleManager(),
+      undefined,
+      new Map([
+        [
+          Role.DEV,
+          {
+            role: Role.DEV,
+            sessionId: 'dev',
+            serverStatus: { type: 'idle' },
+            serverBusy: false,
+            localBusy: false,
+            drift: 'none',
+          },
+        ],
+      ]),
+      [Role.DEV]
+    );
+
+    await vi.waitFor(() => expect(dispatchToRole).toHaveBeenCalledTimes(1));
+    expect(select<{ status: string }>('messages', { id: msgId })[0].status).toBe(
+      MessageStatus.Dispatching
+    );
+
+    await schedulerDispatch.tryDispatchNormalRole(
+      {} as never,
+      {} as never,
+      new RoleManager(),
+      undefined,
+      new Map([
+        [
+          Role.DEV,
+          {
+            role: Role.DEV,
+            sessionId: 'dev',
+            serverStatus: { type: 'idle' },
+            serverBusy: false,
+            localBusy: false,
+            drift: 'none',
+          },
+        ],
+      ]),
+      [Role.DEV]
+    );
+
+    expect(dispatchToRole).toHaveBeenCalledTimes(1);
+    resolveDispatch?.();
+    await firstDispatch;
+  });
+
+  it('returns claimed messages to unread when dispatch fails below retry limit', async () => {
+    const { insert, select } = await import('../../db/repository.js');
+    const { dispatchToRole } = await import('../dispatcher.js');
+    const schedulerDispatch = await import('../scheduler-dispatch.js');
+
+    const task = insert('tasks', {
+      title: 'task',
+    });
+    const taskId = Number(task.lastInsertRowid);
+
+    const message = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'dev work',
+      status: MessageStatus.Unread,
+      related_task_id: taskId,
+    });
+    const msgId = Number(message.lastInsertRowid);
+
+    vi.mocked(dispatchToRole).mockRejectedValue(new Error('temporary failure'));
+
+    await schedulerDispatch.tryDispatchNormalRole(
+      {} as never,
+      {} as never,
+      new RoleManager(),
+      undefined,
+      new Map([
+        [
+          Role.DEV,
+          {
+            role: Role.DEV,
+            sessionId: 'dev',
+            serverStatus: { type: 'idle' },
+            serverBusy: false,
+            localBusy: false,
+            drift: 'none',
+          },
+        ],
+      ]),
+      [Role.DEV]
+    );
+
+    const row = select<{ status: string; retry_count: number }>('messages', { id: msgId })[0];
+    expect(row.status).toBe(MessageStatus.Unread);
+    expect(row.retry_count).toBe(1);
+  });
 });

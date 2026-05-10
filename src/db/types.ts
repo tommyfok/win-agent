@@ -26,6 +26,7 @@ export const TASK_STATUS_SET = new Set<TaskStatus>(TASK_STATUS_VALUES);
  */
 export const MessageStatus = {
   Unread: 'unread',
+  Dispatching: 'dispatching',
   Read: 'read',
   Deferred: 'deferred',
 } as const;
