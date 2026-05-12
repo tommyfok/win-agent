@@ -4,6 +4,7 @@ import { generateIterationStats } from './iteration-stats.js';
 import { engineBus, EngineEvents } from './event-bus.js';
 import { loadConfig } from '../config/index.js';
 import { Role } from './role-manager.js';
+import { buildTriggerTraceAttachment, createTraceId, withTrace } from './trace.js';
 
 interface ProjectConfigRow {
   key: string;
@@ -66,13 +67,15 @@ function checkScaffoldDone(): void {
   if (scaffoldDone.length === 0) return;
 
   firedTriggers.add(key);
+  const traceId = createTraceId('trigger');
 
-  withTransaction(() => {
-    insert('messages', {
-      from_role: Role.SYS,
-      to_role: Role.PM,
-      type: 'system',
-      content: `🏗️ 脚手架任务已完成。请执行以下操作：
+  withTrace(traceId, () =>
+    withTransaction(() => {
+      insert('messages', {
+        from_role: Role.SYS,
+        to_role: Role.PM,
+        type: 'system',
+        content: `🏗️ 脚手架任务已完成。请执行以下操作：
 
 1. **生成项目概览**：扫描当前工作空间，分析项目结构和技术栈，生成概览文档并写入 \`.win-agent/docs/overview.md\`。
    - 概览应包含：项目定位、技术栈、核心模块、架构要点
@@ -81,14 +84,23 @@ function checkScaffoldDone(): void {
 2. **审阅 docs 文件**：检查 DEV 更新的 \`.win-agent/docs/development.md\` 和 \`.win-agent/docs/validation.md\` 是否完整准确。
 
 3. 向用户汇报脚手架搭建完成情况，询问是否可以开始功能需求开发。`,
-      status: MessageStatus.Deferred,
-    });
-    insert('logs', {
-      role: Role.SYS,
-      action: 'auto_trigger',
-      content: '脚手架任务完成，已通知 PM 生成 overview.md',
-    });
-  });
+        status: MessageStatus.Deferred,
+        related_task_id: scaffoldDone[0].id,
+        attachments: buildTriggerTraceAttachment({
+          traceId,
+          trigger: key,
+          taskId: scaffoldDone[0].id,
+        }),
+      });
+      insert('logs', {
+        role: Role.SYS,
+        action: 'auto_trigger',
+        content: '脚手架任务完成，已通知 PM 生成 overview.md',
+        related_task_id: scaffoldDone[0].id,
+        trace_id: traceId,
+      });
+    })
+  );
 
   console.log('   🏗️ 自动触发: 脚手架完成，通知 PM 生成项目概览');
 }
@@ -114,29 +126,38 @@ function checkAllTasksDone(): void {
     if (!allDone) continue;
 
     firedTriggers.add(key);
+    const traceId = createTraceId('trigger');
 
     // 统计报告在事务外生成（只读查询）
     const statsReport = generateIterationStats(iter.id);
 
-    withTransaction(() => {
-      rawRun(
-        "UPDATE iterations SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [iter.id]
-      );
-      insert('messages', {
-        from_role: Role.SYS,
-        to_role: Role.PM,
-        type: 'system',
-        content: `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。\n\n${statsReport}\n\n请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。\n审阅完成后，将回顾摘要写入 memory 表，然后通过 database_update 将迭代 #${iter.id} 的 status 更新为 'reviewed'。`,
-        status: MessageStatus.Deferred,
-        related_iteration_id: iter.id,
-      });
-      insert('logs', {
-        role: Role.SYS,
-        action: 'auto_trigger',
-        content: `迭代 #${iter.id} 全部任务完成，已生成统计报告并通知 PM`,
-      });
-    });
+    withTrace(traceId, () =>
+      withTransaction(() => {
+        rawRun(
+          "UPDATE iterations SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [iter.id]
+        );
+        insert('messages', {
+          from_role: Role.SYS,
+          to_role: Role.PM,
+          type: 'system',
+          content: `📊 迭代 #${iter.id} 所有任务已完成，引擎已自动生成统计报告。\n\n${statsReport}\n\n请审阅以上统计数据，向用户汇报迭代完成情况，并提出改进建议（如有）。\n审阅完成后，将回顾摘要写入 memory 表，然后通过 database_update 将迭代 #${iter.id} 的 status 更新为 'reviewed'。`,
+          status: MessageStatus.Deferred,
+          related_iteration_id: iter.id,
+          attachments: buildTriggerTraceAttachment({
+            traceId,
+            trigger: key,
+            iterationId: iter.id,
+          }),
+        });
+        insert('logs', {
+          role: Role.SYS,
+          action: 'auto_trigger',
+          content: `迭代 #${iter.id} 全部任务完成，已生成统计报告并通知 PM`,
+          trace_id: traceId,
+        });
+      })
+    );
 
     console.log(`   🔄 自动触发: 迭代 #${iter.id} 回顾`);
   }
@@ -170,27 +191,41 @@ function checkRejectionRate(): void {
     if (rate <= rateThreshold) continue;
 
     firedTriggers.add(key);
+    const traceId = createTraceId('trigger');
 
     // 统计报告在事务外生成（只读查询）
     const statsReport = generateIterationStats(iter.id);
 
-    withTransaction(() => {
-      // 持久化到日志，引擎重启后仍可恢复，避免对同一活跃迭代重复触发
-      insert('logs', { role: Role.SYS, action: 'trigger_fired', content: key });
-      insert('messages', {
-        from_role: Role.SYS,
-        to_role: Role.PM,
-        type: 'system',
-        content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 ${Math.round(rateThreshold * 100)}%，需要关注。\n\n${statsReport}\n\n请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。`,
-        status: MessageStatus.Deferred,
-        related_iteration_id: iter.id,
-      });
-      insert('logs', {
-        role: Role.SYS,
-        action: 'auto_trigger',
-        content: `迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超阈值，已通知 PM`,
-      });
-    });
+    withTrace(traceId, () =>
+      withTransaction(() => {
+        // 持久化到日志，引擎重启后仍可恢复，避免对同一活跃迭代重复触发
+        insert('logs', {
+          role: Role.SYS,
+          action: 'trigger_fired',
+          content: key,
+          trace_id: traceId,
+        });
+        insert('messages', {
+          from_role: Role.SYS,
+          to_role: Role.PM,
+          type: 'system',
+          content: `⚠️ 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超过阈值 ${Math.round(rateThreshold * 100)}%，需要关注。\n\n${statsReport}\n\n请分析打回原因，向用户汇报情况，并决定是否需要调整后续任务的策略。`,
+          status: MessageStatus.Deferred,
+          related_iteration_id: iter.id,
+          attachments: buildTriggerTraceAttachment({
+            traceId,
+            trigger: key,
+            iterationId: iter.id,
+          }),
+        });
+        insert('logs', {
+          role: Role.SYS,
+          action: 'auto_trigger',
+          content: `迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}% 超阈值，已通知 PM`,
+          trace_id: traceId,
+        });
+      })
+    );
 
     console.log(`   ⚠️ 自动触发: 迭代 #${iter.id} 打回率 ${Math.round(rate * 100)}%`);
   }

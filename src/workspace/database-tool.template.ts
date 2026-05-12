@@ -8,6 +8,7 @@ import path from 'node:path';
 
 /** Hardcoded role identity — ctx.agent is unreliable */
 const ROLE = '__WIN_AGENT_ROLE__';
+const CURRENT_DISPATCH_TRACE_KEY = 'engine.currentDispatchTraceId';
 
 /** Task status values (hardcoded to avoid cross-module imports) */
 const TASK_STATUS_VALUES = [
@@ -135,6 +136,17 @@ function validateColumns(db: SqliteDb, table: string, keys: string[]): void {
     throw new Error(
       `列名错误: ${invalid.join(', ')} 不存在于 ${table} 表。有效列: ${validCols.join(', ')}`
     );
+  }
+}
+
+function getProjectConfigValue(db: SqliteDb, key: string): string | null {
+  try {
+    const row = db.prepare('SELECT value FROM project_config WHERE key = ?').get(key) as
+      | { value: string }
+      | undefined;
+    return row?.value || null;
+  } catch {
+    return null;
   }
 }
 
@@ -395,15 +407,17 @@ export const update: ToolDefinition = tool({
 
       try {
         if (prev) {
-          db.prepare(
-            'INSERT INTO task_events (task_id, from_status, to_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)'
-          ).run(
-            where.id,
-            prev.status,
-            data.status,
-            ROLE,
-            data.rejection_reason != null ? data.rejection_reason : null
-          );
+          const reason = data.rejection_reason != null ? data.rejection_reason : null;
+          const traceId = getProjectConfigValue(db, CURRENT_DISPATCH_TRACE_KEY);
+          if (getTableColumns(db, 'task_events').includes('trace_id')) {
+            db.prepare(
+              'INSERT INTO task_events (task_id, from_status, to_status, changed_by, reason, trace_id) VALUES (?, ?, ?, ?, ?, ?)'
+            ).run(where.id, prev.status, data.status, ROLE, reason, traceId);
+          } else {
+            db.prepare(
+              'INSERT INTO task_events (task_id, from_status, to_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)'
+            ).run(where.id, prev.status, data.status, ROLE, reason);
+          }
         }
       } catch {
         /* best-effort event log */

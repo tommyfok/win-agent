@@ -2,6 +2,10 @@ import { select } from '../db/repository.js';
 import { MessageStatus, TaskStatus } from '../db/types.js';
 import type { KnowledgeEntry } from '../embedding/knowledge.js';
 import type { MessageRow } from './dispatch-filter.js';
+import {
+  formatMessageProtocolForPrompt,
+  parseMessageProtocolAttachment,
+} from './message-protocol.js';
 import { Role } from './role-manager.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -128,7 +132,11 @@ export function buildDispatchPrompt(
   parts.push('## 本次派发消息');
   for (const msg of messages) {
     const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : '';
-    parts.push(`来自 ${msg.from_role} [type: ${msg.type}]${taskRef}：\n${msg.content}`);
+    const attachmentContext = formatAttachmentsForPrompt(msg.attachments);
+    parts.push(
+      `来自 ${msg.from_role} [type: ${msg.type}]${taskRef}：\n${msg.content}` +
+        (attachmentContext ? `\n\n${attachmentContext}` : '')
+    );
   }
 
   // 2. Task context (for DEV)
@@ -254,12 +262,28 @@ export function buildDispatchPrompt(
   return parts.join('\n\n');
 }
 
+function formatAttachmentsForPrompt(attachments: string | null): string | null {
+  if (!attachments) return null;
+
+  const protocol = parseMessageProtocolAttachment(attachments);
+  if (protocol.ok) {
+    return formatMessageProtocolForPrompt(protocol.payload);
+  }
+
+  try {
+    const parsed = JSON.parse(attachments) as unknown;
+    return `attachments（非 ${protocolName()} 协议 JSON，原样保留）:\n${JSON.stringify(parsed, null, 2)}`;
+  } catch {
+    return `attachments（非 JSON，原样保留）:\n${attachments}`;
+  }
+}
+
+function protocolName(): string {
+  return 'win-agent.message.v1';
+}
+
 function isActionableDevPendingMessage(message: MessageRow): boolean {
-  if (
-    !message.related_task_id ||
-    message.type === 'cancel_task' ||
-    message.type === 'feedback'
-  ) {
+  if (!message.related_task_id || message.type === 'cancel_task' || message.type === 'feedback') {
     return true;
   }
 

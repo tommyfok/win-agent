@@ -88,7 +88,7 @@ describe('tryDispatchNormalRole', () => {
       expect.anything(),
       Role.DEV,
       expect.any(Array),
-      expect.any(Object)
+      expect.objectContaining({ traceId: expect.stringMatching(/^dispatch_/) })
     );
     expect(checkAndRotate).toHaveBeenCalledWith(
       expect.anything(),
@@ -231,5 +231,77 @@ describe('tryDispatchNormalRole', () => {
     const row = select<{ status: string; retry_count: number }>('messages', { id: msgId })[0];
     expect(row.status).toBe(MessageStatus.Unread);
     expect(row.retry_count).toBe(1);
+
+    const logs = select<{ trace_id: string | null }>('logs', { action: 'dispatch_failed' });
+    expect(logs[0].trace_id).toMatch(/^dispatch_/);
+  });
+
+  it('persists current dispatch trace while dispatch is running and clears it afterward', async () => {
+    const { insert, select } = await import('../../db/repository.js');
+    const { dispatchToRole } = await import('../dispatcher.js');
+    const schedulerDispatch = await import('../scheduler-dispatch.js');
+
+    const task = insert('tasks', {
+      title: 'task',
+    });
+    const taskId = Number(task.lastInsertRowid);
+
+    insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'dev work',
+      status: MessageStatus.Unread,
+      related_task_id: taskId,
+    });
+
+    let resolveDispatch: (() => void) | undefined;
+    vi.mocked(dispatchToRole).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDispatch = () =>
+            resolve({
+              sessionId: 'session-1',
+              inputTokens: 0,
+              outputTokens: 0,
+            });
+        })
+    );
+
+    const running = schedulerDispatch.tryDispatchNormalRole(
+      {} as never,
+      {} as never,
+      new RoleManager(),
+      undefined,
+      new Map([
+        [
+          Role.DEV,
+          {
+            role: Role.DEV,
+            sessionId: 'dev',
+            serverStatus: { type: 'idle' },
+            serverBusy: false,
+            localBusy: false,
+            drift: 'none',
+          },
+        ],
+      ]),
+      [Role.DEV]
+    );
+
+    await vi.waitFor(() => expect(dispatchToRole).toHaveBeenCalledTimes(1));
+
+    const currentTrace = select<{ value: string }>('project_config', {
+      key: 'engine.currentDispatchTraceId',
+    })[0].value;
+    expect(currentTrace).toMatch(/^dispatch_/);
+    expect(schedulerDispatch.getCurrentDispatchContext()?.traceId).toBe(currentTrace);
+
+    resolveDispatch?.();
+    await running;
+
+    expect(
+      select<{ value: string }>('project_config', { key: 'engine.currentDispatchTraceId' })[0].value
+    ).toBe('');
   });
 });

@@ -4,6 +4,7 @@ import { insert, update, select } from '../repository.js';
 import { transitionTaskStatus, TASK_TRANSITIONS } from '../state-machine.js';
 import { Role } from '../../engine/role-manager.js';
 import { TaskStatus } from '../types.js';
+import { withTrace } from '../../engine/trace.js';
 
 beforeEach(() => {
   setupTestDb();
@@ -44,7 +45,9 @@ describe('transitionTaskStatus — legal transitions', () => {
     expect(task.status).toBe(TaskStatus.InDev);
     expect(task.pre_suspend_status).toBeNull();
 
-    const events = select<{ from_status: string; to_status: string }>('task_events', { task_id: id });
+    const events = select<{ from_status: string; to_status: string }>('task_events', {
+      task_id: id,
+    });
     expect(events).toHaveLength(1);
     expect(events[0].from_status).toBe(TaskStatus.PendingDev);
     expect(events[0].to_status).toBe(TaskStatus.InDev);
@@ -61,7 +64,13 @@ describe('transitionTaskStatus — legal transitions', () => {
 
   it('in_dev → blocked saves pre_suspend_status', () => {
     const id = createTask(TaskStatus.InDev);
-    transitionTaskStatus(id, TaskStatus.InDev, TaskStatus.Blocked, Role.SYS, 'dep unmet during dev');
+    transitionTaskStatus(
+      id,
+      TaskStatus.InDev,
+      TaskStatus.Blocked,
+      Role.SYS,
+      'dep unmet during dev'
+    );
 
     const task = select<{ status: string; pre_suspend_status: string | null }>('tasks', { id })[0];
     expect(task.status).toBe(TaskStatus.Blocked);
@@ -88,6 +97,17 @@ describe('transitionTaskStatus — legal transitions', () => {
     expect(events[0].reason).toBe('accepted');
   });
 
+  it('records ambient trace id on task_events', () => {
+    const id = createTask(TaskStatus.InReview);
+
+    withTrace('dispatch_test_trace', () => {
+      transitionTaskStatus(id, TaskStatus.InReview, TaskStatus.Done, Role.PM, 'accepted');
+    });
+
+    const events = select<{ trace_id: string | null }>('task_events', { task_id: id });
+    expect(events[0].trace_id).toBe('dispatch_test_trace');
+  });
+
   it('rejected → pending_dev is allowed', () => {
     const id = createTask(TaskStatus.Rejected);
     transitionTaskStatus(id, TaskStatus.Rejected, TaskStatus.PendingDev, Role.PM, 'rework');
@@ -100,36 +120,28 @@ describe('transitionTaskStatus — illegal transitions', () => {
     const id = createTask(TaskStatus.PendingDev);
     expect(() =>
       transitionTaskStatus(id, TaskStatus.PendingDev, TaskStatus.Done, Role.SYS, 'skip')
-    ).toThrow(
-      '非法任务状态转换'
-    );
+    ).toThrow('非法任务状态转换');
   });
 
   it('throws for done → pending_dev (terminal state)', () => {
     const id = createTask(TaskStatus.Done);
     expect(() =>
       transitionTaskStatus(id, TaskStatus.Done, TaskStatus.PendingDev, Role.SYS, 'retry')
-    ).toThrow(
-      '非法任务状态转换'
-    );
+    ).toThrow('非法任务状态转换');
   });
 
   it('throws for cancelled → in_dev (terminal state)', () => {
     const id = createTask(TaskStatus.Cancelled);
     expect(() =>
       transitionTaskStatus(id, TaskStatus.Cancelled, TaskStatus.InDev, Role.SYS, 'resume')
-    ).toThrow(
-      '非法任务状态转换'
-    );
+    ).toThrow('非法任务状态转换');
   });
 
   it('throws for in_review → in_dev (back-transition)', () => {
     const id = createTask(TaskStatus.InReview);
     expect(() =>
       transitionTaskStatus(id, TaskStatus.InReview, TaskStatus.InDev, Role.SYS, 'back')
-    ).toThrow(
-      '非法任务状态转换'
-    );
+    ).toThrow('非法任务状态转换');
   });
 
   it('does not persist task update when transition is illegal', () => {

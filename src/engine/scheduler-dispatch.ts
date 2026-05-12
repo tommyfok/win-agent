@@ -11,8 +11,10 @@ import { MessageStatus } from '../db/types.js';
 import { engineBus, EngineEvents } from './event-bus.js';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { createTraceId, setCurrentDispatchTrace, withTrace } from './trace.js';
 
 export interface DispatchContext {
+  traceId: string;
   role: Role;
   taskId: number | null;
   sessionId: string | null;
@@ -196,8 +198,11 @@ export async function tryDispatchNormalRole(
       continue;
     }
 
-    logger.info(
-      { role, groupTaskId, batchSize: batch.length, totalUnread: messages.length },
+    const traceId = createTraceId('dispatch');
+    const dispatchLog = logger.child({ traceId, role });
+
+    dispatchLog.info(
+      { groupTaskId, batchSize: batch.length, totalUnread: messages.length },
       'dispatch start'
     );
 
@@ -206,27 +211,26 @@ export async function tryDispatchNormalRole(
     currentAbortController = abortController;
     const dispatchTaskId = groupTaskId;
     currentDispatch = {
+      traceId,
       role,
       taskId: dispatchTaskId,
       sessionId: null,
       startedAt: new Date().toISOString(),
     };
+    setCurrentDispatchTrace(traceId);
 
     let completedNormally = false;
     let dispatchSucceeded = false;
 
     try {
-      const { sessionId, inputTokens, outputTokens } = await dispatchToRole(
-        client,
-        sessionManager,
-        role,
-        batch,
-        {
+      const { sessionId, inputTokens, outputTokens } = await withTrace(traceId, () =>
+        dispatchToRole(client, sessionManager, role, batch, {
           signal: abortController.signal,
+          traceId,
           onSessionResolved: (sid) => {
             if (currentDispatch) currentDispatch.sessionId = sid;
           },
-        }
+        })
       );
       if (sessionId && (role === Role.PM || role === Role.DEV)) {
         await checkAndRotate(
@@ -241,7 +245,7 @@ export async function tryDispatchNormalRole(
       if (sessionId) {
         engineBus.emit(EngineEvents.DISPATCH_COMPLETE, { role, inputTokens, outputTokens });
       }
-      logger.info({ role }, 'dispatch done');
+      dispatchLog.info('dispatch done');
       completedNormally = true;
       dispatchSucceeded = true;
     } catch (err) {
@@ -281,10 +285,12 @@ export async function tryDispatchNormalRole(
         action: 'dispatch_failed',
         content: `${role} dispatch failed (group=${dispatchTaskId ?? 'none'}), batch=${batch.length}: ${String(err).slice(0, 200)}`,
         related_task_id: dispatchTaskId,
+        trace_id: traceId,
       });
     } finally {
       currentDispatch = null;
       currentAbortController = null;
+      setCurrentDispatchTrace(null);
       roleManager.setBusy(role, false);
       if (completedNormally) {
         lastDispatchedRole = role;

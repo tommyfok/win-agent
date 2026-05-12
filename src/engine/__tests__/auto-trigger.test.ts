@@ -44,6 +44,26 @@ describe('checkAllTasksDone (via checkAutoTriggers)', () => {
     expect(msgs[0].content).toContain(`#${iterId}`);
   });
 
+  it('attaches trigger trace metadata and logs the same trace', () => {
+    const iterId = createIteration('active');
+    createTask(iterId, TaskStatus.Done, 'Task 1');
+
+    checkAutoTriggers();
+
+    const msgs = select<{ attachments: string | null }>('messages', { to_role: Role.PM });
+    const attachment = JSON.parse(msgs[0].attachments ?? '{}') as {
+      trace_id?: string;
+      trace?: { trigger?: string; iteration_id?: number };
+    };
+
+    expect(attachment.trace_id).toMatch(/^trigger_/);
+    expect(attachment.trace?.trigger).toBe(`all_done:${iterId}`);
+    expect(attachment.trace?.iteration_id).toBe(iterId);
+
+    const logs = select<{ trace_id: string | null }>('logs', { action: 'auto_trigger' });
+    expect(logs[0].trace_id).toBe(attachment.trace_id);
+  });
+
   it('does not trigger if some tasks are not done', () => {
     const iterId = createIteration('active');
     createTask(iterId, TaskStatus.Done, 'Task 1');

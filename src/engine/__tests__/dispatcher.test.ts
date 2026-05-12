@@ -99,5 +99,53 @@ describe('dispatchToRole DEV session routing', () => {
     expect(result.sessionId).toBe('fallback-session');
     expect(sessionManager.getTaskSession).toHaveBeenCalledWith(-1, Role.DEV);
     expect(client.session.prompt).toHaveBeenCalledTimes(1);
+
+    const outputs = select<{ trace_id: string | null }>('role_outputs', {});
+    expect(outputs[0].trace_id).toMatch(/^dispatch_/);
+
+    const logs = select<{ trace_id: string | null }>('logs', { action: 'dispatch' });
+    expect(logs[0].trace_id).toBe(outputs[0].trace_id);
+  });
+
+  it('uses caller-provided dispatch trace id in role_outputs and logs', async () => {
+    const { lastInsertRowid } = insert('messages', {
+      from_role: Role.SYS,
+      to_role: Role.DEV,
+      type: 'reflection',
+      content: 'reflect',
+      status: MessageStatus.Unread,
+    });
+    const msgId = Number(lastInsertRowid);
+
+    const client = {
+      session: {
+        prompt: vi.fn().mockResolvedValue({
+          data: {
+            parts: [{ type: 'text', text: 'ok' }],
+            info: { tokens: { input: 1, output: 1 } },
+          },
+        }),
+      },
+    };
+    const sessionManager = {
+      getTaskSession: vi.fn().mockResolvedValue('fallback-session'),
+      getWorkspace: vi.fn().mockReturnValue(process.cwd()),
+      consumePendingContext: vi.fn().mockReturnValue(''),
+    };
+
+    await dispatchToRole(
+      client as never,
+      sessionManager as never,
+      Role.DEV,
+      [makeMessage({ id: msgId, type: 'reflection', content: 'reflect', from_role: Role.SYS })],
+      { traceId: 'dispatch_test_123' }
+    );
+
+    expect(select<{ trace_id: string | null }>('role_outputs', {})[0].trace_id).toBe(
+      'dispatch_test_123'
+    );
+    expect(select<{ trace_id: string | null }>('logs', { action: 'dispatch' })[0].trace_id).toBe(
+      'dispatch_test_123'
+    );
   });
 });

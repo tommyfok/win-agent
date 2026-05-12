@@ -4,6 +4,10 @@ import { select as dbSelect, rawQuery } from '../db/repository.js';
 import { formatTokens } from '../utils/format.js';
 import type { Role } from '../engine/role-manager.js';
 import { TaskStatus } from '../db/types.js';
+import {
+  collectSchedulerExplanationSnapshot,
+  formatSchedulerExplanation,
+} from './status-explain.js';
 
 export async function statusCommand() {
   // 1. Check engine status
@@ -143,7 +147,12 @@ export async function statusCommand() {
     }
   }
 
-  // 5. Recent messages
+  // 5. Scheduler explanation
+  for (const line of formatSchedulerExplanation(collectSchedulerExplanationSnapshot())) {
+    console.log(line);
+  }
+
+  // 6. Recent messages
   const recentMessages = dbSelect<{
     id: number;
     from_role: Role;

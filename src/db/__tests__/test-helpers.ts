@@ -61,6 +61,7 @@ export function setupTestDb(): Database.Database {
       action          TEXT NOT NULL,
       content         TEXT NOT NULL,
       related_task_id INTEGER REFERENCES tasks(id),
+      trace_id        TEXT,
       created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -77,6 +78,7 @@ export function setupTestDb(): Database.Database {
       to_status   TEXT NOT NULL,
       changed_by  TEXT NOT NULL,
       reason      TEXT,
+      trace_id    TEXT,
       created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -90,6 +92,7 @@ export function setupTestDb(): Database.Database {
       output_tokens       INTEGER DEFAULT 0,
       related_task_id     INTEGER REFERENCES tasks(id),
       related_iteration_id INTEGER REFERENCES iterations(id),
+      trace_id            TEXT,
       created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 

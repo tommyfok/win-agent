@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { SessionManager } from './session-manager.js';
 import { update, insert as dbInsert, withTransaction } from '../db/repository.js';
@@ -14,6 +13,7 @@ import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { getModelForRole } from './role-model.js';
 import { startDevSessionStallMonitor } from './dev-session-nudger.js';
+import { createTraceId, withTrace } from './trace.js';
 
 export type { MessageRow };
 
@@ -21,6 +21,8 @@ export type { MessageRow };
 export interface DispatchOptions {
   /** AbortSignal — if aborted, dispatch throws AbortError immediately */
   signal?: AbortSignal;
+  /** Trace id created by the scheduler for this dispatch lifecycle. */
+  traceId?: string;
   /** Callback invoked with sessionId once the session is resolved, before prompt is sent. */
   onSessionResolved?: (sessionId: string) => void;
 }
@@ -49,12 +51,25 @@ export async function dispatchToRole(
   messages: MessageRow[],
   options?: DispatchOptions
 ): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
-  const traceId = crypto.randomUUID().slice(0, 8);
+  const traceId = options?.traceId ?? createTraceId('dispatch');
+  return withTrace(traceId, () =>
+    dispatchToRoleWithTrace(client, sessionManager, role, messages, traceId, options)
+  );
+}
+
+async function dispatchToRoleWithTrace(
+  client: OpencodeClient,
+  sessionManager: SessionManager,
+  role: Role,
+  messages: MessageRow[],
+  traceId: string,
+  options?: DispatchOptions
+): Promise<{ sessionId: string | null; inputTokens: number; outputTokens: number }> {
   const log = logger.child({ traceId, role });
 
   // 1. Filter messages (DEV skips paused/blocked/cancelled/done tasks)
   messages = filterMessagesForRole(role, messages);
-  messages = filterInvalidDevFallbackMessages(role, messages, log);
+  messages = filterInvalidDevFallbackMessages(role, messages, log, traceId);
   if (messages.length === 0) {
     log.warn({ role }, 'no messages to dispatch');
     return { sessionId: null, inputTokens: 0, outputTokens: 0 };
@@ -139,6 +154,7 @@ export async function dispatchToRole(
         output_tokens: outputTokens,
         related_task_id: messages[0]?.related_task_id ?? null,
         related_iteration_id: messages[0]?.related_iteration_id ?? null,
+        trace_id: traceId,
       });
     }
     dbInsert('logs', {
@@ -146,6 +162,7 @@ export async function dispatchToRole(
       action: 'dispatch',
       content: `处理 ${messages.length} 条消息 (from: ${[...new Set(messages.map((m) => m.from_role))].join(',')})`,
       related_task_id: messages[0]?.related_task_id ?? null,
+      trace_id: traceId,
     });
   });
 
@@ -155,7 +172,8 @@ export async function dispatchToRole(
 function filterInvalidDevFallbackMessages(
   role: Role,
   messages: MessageRow[],
-  log: { warn: (obj: unknown, msg?: string) => void }
+  log: { warn: (obj: unknown, msg?: string) => void },
+  traceId: string
 ): MessageRow[] {
   if (role !== Role.DEV) return messages;
 
@@ -187,6 +205,7 @@ function filterInvalidDevFallbackMessages(
         role: Role.SYS,
         action: 'dev_message_missing_task',
         content: `Skipped DEV ${msg.type} message msg#${msg.id} without related_task_id`,
+        trace_id: traceId,
       });
     }
   });

@@ -1,13 +1,16 @@
 import { update, insert } from './repository.js';
 import { TaskStatus } from './types.js';
 import { Role } from '../engine/role-manager.js';
+import { getAmbientTraceId } from '../engine/trace.js';
 
 /**
  * 状态转换的角色白名单。
  * 外层 key = from 状态，内层 key = to 状态，value = 允许执行该转换的角色列表。
  * 未在此映射中的转换表示所有角色均可执行（受 TASK_TRANSITIONS 约束）。
  */
-export const TASK_TRANSITION_ROLES: Partial<Record<TaskStatus, Partial<Record<TaskStatus, Role[]>>>> = {
+export const TASK_TRANSITION_ROLES: Partial<
+  Record<TaskStatus, Partial<Record<TaskStatus, Role[]>>>
+> = {
   [TaskStatus.PendingDev]: {
     [TaskStatus.InDev]: [Role.DEV, Role.SYS],
   },
@@ -63,7 +66,8 @@ export function transitionTaskStatus(
   from: TaskStatus,
   to: TaskStatus,
   changedBy: Role,
-  reason: string
+  reason: string,
+  traceId = getAmbientTraceId()
 ): void {
   const allowed = TASK_TRANSITIONS[from];
   if (!allowed?.includes(to)) {
@@ -76,15 +80,20 @@ export function transitionTaskStatus(
       `角色 ${changedBy} 无权执行状态转换 ${from} → ${to} (task #${taskId})，允许的角色: ${roleAllowlist.join(', ')}`
     );
   }
-  update('tasks', { id: taskId }, {
-    status: to,
-    pre_suspend_status: to === TaskStatus.Blocked ? from : null,
-  });
+  update(
+    'tasks',
+    { id: taskId },
+    {
+      status: to,
+      pre_suspend_status: to === TaskStatus.Blocked ? from : null,
+    }
+  );
   insert('task_events', {
     task_id: taskId,
     from_status: from,
     to_status: to,
     changed_by: changedBy,
     reason,
+    trace_id: traceId,
   });
 }

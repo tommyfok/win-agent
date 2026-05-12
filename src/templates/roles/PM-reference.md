@@ -134,12 +134,21 @@ DEV 收到 directive 时是零上下文，directive 必须**完全自包含**：
 - **参考代码**（推荐）：项目中可参考的类似实现，帮助 DEV 理解代码风格和模式
 - **验收标准**：从 task 表中完整列出，必须包含用户验收标准和技术验收标准（详见下方「验收标准质量要求」）
 - **禁止出现"参考之前的讨论"等隐式引用，DEV 看不到之前的对话**
+- `attachments` 必须写入协议 payload：`JSON.stringify({ protocol: "win-agent.message.v1", type: "directive", task_id: N, iteration_id: N })`
 
 ```
 database_insert({ table: "messages", data: {
   from_role: "PM", to_role: "DEV", type: "directive",
   content: "请开始 feature#N 的开发。\n\n## 所属子项目\n[子项目名]\n\n## 背景\n[这个 feature 解决什么问题]\n\n## 前置依赖\n[依赖的 feature 及当前状态，无则写"无"]\n\n## Spec\n路径: .win-agent/docs/spec/xxx.md\n\n## Spec 摘要\n[将 spec 中的功能描述和验收标准直接内联，不写"见 Spec"]\n\n## 涉及模块/文件（如有技术方案）\n[需要修改或新增的文件路径清单]\n\n## 技术要求（如有技术方案）\n[必须使用的技术方案、数据模型、接口定义]\n\n## 参考代码（推荐）\n[项目中可参考的类似实现，无则写"无"]\n\n## 验收标准\n### 用户验收\n- [ ] [用户视角的可验证条件]\n\n### 技术验收\n- [ ] [技术层面的检查项：API 行为、数据正确性、测试覆盖等]\n\n---\n禁止出现"参考之前的讨论"等隐式引用，DEV 看不到之前的对话。",
-  related_task_id: N, status: "unread"
+  related_task_id: N,
+  related_iteration_id: N,
+  attachments: JSON.stringify({
+    protocol: "win-agent.message.v1",
+    type: "directive",
+    task_id: N,
+    iteration_id: N
+  }),
+  status: "unread"
 }})
 ```
 
@@ -232,7 +241,16 @@ PM-task-handling Step 3 中，PM 向 DEV 发送技术方案请求时使用此格
 database_insert({ table: "messages", data: {
   from_role: "PM", to_role: "DEV", type: "system",
   content: "请为 feature#N 输出技术方案（不动代码）。\n\n## Spec\n路径: .win-agent/docs/spec/xxx.md\n\n## Spec 摘要\n[功能描述和验收标准内联]\n\n## 要求输出\n- 涉及的文件/模块清单（新增/修改）\n- 数据模型变更（如有）\n- 接口契约（API endpoint / 组件 props / 函数签名）\n- 关键实现思路与主要风险",
-  related_task_id: N, status: "unread"
+  related_task_id: N,
+  related_iteration_id: N,
+  attachments: JSON.stringify({
+    protocol: "win-agent.message.v1",
+    type: "system",
+    task_id: N,
+    iteration_id: N,
+    intent: "plan_request"
+  }),
+  status: "unread"
 }})
 ```
 
@@ -244,7 +262,15 @@ database_insert({ table: "messages", data: {
 database_insert({ table: "messages", data: {
   from_role: "PM", to_role: "DEV", type: "cancel_task",
   content: "取消 task#N，请回滚到开发前的状态",
-  related_task_id: N, status: "unread"
+  related_task_id: N,
+  related_iteration_id: N,
+  attachments: JSON.stringify({
+    protocol: "win-agent.message.v1",
+    type: "cancel_task",
+    task_id: N,
+    iteration_id: N
+  }),
+  status: "unread"
 }})
 ```
 

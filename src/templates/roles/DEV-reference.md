@@ -19,9 +19,18 @@
 
 ```
 database_insert({ table: "messages", data: {
-  from_role: "DEV", to_role: "PM", type: "feedback",
+  from_role: "DEV", to_role: "PM", type: "review_result",
   content: "feature#N 验收报告：\n\n## 实现说明\n[做了什么，git diff 摘要]\n\n## 代码检查\n[lint/build/test 命令及输出]\n\n## E2E 验收\n[端到端验证的操作步骤、命令输出/截图]\n\n## 验收标准逐项确认\n\n对照 spec 文件中的每一条验收标准，逐条列出：\n\n- [标准原文]：✅ [具体证据：命令输出/截图/代码引用，不接受纯文字声明]\n- [标准原文]：❌ [未实现的原因和计划]\n\n**如有任何标准标记为 ❌，不得提交验收报告，必须先完成或发阻塞消息给 PM。**\n\n## 经验归档\n[本次归档的经验条目，无则写"无新增"]",
-  related_task_id: N, status: "unread"
+  related_task_id: N,
+  related_iteration_id: N,
+  attachments: JSON.stringify({
+    protocol: "win-agent.message.v1",
+    type: "review_result",
+    task_id: N,
+    iteration_id: N,
+    result: "submitted"
+  }),
+  status: "unread"
 }})
 ```
 
@@ -33,7 +42,16 @@ database_insert({ table: "messages", data: {
 database_insert({ table: "messages", data: {
   from_role: "DEV", to_role: "PM", type: "feedback",
   content: "feature#N 阻塞：\n\n## 问题描述\n[具体遇到了什么问题]\n\n## 已尝试\n[做了哪些排查，结果如何]\n\n## 需要 PM 协助\n[需要什么信息或决策]",
-  related_task_id: N, status: "unread"
+  related_task_id: N,
+  related_iteration_id: N,
+  attachments: JSON.stringify({
+    protocol: "win-agent.message.v1",
+    type: "feedback",
+    task_id: N,
+    iteration_id: N,
+    reason: "blocked"
+  }),
+  status: "unread"
 }})
 ```
 
@@ -49,8 +67,8 @@ database_insert({ table: "messages", data: {
 
 | 文件                                       | 何时阅读                           |
 | ------------------------------------------ | ---------------------------------- |
-| `.win-agent/docs/development.md`           | Phase 3 步骤 1（开发）            |
-| `.win-agent/docs/validation.md`            | Phase 3 步骤 2（验证）            |
-| `.win-agent/docs/known-issues.md`          | 遇到报错时，排查前先查阅          |
+| `.win-agent/docs/development.md`           | Phase 3 步骤 1（开发）             |
+| `.win-agent/docs/validation.md`            | Phase 3 步骤 2（验证）             |
+| `.win-agent/docs/known-issues.md`          | 遇到报错时，排查前先查阅           |
 | `.win-agent/docs/dev-notes.md`             | 涉及对应子项目时，了解项目特有经验 |
 | `.win-agent/docs/efficiency-and-skills.md` | 收尾归档时参考，避免重复记录       |

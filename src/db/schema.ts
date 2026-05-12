@@ -63,6 +63,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       action          TEXT NOT NULL,
       content         TEXT NOT NULL,
       related_task_id INTEGER REFERENCES tasks(id),
+      trace_id        TEXT,
       created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
 
@@ -129,6 +130,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       output_tokens       INTEGER DEFAULT 0,
       related_task_id     INTEGER REFERENCES tasks(id),
       related_iteration_id INTEGER REFERENCES iterations(id),
+      trace_id            TEXT,
       created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
 
@@ -140,6 +142,7 @@ const TABLE_SCHEMAS: Record<string, string> = {
       to_status   TEXT NOT NULL,
       changed_by  TEXT NOT NULL,
       reason      TEXT,
+      trace_id    TEXT,
       created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
 };
@@ -176,10 +179,13 @@ const INDEX_STATEMENTS: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_tasks_iteration ON tasks(iteration_id)',
   'CREATE INDEX IF NOT EXISTS idx_memory_role ON memory(role, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_logs_role ON logs(role, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_logs_trace ON logs(trace_id)',
   'CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, submitted_by)',
   'CREATE INDEX IF NOT EXISTS idx_role_outputs_role ON role_outputs(role, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_role_outputs_iteration ON role_outputs(related_iteration_id)',
+  'CREATE INDEX IF NOT EXISTS idx_role_outputs_trace ON role_outputs(trace_id)',
   'CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_task_events_trace ON task_events(trace_id)',
 ];
 
 // Table creation order matters due to foreign key references
@@ -253,15 +259,36 @@ export function patchMissingTables(db: Database.Database): string[] {
 }
 
 export function runMigrations(db: Database.Database): void {
-  const columns = db
-    .prepare("PRAGMA table_info(messages)")
-    .all() as Array<{ name: string }>;
-  const columnNames = new Set(columns.map((c) => c.name));
+  const messageColumns = getColumnNames(db, 'messages');
 
-  if (!columnNames.has('retry_count')) {
+  if (!messageColumns.has('retry_count')) {
     db.exec('ALTER TABLE messages ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0');
   }
-  if (!columnNames.has('last_retry_at')) {
+  if (!messageColumns.has('last_retry_at')) {
     db.exec('ALTER TABLE messages ADD COLUMN last_retry_at INTEGER');
+  }
+
+  addColumnIfMissing(db, 'logs', 'trace_id', 'TEXT');
+  addColumnIfMissing(db, 'role_outputs', 'trace_id', 'TEXT');
+  addColumnIfMissing(db, 'task_events', 'trace_id', 'TEXT');
+
+  for (const stmt of INDEX_STATEMENTS) {
+    db.exec(stmt);
+  }
+}
+
+function getColumnNames(db: Database.Database, table: string): Set<string> {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return new Set(columns.map((c) => c.name));
+}
+
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string
+): void {
+  if (!getColumnNames(db, table).has(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }

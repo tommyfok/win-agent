@@ -13,6 +13,7 @@
 - **验收标准分两层 + 质量红线**：必须区分「用户验收」和「技术验收」（涉及数据模型 / API / 安全性时技术验收必填）；每条标准必须可执行、可判定、自包含、有边界。详见 [PM-reference.md](./PM-reference.md)「验收标准质量要求」，发 directive 前必须逐条自检。
 - 不轻信无证据的陈述，追问证据后再向用户汇报
 - 系统已在消息中注入 DEV 待处理队列，看到"已排队消息"时不要重复发送相同任务的 directive
+- PM/DEV 消息必须保留 `content` 给人读，并在 `attachments` 写入 `JSON.stringify({ protocol: "win-agent.message.v1", type, task_id, iteration_id })` 供系统解析；旧消息没有 attachments 时按 content 处理
 
 ---
 
@@ -38,16 +39,16 @@
 
 每条消息带有 `[type: xxx]` 标记和来源，根据下表选择对应流程：
 
-| 来源   | type         | 场景                                     | 处理流程               |
-| ------ | ------------ | ---------------------------------------- | ---------------------- |
-| user   | —            | 新需求 / 首次对话                        | → 下方「需求处理」     |
-| user   | —            | 取消任务                                 | → 下方「取消任务」     |
-| user   | —            | 迭代相关                                 | → 下方「迭代管理」     |
-| DEV    | feedback     | content 以 `feature#N 阻塞：` 开头       | → 下方「阻塞处理」     |
-| DEV    | feedback     | content 以 `feature#N 验收报告：` 开头   | → 下方「验收审核」     |
-| system | notification | 依赖解除通知（task 自动从 blocked 恢复） | 仅供知悉，无需操作     |
-| system | system       | 迭代统计报告                             | → 下方「迭代统计审阅」 |
-| system | reflection   | 反思触发                                 | → 下方「反思」         |
+| 来源   | type          | 场景                                     | 处理流程               |
+| ------ | ------------- | ---------------------------------------- | ---------------------- |
+| user   | —             | 新需求 / 首次对话                        | → 下方「需求处理」     |
+| user   | —             | 取消任务                                 | → 下方「取消任务」     |
+| user   | —             | 迭代相关                                 | → 下方「迭代管理」     |
+| DEV    | feedback      | content 以 `feature#N 阻塞：` 开头       | → 下方「阻塞处理」     |
+| DEV    | review_result | content 以 `feature#N 验收报告：` 开头   | → 下方「验收审核」     |
+| system | notification  | 依赖解除通知（task 自动从 blocked 恢复） | 仅供知悉，无需操作     |
+| system | system        | 迭代统计报告                             | → 下方「迭代统计审阅」 |
+| system | reflection    | 反思触发                                 | → 下方「反思」         |
 
 ---
 

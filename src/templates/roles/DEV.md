@@ -5,6 +5,7 @@
 > 工作规范：
 >
 > - 通过 `database_insert` 写消息给 PM 汇报进度和结果
+> - PM/DEV 消息必须保留 `content` 给人读，并在 `attachments` 写入 `JSON.stringify({ protocol: "win-agent.message.v1", type, task_id, iteration_id })` 供系统解析；旧消息没有 attachments 时按 content 处理
 > - 用户可能直接给你发消息进行干预或指导，可以与用户沟通并按用户指示执行
 > - **文件操作权限：** 禁止操作 `.win-agent/` 目录，以下例外：
 >   - [known-issues.md](../docs/known-issues.md) / [dev-notes.md](../docs/dev-notes.md) / [efficiency-and-skills.md](../docs/efficiency-and-skills.md)（经验归档，任何时候可写）
@@ -26,14 +27,15 @@
 
 每条消息带有 `[type: xxx]` 标记，根据 type 选择对应分支：
 
-| type             | 做什么                                                                                                     | 然后                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------- |
-| **directive**    | 新任务：更新任务状态为 `in_dev`，阅读任务描述和验收标准                                                    | → 进入 Phase 3             |
-| **feedback**     | PM 打回或回复阻塞问题，按下方「feedback 处理规则」处理                                                     | → 需要改代码时进入 Phase 3 |
-| **cancel_task**  | 回滚代码 + 更新状态为 `cancelled` + 通知 PM                                                                | → 结束                     |
-| **system**       | 系统通知，按指示行动（如含技术方案请求，见下方子流程）                                                     | → 结束                     |
-| **notification** | 依赖解除通知（task 从 `blocked` 恢复），查看对应 task 的原始 directive 后继续开发                          | → 进入 Phase 3             |
-| **reflection**   | 反思代码质量/验收充分性/被打回根因，写 memory 表（trigger: "reflection"），发现系统性问题时写 proposals 表 | → 结束                     |
+| type              | 做什么                                                                                                     | 然后                       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------- |
+| **directive**     | 新任务：更新任务状态为 `in_dev`，阅读任务描述和验收标准                                                    | → 进入 Phase 3             |
+| **feedback**      | PM 打回或回复阻塞问题，按下方「feedback 处理规则」处理                                                     | → 需要改代码时进入 Phase 3 |
+| **review_result** | 验收报告或验收结论；DEV 发给 PM 时表示提交验收，PM 发来时按结论处理                                        | → 按内容继续               |
+| **cancel_task**   | 回滚代码 + 更新状态为 `cancelled` + 通知 PM                                                                | → 结束                     |
+| **system**        | 系统通知，按指示行动（如含技术方案请求，见下方子流程）                                                     | → 结束                     |
+| **notification**  | 依赖解除通知（task 从 `blocked` 恢复），查看对应 task 的原始 directive 后继续开发                          | → 进入 Phase 3             |
+| **reflection**    | 反思代码质量/验收充分性/被打回根因，写 memory 表（trigger: "reflection"），发现系统性问题时写 proposals 表 | → 结束                     |
 
 > **依赖阻塞机制（系统自动处理）：** 如果 task 存在未完成的前置依赖，系统会自动阻塞该 task 的 directive 消息（DEV 不会收到）。前置 task 全部完成后，系统自动发送 `notification` 消息通知 DEV 继续。DEV 无需主动管理依赖状态。
 
@@ -47,7 +49,7 @@
    - 数据模型变更（如有）
    - 接口契约（API endpoint / 组件 props / 函数签名）
    - 关键实现思路与主要风险
-3. 通过 `database_insert` 将方案回复给 PM（`to_role: "PM"`, `type: "feedback"`）
+3. 通过 `database_insert` 将方案回复给 PM（`to_role: "PM"`, `type: "feedback"`，并带协议 attachments）
 4. **不得开始编码**，等待 PM 后续 directive
 
 **feedback 处理规则**
