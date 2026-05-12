@@ -111,7 +111,9 @@ export async function runEnvCheck(): Promise<{ config: WinAgentConfig; workspace
     `   Provider: ${config.provider?.type} / ${config.provider?.model}${config.provider?.reasoning ? ' (推理模型)' : ''}`
   );
   if (config.roleProviders?.PM) {
-    console.log(`   PM Provider: ${config.roleProviders.PM.type} / ${config.roleProviders.PM.model}`);
+    console.log(
+      `   PM Provider: ${config.roleProviders.PM.type} / ${config.roleProviders.PM.model}`
+    );
   }
   if (config.roleProviders?.DEV) {
     console.log(

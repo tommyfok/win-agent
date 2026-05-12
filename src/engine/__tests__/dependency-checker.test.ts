@@ -12,7 +12,11 @@ beforeEach(() => {
   setupTestDb();
 });
 
-function createTask(title: string, status: TaskStatus = TaskStatus.PendingDev, assignedTo?: string): number {
+function createTask(
+  title: string,
+  status: TaskStatus = TaskStatus.PendingDev,
+  assignedTo?: string
+): number {
   const { lastInsertRowid } = insert('tasks', {
     title,
     status,

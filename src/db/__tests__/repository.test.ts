@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { setupTestDb } from './test-helpers.js';
-import { select, insert, update, del, withTransaction, upsertProjectConfig } from '../repository.js';
+import {
+  select,
+  insert,
+  update,
+  del,
+  withTransaction,
+  upsertProjectConfig,
+} from '../repository.js';
 import { TaskStatus } from '../types.js';
 
 beforeEach(() => {
@@ -32,9 +39,9 @@ describe('select', () => {
   });
 
   it('rejects invalid orderBy (SQL injection protection)', () => {
-    expect(() =>
-      select('tasks', {}, { orderBy: 'title; DROP TABLE tasks' })
-    ).toThrow('Invalid orderBy value');
+    expect(() => select('tasks', {}, { orderBy: 'title; DROP TABLE tasks' })).toThrow(
+      'Invalid orderBy value'
+    );
   });
 
   it('applies limit and offset', () => {
@@ -116,7 +123,9 @@ describe('withTransaction', () => {
 describe('upsertProjectConfig', () => {
   it('inserts a new key-value pair', () => {
     upsertProjectConfig('engine.test.key', 'hello');
-    const rows = select<{ key: string; value: string }>('project_config', { key: 'engine.test.key' });
+    const rows = select<{ key: string; value: string }>('project_config', {
+      key: 'engine.test.key',
+    });
     expect(rows.length).toBe(1);
     expect(rows[0].value).toBe('hello');
   });

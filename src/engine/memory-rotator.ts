@@ -107,13 +107,20 @@ export function loadOutputHistory(): void {
         if (Array.isArray(parsed)) outputHistory.set(role, parsed);
       }
     }
-  } catch { /* non-fatal */ }
+  } catch {
+    /* non-fatal */
+  }
 }
 
 function saveOutputHistory(role: Role): void {
   try {
-    upsertProjectConfig(`engine.outputHistory.${role}`, JSON.stringify(outputHistory.get(role) ?? []));
-  } catch { /* non-fatal */ }
+    upsertProjectConfig(
+      `engine.outputHistory.${role}`,
+      JSON.stringify(outputHistory.get(role) ?? [])
+    );
+  } catch {
+    /* non-fatal */
+  }
 }
 
 /**
@@ -192,7 +199,10 @@ export async function checkAndRotate(
 
   // Check context anxiety (only if we're past 50% usage — don't trigger too early)
   if (usage > 0.5 && detectContextAnxiety(role, outputTokens)) {
-    logger.info({ role, outputTokens, usagePct: Math.round(usage * 100) }, 'context anxiety rotation');
+    logger.info(
+      { role, outputTokens, usagePct: Math.round(usage * 100) },
+      'context anxiety rotation'
+    );
     insert('logs', {
       role: Role.SYS,
       action: 'session_rotation',

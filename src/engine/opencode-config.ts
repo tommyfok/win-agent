@@ -103,7 +103,10 @@ function mergeProviderSection(
       options?: Record<string, unknown>;
     };
 
-    if (existing.npm !== incoming.npm || !sameJson(existing.options ?? {}, incoming.options ?? {})) {
+    if (
+      existing.npm !== incoming.npm ||
+      !sameJson(existing.options ?? {}, incoming.options ?? {})
+    ) {
       throw new Error(
         'Conflicting custom provider config. Per-role custom models must share the same SDK, baseUrl, and apiKey.'
       );
@@ -149,7 +152,9 @@ export function ensureOpencodePackages(
   providerOrProviders: ProviderConfig | ProviderConfig[]
 ): void {
   const opencodeDir = path.join(workspace, '.opencode');
-  const providers = Array.isArray(providerOrProviders) ? providerOrProviders : [providerOrProviders];
+  const providers = Array.isArray(providerOrProviders)
+    ? providerOrProviders
+    : [providerOrProviders];
 
   if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
   const pkgJsonPath = path.join(opencodeDir, 'package.json');

@@ -99,9 +99,9 @@ export async function buildRecallPrompt(
   const vecResults = db
     .prepare('SELECT id, distance FROM memory_vec WHERE embedding MATCH ? AND k = ?')
     .all(new Float32Array(queryEmbedding), limit * 3) as Array<{
-      id: number;
-      distance: number;
-    }>;
+    id: number;
+    distance: number;
+  }>;
 
   if (vecResults.length === 0) {
     return formatRecallPrompt([]);
@@ -120,10 +120,10 @@ export async function buildRecallPrompt(
        ORDER BY created_at DESC`
     )
     .all(role, ...ids) as Array<{
-      id: number;
-      summary: string;
-      created_at: string;
-    }>;
+    id: number;
+    summary: string;
+    created_at: string;
+  }>;
 
   // Apply time-decay filtering
   const now = Date.now();

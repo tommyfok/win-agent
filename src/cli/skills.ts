@@ -63,7 +63,7 @@ async function searchSkillsByKeywords(keywords: string[]): Promise<SkillCandidat
       } catch {
         return [];
       }
-    }),
+    })
   );
 
   // Deduplicate by source – keep the entry with highest installs
@@ -117,7 +117,9 @@ function collectDependencyNames(workspace: string): string[] {
           }
         }
       }
-    } catch { /* malformed json, skip */ }
+    } catch {
+      /* malformed json, skip */
+    }
   };
 
   const scanRequirementsTxt = (dir: string) => {
@@ -131,7 +133,9 @@ function collectDependencyNames(workspace: string): string[] {
         const name = trimmed.split(/[>=<![;]/)[0].trim();
         if (name) deps.add(name.toLowerCase());
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   };
 
   const scanPyprojectToml = (dir: string) => {
@@ -147,7 +151,9 @@ function collectDependencyNames(workspace: string): string[] {
           if (m) deps.add(m[1].toLowerCase());
         }
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   };
 
   // Scan root
@@ -176,11 +182,12 @@ async function extractKeywords(
   client: OpencodeClient,
   sessionId: string,
   overviewContent: string,
-  dependencyNames: string[],
+  dependencyNames: string[]
 ): Promise<string[]> {
-  const depsSection = dependencyNames.length > 0
-    ? `\n## 项目实际依赖列表（从 package.json / requirements.txt 等扫描）\n${dependencyNames.join(', ')}`
-    : '';
+  const depsSection =
+    dependencyNames.length > 0
+      ? `\n## 项目实际依赖列表（从 package.json / requirements.txt 等扫描）\n${dependencyNames.join(', ')}`
+      : '';
 
   const prompt = `根据以下项目概览和实际依赖列表，提取用于在 Skills 市场搜索的技术关键词（6-15个）。
 关键词应为具体的技术名称（框架、语言、工具），例如 nestjs、react、tailwind、taro、golang 等。
@@ -213,7 +220,7 @@ async function evaluateSkills(
   client: OpencodeClient,
   sessionId: string,
   candidates: SkillCandidate[],
-  overviewContent: string,
+  overviewContent: string
 ): Promise<SkillRecommendation[]> {
   const candidateList = candidates
     .map((c, i) => `${i + 1}. ${c.source}  (${formatInstalls(c.installs)} installs)`)
@@ -260,7 +267,7 @@ ${candidateList}
 async function promptSession(
   client: OpencodeClient,
   sessionId: string,
-  prompt: string,
+  prompt: string
 ): Promise<string> {
   const result = await client.session.prompt({
     path: { id: sessionId },
@@ -269,7 +276,7 @@ async function promptSession(
     },
   });
   const textParts = result.data?.parts?.filter(
-    (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text',
+    (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
   );
   return textParts?.map((p) => p.text).join('\n') ?? '';
 }
@@ -281,7 +288,7 @@ function formatInstalls(n: number): string {
 }
 
 async function selectSkillsToInstall(
-  recommendations: SkillRecommendation[],
+  recommendations: SkillRecommendation[]
 ): Promise<SkillRecommendation[]> {
   const { checkbox } = await import('@inquirer/prompts');
   const selected = await checkbox<string>({
@@ -323,7 +330,7 @@ function installSkills(recommendations: SkillRecommendation[]): void {
  */
 export async function checkAndInstallSkills(
   workspace: string,
-  client: OpencodeClient,
+  client: OpencodeClient
 ): Promise<void> {
   // Read overview.md
   const overviewPath = path.join(workspace, '.win-agent', 'docs', 'overview.md');

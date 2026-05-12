@@ -66,9 +66,8 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
   });
 
   it('detects context anxiety when output tokens drop sharply at >50% usage', async () => {
-    const { checkAndRotate, detectModelContextLimit, recordOutputTokens } = await import(
-      '../memory-rotator.js'
-    );
+    const { checkAndRotate, detectModelContextLimit, recordOutputTokens } =
+      await import('../memory-rotator.js');
 
     const mockClient = {
       provider: {
@@ -101,9 +100,8 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
   });
 
   it('does not trigger anxiety when history is insufficient (< 3 outputs)', async () => {
-    const { checkAndRotate, detectModelContextLimit, recordOutputTokens } = await import(
-      '../memory-rotator.js'
-    );
+    const { checkAndRotate, detectModelContextLimit, recordOutputTokens } =
+      await import('../memory-rotator.js');
 
     const mockClient = {
       provider: {
@@ -133,9 +131,8 @@ describe('recordOutputTokens / detectContextAnxiety (via checkAndRotate)', () =>
   });
 
   it('does not trigger anxiety when usage is below 50%', async () => {
-    const { checkAndRotate, detectModelContextLimit, recordOutputTokens } = await import(
-      '../memory-rotator.js'
-    );
+    const { checkAndRotate, detectModelContextLimit, recordOutputTokens } =
+      await import('../memory-rotator.js');
 
     const mockClient = {
       provider: {
@@ -184,9 +181,8 @@ describe('loadOutputHistory / saveOutputHistory (P1-3 persistence)', () => {
     // Seed 3 large outputs so anxiety detection can trigger
     upsertProjectConfig('engine.outputHistory.PM', JSON.stringify([1000, 1000, 1000]));
 
-    const { loadOutputHistory, checkAndRotate, detectModelContextLimit } = await import(
-      '../memory-rotator.js'
-    );
+    const { loadOutputHistory, checkAndRotate, detectModelContextLimit } =
+      await import('../memory-rotator.js');
 
     const mockClient = {
       provider: {
@@ -216,9 +212,8 @@ describe('loadOutputHistory / saveOutputHistory (P1-3 persistence)', () => {
   });
 
   it('loadOutputHistory is a no-op when project_config has no history keys', async () => {
-    const { loadOutputHistory, checkAndRotate, detectModelContextLimit } = await import(
-      '../memory-rotator.js'
-    );
+    const { loadOutputHistory, checkAndRotate, detectModelContextLimit } =
+      await import('../memory-rotator.js');
 
     const mockClient = {
       provider: {

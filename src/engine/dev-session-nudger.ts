@@ -46,21 +46,15 @@ interface ClientWithOptionalStatus extends OpencodeClient {
 }
 
 function getStalledThresholdMs(workspace?: string): number {
-  return (
-    loadConfig(workspace).engine?.devSessionStalledThresholdMs ?? DEFAULT_STALLED_THRESHOLD_MS
-  );
+  return loadConfig(workspace).engine?.devSessionStalledThresholdMs ?? DEFAULT_STALLED_THRESHOLD_MS;
 }
 
 function getNudgeCooldownMs(workspace?: string): number {
-  return (
-    loadConfig(workspace).engine?.devSessionNudgeCooldownMs ?? DEFAULT_NUDGE_COOLDOWN_MS
-  );
+  return loadConfig(workspace).engine?.devSessionNudgeCooldownMs ?? DEFAULT_NUDGE_COOLDOWN_MS;
 }
 
 function getCheckIntervalMs(workspace?: string): number {
-  return (
-    loadConfig(workspace).engine?.devSessionStallCheckIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS
-  );
+  return loadConfig(workspace).engine?.devSessionStallCheckIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS;
 }
 
 function maxTime(values: Array<number | undefined>): number {
@@ -118,10 +112,7 @@ async function inspectRecentSessionMessages(
   return { latestUpdate: latest > 0 ? latest : null, hasUnfinishedWork };
 }
 
-async function isSessionBusyOnServer(
-  client: OpencodeClient,
-  sessionId: string
-): Promise<boolean> {
+async function isSessionBusyOnServer(client: OpencodeClient, sessionId: string): Promise<boolean> {
   const maybeStatus = (client as ClientWithOptionalStatus).session.status;
   if (!maybeStatus) return false;
 
@@ -150,10 +141,7 @@ export async function nudgeDevSessionIfStalled(
 
   if (await isSessionBusyOnServer(client, sessionId)) return false;
 
-  const { latestUpdate, hasUnfinishedWork } = await inspectRecentSessionMessages(
-    client,
-    sessionId
-  );
+  const { latestUpdate, hasUnfinishedWork } = await inspectRecentSessionMessages(client, sessionId);
   if (!latestUpdate) return false;
   if (hasUnfinishedWork) return false;
 

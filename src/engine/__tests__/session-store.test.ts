@@ -52,13 +52,7 @@ describe('checkAndResumeInterrupted', () => {
     const taskSessions = new Map<string, string>();
 
     await expect(
-      checkAndResumeInterrupted(
-        client as never,
-        workspace,
-        new Map(),
-        taskSessions,
-        vi.fn()
-      )
+      checkAndResumeInterrupted(client as never, workspace, new Map(), taskSessions, vi.fn())
     ).resolves.toBe(true);
 
     expect(taskSessions.get(`42-${Role.DEV}`)).toBe('dev-session');

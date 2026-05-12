@@ -37,10 +37,9 @@ export async function cancelCommand(iterationId: string) {
   }
 
   // 2. Query target iteration
-  const iterations = dbSelect<{ id: number; status: string; name: string | null }>(
-    'iterations',
-    { id }
-  );
+  const iterations = dbSelect<{ id: number; status: string; name: string | null }>('iterations', {
+    id,
+  });
   if (iterations.length === 0) {
     console.log(`⚠️  未找到迭代 #${id}`);
     process.exit(1);
