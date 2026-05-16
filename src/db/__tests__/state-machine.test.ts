@@ -31,7 +31,8 @@ describe('TASK_TRANSITIONS', () => {
   });
 
   it('terminal states have no outgoing transitions', () => {
-    expect(TASK_TRANSITIONS[TaskStatus.Done]).toHaveLength(0);
+    expect(TASK_TRANSITIONS[TaskStatus.Done]).toHaveLength(1);
+    expect(TASK_TRANSITIONS[TaskStatus.Done]).toContain(TaskStatus.Rejected);
     expect(TASK_TRANSITIONS[TaskStatus.Cancelled]).toHaveLength(0);
   });
 });
@@ -112,6 +113,24 @@ describe('transitionTaskStatus — legal transitions', () => {
     const id = createTask(TaskStatus.Rejected);
     transitionTaskStatus(id, TaskStatus.Rejected, TaskStatus.PendingDev, Role.PM, 'rework');
     expect(select<{ status: string }>('tasks', { id })[0].status).toBe(TaskStatus.PendingDev);
+  });
+
+  it('done → rejected is allowed and sets rejection_reason', () => {
+    const id = createTask(TaskStatus.Done);
+    transitionTaskStatus(id, TaskStatus.Done, TaskStatus.Rejected, Role.PM, 'PM feedback');
+    const task = select<{ status: string; rejection_reason: string | null }>('tasks', { id })[0];
+    expect(task.status).toBe(TaskStatus.Rejected);
+    expect(task.rejection_reason).toBe('PM feedback');
+  });
+
+  it('throws when transitioning to rejected without a reason', () => {
+    const id = createTask(TaskStatus.InReview);
+    expect(() =>
+      transitionTaskStatus(id, TaskStatus.InReview, TaskStatus.Rejected, Role.PM, '')
+    ).toThrow('必须提供非空 rejection_reason');
+    expect(() =>
+      transitionTaskStatus(id, TaskStatus.InReview, TaskStatus.Rejected, Role.PM, '   ')
+    ).toThrow('必须提供非空 rejection_reason');
   });
 });
 

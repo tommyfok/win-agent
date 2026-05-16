@@ -1,5 +1,6 @@
 import { select, update } from '../db/repository.js';
 import { TaskStatus, MessageStatus } from '../db/types.js';
+import { transitionTaskStatus } from '../db/state-machine.js';
 import { checkAndBlockUnmetDependencies } from './dependency-checker.js';
 import { Role } from './role-manager.js';
 
@@ -64,7 +65,9 @@ export function filterMessagesForRole(role: Role, messages: MessageRow[]): Messa
       });
       const taskStatus = tasks[0]?.status;
       if (taskStatus === TaskStatus.Done) {
-        update('tasks', { id: msg.related_task_id }, { status: TaskStatus.Rejected });
+        const reason =
+          msg.content && msg.content.trim() ? msg.content.trim() : 'PM feedback on done task';
+        transitionTaskStatus(msg.related_task_id, TaskStatus.Done, TaskStatus.Rejected, Role.PM, reason);
       }
     }
 

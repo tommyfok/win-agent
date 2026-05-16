@@ -28,6 +28,7 @@ export function setupTestDb(): Database.Database {
       priority        TEXT NOT NULL DEFAULT 'medium',
       status          TEXT NOT NULL DEFAULT '${TaskStatus.PendingDev}',
       assigned_to     TEXT,
+      rejection_reason    TEXT,
       pre_suspend_status  TEXT,
       iteration_id    INTEGER REFERENCES iterations(id),
       created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

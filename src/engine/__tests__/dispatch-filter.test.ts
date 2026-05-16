@@ -161,7 +161,7 @@ describe('filterMessagesForRole', () => {
       expect(filtered).toHaveLength(1);
     });
 
-    it('delivers feedback messages and auto-rejects done tasks', () => {
+    it('delivers feedback messages and auto-rejects done tasks with reason', () => {
       const taskId = createTask('Task', TaskStatus.Done);
       const msgId = createMessage(Role.PM, Role.DEV, 'feedback', taskId);
 
@@ -171,7 +171,7 @@ describe('filterMessagesForRole', () => {
           from_role: Role.PM,
           to_role: Role.DEV,
           type: 'feedback',
-          content: 'test',
+          content: 'needs fix',
           status: 'unread',
           related_task_id: taskId,
           related_iteration_id: null,
@@ -183,8 +183,9 @@ describe('filterMessagesForRole', () => {
       ]);
 
       expect(filtered).toHaveLength(1);
-      const task = select<{ status: string }>('tasks', { id: taskId })[0];
+      const task = select<{ status: string; rejection_reason: string | null }>('tasks', { id: taskId })[0];
       expect(task.status).toBe(TaskStatus.Rejected);
+      expect(task.rejection_reason).toBe('needs fix');
     });
 
     it('does not change status for feedback on non-done tasks', () => {

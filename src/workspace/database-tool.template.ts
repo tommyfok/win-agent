@@ -381,6 +381,15 @@ export const update: ToolDefinition = tool({
           error: `无效的任务状态: ${String(data.status)}，有效值: ${TASK_STATUS_VALUES.join(', ')}`,
         });
       }
+      // Reject with empty reason is forbidden
+      if (String(data.status) === 'rejected') {
+        const hasReason = data.rejection_reason != null && String(data.rejection_reason).trim() !== '';
+        if (!hasReason) {
+          return JSON.stringify({
+            error: '任务状态设为 rejected 时必须提供非空 rejection_reason',
+          });
+        }
+      }
       // Role-based transition check
       if (where.id != null) {
         const prev = db.prepare('SELECT status FROM tasks WHERE id = ?').get(where.id) as

@@ -45,7 +45,7 @@ export const TASK_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   ],
   [TaskStatus.InReview]: [TaskStatus.Done, TaskStatus.Rejected],
   [TaskStatus.Rejected]: [TaskStatus.PendingDev, TaskStatus.Cancelled],
-  [TaskStatus.Done]: [],
+  [TaskStatus.Done]: [TaskStatus.Rejected],
   [TaskStatus.Cancelled]: [],
   [TaskStatus.Paused]: [],
 };
@@ -74,6 +74,12 @@ export function transitionTaskStatus(
     throw new Error(`非法任务状态转换: ${from} → ${to} (task #${taskId})`);
   }
 
+  if (to === TaskStatus.Rejected && (!reason || !reason.trim())) {
+    throw new Error(
+      `任务状态转换为 rejected 时必须提供非空 rejection_reason (task #${taskId})`
+    );
+  }
+
   const roleAllowlist = TASK_TRANSITION_ROLES[from]?.[to];
   if (roleAllowlist && !roleAllowlist.includes(changedBy)) {
     throw new Error(
@@ -85,6 +91,7 @@ export function transitionTaskStatus(
     { id: taskId },
     {
       status: to,
+      rejection_reason: to === TaskStatus.Rejected ? reason : null,
       pre_suspend_status: to === TaskStatus.Blocked ? from : null,
     }
   );
