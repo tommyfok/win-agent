@@ -375,7 +375,7 @@ function taskReprioritize(taskId: string, priority: string) {
 }
 
 export function registerTaskCommands(program: Command) {
-  const task = program.command('task').description('任务管理');
+  const task = program.command('task').description('Task Management');
 
   task
     .command('status')
