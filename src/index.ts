@@ -13,6 +13,7 @@ import { logCommand } from './cli/log.js';
 import { updateCommand } from './cli/update.js';
 import { skillsCommand } from './cli/skills.js';
 import { modelCommand } from './cli/model.js';
+import { serverCommand } from './cli/server.js';
 import { registerTaskCommands } from './cli/task.js';
 
 const program = new Command();
@@ -72,6 +73,8 @@ program
   .command('model')
   .description('Switch the LLM provider/model for the current workspace')
   .action(modelCommand);
+
+program.command('server').description('List all running win-agent servers').action(serverCommand);
 
 registerTaskCommands(program);
 
