@@ -23,7 +23,7 @@ function buildBindPrompt(workspace: string, role: Role): string {
       `**⚠️ 关键提醒：你必须严格按 Phase 1 → 2 → 3 → 4 顺序执行，禁止跳过任何 Phase。**\n` +
       `- Phase 1（环境感知）：先执行 git log + git status，查看回忆和任务上下文，完成后才能继续\n` +
       `- Phase 2（消息分派）：根据消息 type 选择分支\n` +
-      `- Phase 3（开发和自测）：按 development.md 开发，按 validation.md 验证，全部通过才能进入 Phase 4\n` +
+      `- Phase 3（开发和自测）：先评估 subagents 编排；可并发就并发，有依赖就分批/顺序推进，再按 development.md 开发，按 validation.md 验证，全部通过才能进入 Phase 4\n` +
       `- Phase 4（收尾）：git commit → 更新状态 → 写记忆 → 归档 → 发验收报告\n` +
       `跳过任何 Phase 均属严重违规。`
     );

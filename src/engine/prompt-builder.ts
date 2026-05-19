@@ -242,7 +242,13 @@ export function buildDispatchPrompt(
         '2. 查看近期工作回忆（系统注入的或查询 memory 表）\n' +
         '3. 阅读上方注入的任务上下文（任务描述、验收标准）\n\n' +
         '**Phase 2 — 消息分派：** 根据消息 type 选择对应分支\n\n' +
-        '**Phase 3 — 开发和自测：** 阅读 spec → 开发（按 development.md）→ 验证（按 validation.md），全部通过才能进入 Phase 4\n\n' +
+        '**Phase 3 — 开发和自测：** 阅读 spec → 评估 subagents 编排 → 开发（按 development.md）→ 验证（按 validation.md），全部通过才能进入 Phase 4\n\n' +
+        '**Subagents 编排要求：**\n' +
+        '- 只要运行环境提供 subagent / Task / worker / explorer 等委派能力，默认应主动评估并使用\n' +
+        '- 可并发就并发：独立的代码阅读、模块实现、测试验证、资料检索应尽早委派给多个 subagents\n' +
+        '- 有依赖就分批：先完成上游接口/结论，再启动依赖它的下游任务；同层任务可并行\n' +
+        '- 写代码的 subagent 必须有清晰且互不重叠的文件/模块/职责边界，不能回滚或覆盖他人改动\n' +
+        '- 关键路径、最终集成、冲突消解、任务状态更新、commit 和验收报告仍由主 DEV 负责\n\n' +
         '**Phase 4 — 收尾：** git commit → 更新状态为 done → 写交接记忆 → 经验归档 → 发验收报告给 PM\n\n' +
         '**禁止行为：**\n' +
         '- 禁止跳过 Phase 1 直接开始编码\n' +
