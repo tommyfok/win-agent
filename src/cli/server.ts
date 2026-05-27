@@ -1,7 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { Separator, select } from '@inquirer/prompts';
 import { isProcessRunning, loadConfig } from '../config/index.js';
+import { logCommand } from './log.js';
+import { modelCommand } from './model.js';
+import { restartCommand } from './restart.js';
+import { skillsCommand } from './skills.js';
+import { statusCommand } from './status.js';
+import { stopCommand } from './stop.js';
+import { taskStatus } from './task.js';
+import { talkCommand } from './talk.js';
+import { updateCommand } from './update.js';
 
 interface ServerInfo {
   url: string;
@@ -9,6 +19,35 @@ interface ServerInfo {
   pid: number | null;
   startedAt: string;
 }
+
+type WorkspaceAction =
+  | 'talk'
+  | 'status'
+  | 'tasks'
+  | 'log'
+  | 'model'
+  | 'update'
+  | 'skills'
+  | 'restart'
+  | 'stop'
+  | 'exit';
+
+const workspaceActionChoices = [
+  new Separator('──────────── 日常查看 ────────────'),
+  { name: '对话：打开角色聊天页面', value: 'talk' },
+  { name: '状态：查看运行状态、迭代进度和最近消息', value: 'status' },
+  { name: '任务概览：按状态查看所有任务', value: 'tasks' },
+  { name: '日志：实时查看 engine.log', value: 'log' },
+  new Separator('──────────── 配置维护 ────────────'),
+  { name: '模型：切换 LLM / Embedding 配置', value: 'model' },
+  { name: '更新：同步工作空间文档和角色模板', value: 'update' },
+  { name: 'Skills：推荐并安装项目技能', value: 'skills' },
+  new Separator('──────────── 进程控制 ────────────'),
+  { name: '重启：停止后重新启动', value: 'restart' },
+  { name: '停止：停止该 workspace 的 win-agent', value: 'stop' },
+  new Separator(),
+  { name: '退出', value: 'exit' },
+] satisfies Array<Separator | { name: string; value: WorkspaceAction }>;
 
 export async function serverCommand() {
   // Find all running win-agent engine processes
@@ -80,6 +119,98 @@ export async function serverCommand() {
     console.log(`   密码: ${entry.password ?? '未设置'}`);
     console.log('');
   }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return;
+  }
+
+  await promptServerAction(entries);
+}
+
+async function promptServerAction(
+  entries: Array<{
+    workspace: string;
+    enginePid: number;
+    serverInfo: ServerInfo | null;
+    password: string | undefined;
+  }>
+): Promise<void> {
+  try {
+    const selectedWorkspace = await select({
+      message: '请选择要操作的 server',
+      choices: [
+        ...entries.map((entry) => ({
+          name: formatServerChoice(entry),
+          value: entry.workspace,
+        })),
+        { name: '退出', value: '' },
+      ],
+    });
+
+    if (!selectedWorkspace) return;
+
+    const action = await select({
+      message: '请选择操作',
+      choices: workspaceActionChoices,
+    });
+
+    if (action === 'exit') return;
+
+    await runWorkspaceAction(selectedWorkspace, action);
+  } catch (err) {
+    if (isPromptCancel(err)) {
+      console.log('\n👋 已取消');
+      return;
+    }
+    throw err;
+  }
+}
+
+async function runWorkspaceAction(workspace: string, action: WorkspaceAction): Promise<void> {
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(workspace);
+    if (action === 'talk') {
+      await talkCommand();
+    } else if (action === 'status') {
+      await statusCommand();
+    } else if (action === 'tasks') {
+      taskStatus();
+    } else if (action === 'log') {
+      logCommand();
+    } else if (action === 'model') {
+      await modelCommand();
+    } else if (action === 'update') {
+      await updateCommand();
+    } else if (action === 'skills') {
+      await skillsCommand();
+    } else if (action === 'restart') {
+      await restartCommand();
+    } else if (action === 'stop') {
+      await stopCommand();
+    }
+  } finally {
+    process.chdir(previousCwd);
+  }
+}
+
+function formatServerChoice(entry: {
+  workspace: string;
+  enginePid: number;
+  serverInfo: ServerInfo | null;
+}): string {
+  const parts = [`${path.basename(entry.workspace)} (${entry.workspace})`, `PID ${entry.enginePid}`];
+  if (entry.serverInfo) {
+    parts.push(`:${entry.serverInfo.port}`);
+  }
+  return parts.join('  ');
+}
+
+function isPromptCancel(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.name === 'ExitPromptError' || err.message?.includes('User force closed'))
+  );
 }
 
 function formatTime(isoStr: string): string {

@@ -276,7 +276,7 @@ function taskCancel(taskId: string) {
   console.log(`✅ 任务 #${id}「${task.title}」已取消`);
 }
 
-function taskStatus() {
+export function taskStatus() {
   ensureDb();
 
   const allTasks = rawQuery<TaskRow>('SELECT * FROM tasks ORDER BY created_at ASC');

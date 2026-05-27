@@ -74,7 +74,10 @@ program
   .description('Switch the LLM provider/model for the current workspace')
   .action(modelCommand);
 
-program.command('server').description('List all running win-agent servers').action(serverCommand);
+program
+  .command('server')
+  .description('List and operate running win-agent servers')
+  .action(serverCommand);
 
 registerTaskCommands(program);
 
