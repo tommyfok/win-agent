@@ -1,4 +1,4 @@
-import { select, insert, rawQuery, withTransaction } from '../db/repository.js';
+import { select, insert, rawQuery, rawRun, withTransaction } from '../db/repository.js';
 import { MessageStatus, TaskStatus } from '../db/types.js';
 import { transitionTaskStatus } from '../db/state-machine.js';
 import { Role } from './role-manager.js';
@@ -59,16 +59,18 @@ export function checkAndUnblockDependencies(): void {
     );
     if (unmet.length === 0) {
       const restoreStatus = task.pre_suspend_status || TaskStatus.PendingDev;
-      // Dedup check outside transaction (read-only)
-      // Check for ANY existing notification (any status), not just Unread
-      // because DEV may have already read the message after processing
+      // Dedup check outside transaction (read-only). Only an unread notification for this task
+      // should suppress a new DEV resume notification; historical read messages or other SYS
+      // message types must not hide a fresh unblock event.
       const assignedRole = task.assigned_to;
       const existingNotify =
         assignedRole && assignedRole !== Role.PM
           ? select<{ id: number }>('messages', {
               from_role: Role.SYS,
               to_role: assignedRole,
+              type: 'notification',
               related_task_id: task.id,
+              status: MessageStatus.Unread,
             })
           : [];
 
@@ -79,6 +81,15 @@ export function checkAndUnblockDependencies(): void {
           restoreStatus as TaskStatus,
           Role.SYS,
           '依赖已全部完成，自动解除阻塞'
+        );
+        rawRun(
+          `UPDATE messages
+           SET status = ?,
+               last_retry_at = NULL
+           WHERE related_task_id = ?
+             AND to_role = ?
+             AND status = ?`,
+          [MessageStatus.Unread, task.id, Role.DEV, MessageStatus.Deferred]
         );
         insert('messages', {
           from_role: Role.SYS,

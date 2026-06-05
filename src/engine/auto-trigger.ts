@@ -14,7 +14,8 @@ interface ProjectConfigRow {
 /**
  * 记录本次引擎生命周期内已触发过的自动触发条件，防止重复触发。
  *
- * Key 格式："{type}:{id}"，例如 "all_done:3"、"rejection_rate:2"
+ * Key 格式："{type}:{id}"，例如 "all_done:3"、"rejection_rate:2"，
+ * 或全局触发如 "scaffold_done"。
  */
 const firedTriggers: Set<string> = new Set();
 
@@ -32,19 +33,28 @@ export function checkAutoTriggers(): void {
 }
 
 /**
- * 重置触发状态，并从日志中恢复已持久化的 rejection_rate 触发记录。
+ * 重置触发状态，并从日志中恢复已持久化的触发记录。
  * 在引擎重启时调用，防止对仍处于 active 状态的迭代重复通知 PM。
  */
 export function resetTriggers(): void {
   firedTriggers.clear();
-  // 恢复已触发的 rejection_rate 记录，避免引擎重启后对同一迭代再次通知
   const rows = rawQuery<{ content: string }>(
-    "SELECT content FROM logs WHERE action = 'trigger_fired' AND content LIKE 'rejection_rate:%'",
+    "SELECT content FROM logs WHERE action = 'trigger_fired'",
     []
   );
   for (const row of rows) {
-    firedTriggers.add(row.content);
+    if (row.content) firedTriggers.add(row.content);
   }
+}
+
+function insertTriggerFiredLog(key: string, traceId: string, relatedTaskId?: number): void {
+  insert('logs', {
+    role: Role.SYS,
+    action: 'trigger_fired',
+    content: key,
+    ...(relatedTaskId !== undefined ? { related_task_id: relatedTaskId } : {}),
+    trace_id: traceId,
+  });
 }
 
 /**
@@ -71,6 +81,7 @@ function checkScaffoldDone(): void {
 
   withTrace(traceId, () =>
     withTransaction(() => {
+      insertTriggerFiredLog(key, traceId, scaffoldDone[0].id);
       insert('messages', {
         from_role: Role.SYS,
         to_role: Role.PM,
@@ -133,6 +144,7 @@ function checkAllTasksDone(): void {
 
     withTrace(traceId, () =>
       withTransaction(() => {
+        insertTriggerFiredLog(key, traceId);
         rawRun(
           "UPDATE iterations SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
           [iter.id]
@@ -199,12 +211,7 @@ function checkRejectionRate(): void {
     withTrace(traceId, () =>
       withTransaction(() => {
         // 持久化到日志，引擎重启后仍可恢复，避免对同一活跃迭代重复触发
-        insert('logs', {
-          role: Role.SYS,
-          action: 'trigger_fired',
-          content: key,
-          trace_id: traceId,
-        });
+        insertTriggerFiredLog(key, traceId);
         insert('messages', {
           from_role: Role.SYS,
           to_role: Role.PM,

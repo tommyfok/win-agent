@@ -39,6 +39,7 @@ export let lastDispatchedRole: Role | null = null;
 export function initDispatchState(client: OpencodeClient): void {
   storedClient = client;
   loadDispatchState();
+  recoverAbandonedDispatchingMessages();
 }
 
 function loadDispatchState(): void {
@@ -65,6 +66,33 @@ function saveDispatchState(): void {
     upsertProjectConfig('engine.devLastDispatchEnd', String(devLastDispatchEnd));
   } catch {
     /* non-fatal */
+  }
+}
+
+function recoverAbandonedDispatchingMessages(): void {
+  try {
+    const now = Date.now();
+    const result = rawRun(
+      `UPDATE messages
+       SET status = ?,
+           last_retry_at = ?
+       WHERE status = ?`,
+      [MessageStatus.Unread, now, MessageStatus.Dispatching]
+    );
+
+    if (result.changes > 0) {
+      insert('logs', {
+        role: Role.SYS,
+        action: 'dispatch_recovered',
+        content: `Recovered ${result.changes} dispatching message${result.changes === 1 ? '' : 's'} to unread during scheduler startup`,
+      });
+      logger.info(
+        { recoveredDispatchingMessages: result.changes },
+        'scheduler recovered abandoned dispatching messages'
+      );
+    }
+  } catch (err) {
+    logger.warn({ err }, 'scheduler skipped abandoned dispatching recovery');
   }
 }
 
@@ -250,6 +278,26 @@ export async function tryDispatchNormalRole(
       dispatchSucceeded = true;
     } catch (err) {
       if (err instanceof AbortError) {
+        const now = Date.now();
+        for (const msg of batch) {
+          update(
+            'messages',
+            { id: msg.id },
+            {
+              status: MessageStatus.Unread,
+              last_retry_at: now,
+            }
+          );
+        }
+
+        insert('logs', {
+          role: Role.SYS,
+          action: 'dispatch_aborted',
+          content: `${role} dispatch aborted (group=${dispatchTaskId ?? 'none'}), batch=${batch.length}`,
+          related_task_id: dispatchTaskId,
+          trace_id: traceId,
+        });
+
         throw err;
       }
       completedNormally = true;

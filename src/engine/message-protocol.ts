@@ -6,6 +6,8 @@ export const MESSAGE_PROTOCOL_TYPES = [
   'review_result',
   'cancel_task',
   'system',
+  'notification',
+  'reflection',
 ] as const;
 
 export type MessageProtocolType = (typeof MESSAGE_PROTOCOL_TYPES)[number];
@@ -29,9 +31,13 @@ export type MessageProtocolParseResult =
 const MESSAGE_PROTOCOL_TYPE_SET = new Set<string>(MESSAGE_PROTOCOL_TYPES);
 const TASK_BOUND_TYPES = new Set<MessageProtocolType>([
   'directive',
+  'feedback',
   'review_result',
   'cancel_task',
+  'system',
+  'notification',
 ]);
+const GLOBAL_TYPES = new Set<MessageProtocolType>(['reflection']);
 
 export function validateMessageProtocolPayload(value: unknown): MessageProtocolValidationResult {
   if (!isRecord(value)) {
@@ -59,7 +65,27 @@ export function validateMessageProtocolPayload(value: unknown): MessageProtocolV
     return { ok: false, reason: `${type} messages require task_id` };
   }
 
+  if (
+    GLOBAL_TYPES.has(type) &&
+    !isPositiveInteger(value.task_id) &&
+    !isPositiveInteger(value.iteration_id)
+  ) {
+    return { ok: false, reason: `${type} messages require task_id or iteration_id` };
+  }
+
   return { ok: true, payload: value as MessageProtocolPayload };
+}
+
+export function isMessageProtocolType(value: unknown): value is MessageProtocolType {
+  return typeof value === 'string' && MESSAGE_PROTOCOL_TYPE_SET.has(value);
+}
+
+export function isTaskBoundMessageProtocolType(type: MessageProtocolType): boolean {
+  return TASK_BOUND_TYPES.has(type);
+}
+
+export function isGlobalMessageProtocolType(type: MessageProtocolType): boolean {
+  return GLOBAL_TYPES.has(type);
 }
 
 export function parseMessageProtocolAttachment(

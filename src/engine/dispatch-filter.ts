@@ -2,6 +2,7 @@ import { select, update } from '../db/repository.js';
 import { TaskStatus, MessageStatus } from '../db/types.js';
 import { transitionTaskStatus } from '../db/state-machine.js';
 import { checkAndBlockUnmetDependencies } from './dependency-checker.js';
+import { parseMessageProtocolAttachment } from './message-protocol.js';
 import { Role } from './role-manager.js';
 
 /** Message row from the messages table */
@@ -20,20 +21,16 @@ export interface MessageRow {
   last_retry_at: number | null;
 }
 
-const DEV_SKIP_STATUSES: TaskStatus[] = [
-  TaskStatus.Paused,
-  TaskStatus.Cancelled,
-  TaskStatus.Blocked,
-  TaskStatus.Done,
-];
+const DEV_SKIP_STATUSES: TaskStatus[] = [TaskStatus.Paused, TaskStatus.Cancelled, TaskStatus.Done];
 
 /**
  * Filter messages before dispatch:
  * - DEV: skip messages for paused/blocked/cancelled tasks; also checks unmet dependencies
- * - For done tasks: if message is feedback/cancel_task, auto-reject task to allow DEV to process
+ * - For done tasks: only explicit structured reject feedback auto-rejects task to allow DEV to process
  * - Other roles: returns messages unchanged
  *
- * Skipped messages are marked as read to prevent infinite retry.
+ * Messages for dependency-blocked tasks are deferred so they can be resumed later.
+ * Messages skipped for terminal/suspended states are marked as read to prevent infinite retry.
  * cancel_task and feedback messages are always delivered so DEV can execute rollback/feedback handling.
  */
 export function filterMessagesForRole(role: Role, messages: MessageRow[]): MessageRow[] {
@@ -46,6 +43,10 @@ export function filterMessagesForRole(role: Role, messages: MessageRow[]): Messa
         id: msg.related_task_id,
       });
       const taskStatus = tasks[0]?.status;
+      if (taskStatus === TaskStatus.Blocked) {
+        update('messages', { id: msg.id }, { status: MessageStatus.Deferred });
+        continue;
+      }
       if (taskStatus && DEV_SKIP_STATUSES.includes(taskStatus)) {
         update('messages', { id: msg.id }, { status: MessageStatus.Read });
         continue;
@@ -53,7 +54,7 @@ export function filterMessagesForRole(role: Role, messages: MessageRow[]): Messa
       if (taskStatus) {
         const blocked = checkAndBlockUnmetDependencies(msg.related_task_id, taskStatus);
         if (blocked) {
-          update('messages', { id: msg.id }, { status: MessageStatus.Read });
+          update('messages', { id: msg.id }, { status: MessageStatus.Deferred });
           continue;
         }
       }
@@ -64,14 +65,32 @@ export function filterMessagesForRole(role: Role, messages: MessageRow[]): Messa
         id: msg.related_task_id,
       });
       const taskStatus = tasks[0]?.status;
-      if (taskStatus === TaskStatus.Done) {
+      if (taskStatus === TaskStatus.Done && hasExplicitRejectIntent(msg)) {
         const reason =
           msg.content && msg.content.trim() ? msg.content.trim() : 'PM feedback on done task';
-        transitionTaskStatus(msg.related_task_id, TaskStatus.Done, TaskStatus.Rejected, Role.PM, reason);
+        transitionTaskStatus(
+          msg.related_task_id,
+          TaskStatus.Done,
+          TaskStatus.Rejected,
+          Role.PM,
+          reason
+        );
       }
     }
 
     filtered.push(msg);
   }
   return filtered;
+}
+
+function hasExplicitRejectIntent(msg: MessageRow): boolean {
+  const parsed = parseMessageProtocolAttachment(msg.attachments);
+  if (!parsed.ok) return false;
+
+  const payload = parsed.payload;
+  if (payload.type !== 'feedback' || payload.task_id !== msg.related_task_id) return false;
+
+  return (
+    payload.intent === 'reject' || payload.result === 'rejected' || payload.action === 'reject'
+  );
 }

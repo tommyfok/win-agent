@@ -21,6 +21,33 @@ beforeEach(async () => {
   setupTestDb();
 });
 
+describe('initDispatchState', () => {
+  it('returns messages left dispatching by a previous process to unread', async () => {
+    const { insert, select } = await import('../../db/repository.js');
+    const schedulerDispatch = await import('../scheduler-dispatch.js');
+
+    const message = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'dev work',
+      status: MessageStatus.Dispatching,
+    });
+    const msgId = Number(message.lastInsertRowid);
+
+    schedulerDispatch.initDispatchState({} as never);
+
+    const row = select<{ status: string; last_retry_at: number | null }>('messages', {
+      id: msgId,
+    })[0];
+    expect(row.status).toBe(MessageStatus.Unread);
+    expect(row.last_retry_at).toBeTypeOf('number');
+
+    const logs = select<{ content: string }>('logs', { action: 'dispatch_recovered' });
+    expect(logs[0].content).toContain('Recovered 1 dispatching message');
+  });
+});
+
 describe('tryDispatchNormalRole', () => {
   it('rotates candidate roles after the last dispatched role', async () => {
     const { insert } = await import('../../db/repository.js');
@@ -233,6 +260,64 @@ describe('tryDispatchNormalRole', () => {
     expect(row.retry_count).toBe(1);
 
     const logs = select<{ trace_id: string | null }>('logs', { action: 'dispatch_failed' });
+    expect(logs[0].trace_id).toMatch(/^dispatch_/);
+  });
+
+  it('returns claimed messages to unread when dispatch is aborted', async () => {
+    const { insert, select } = await import('../../db/repository.js');
+    const { dispatchToRole } = await import('../dispatcher.js');
+    const { AbortError } = await import('../retry.js');
+    const schedulerDispatch = await import('../scheduler-dispatch.js');
+
+    const task = insert('tasks', {
+      title: 'task',
+    });
+    const taskId = Number(task.lastInsertRowid);
+
+    const message = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'dev work',
+      status: MessageStatus.Unread,
+      related_task_id: taskId,
+    });
+    const msgId = Number(message.lastInsertRowid);
+
+    vi.mocked(dispatchToRole).mockRejectedValue(new AbortError('dispatch'));
+
+    await expect(
+      schedulerDispatch.tryDispatchNormalRole(
+        {} as never,
+        {} as never,
+        new RoleManager(),
+        undefined,
+        new Map([
+          [
+            Role.DEV,
+            {
+              role: Role.DEV,
+              sessionId: 'dev',
+              serverStatus: { type: 'idle' },
+              serverBusy: false,
+              localBusy: false,
+              drift: 'none',
+            },
+          ],
+        ]),
+        [Role.DEV]
+      )
+    ).rejects.toBeInstanceOf(AbortError);
+
+    const row = select<{ status: string; retry_count: number; last_retry_at: number | null }>(
+      'messages',
+      { id: msgId }
+    )[0];
+    expect(row.status).toBe(MessageStatus.Unread);
+    expect(row.retry_count).toBe(0);
+    expect(row.last_retry_at).toBeTypeOf('number');
+
+    const logs = select<{ trace_id: string | null }>('logs', { action: 'dispatch_aborted' });
     expect(logs[0].trace_id).toMatch(/^dispatch_/);
   });
 

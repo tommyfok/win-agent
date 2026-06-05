@@ -88,6 +88,7 @@
   - 证据不足：如"验收标准 2 缺少实际命令输出"、"E2E 验收无截图"
   - 代码问题：如"验收标准 3 的测试输出显示功能不符合预期"
   - 归档不完整：如"经验归档声明写入了 knowledge 但对应 MD 文件无记录，请补全"
+  - 打回 feedback 的 `attachments` 必须包含明确结构化打回语义，如 `intent: "reject"`、`result: "rejected"` 或 `action: "reject"`。追问证据、补充说明、阻塞回复不要使用这些字段，可省略 intent 或使用 `intent: "clarify"`。
 - 全部满足 → 向用户汇报完成情况
 
 ---
@@ -249,6 +250,52 @@ database_insert({ table: "messages", data: {
     task_id: N,
     iteration_id: N,
     intent: "plan_request"
+  }),
+  status: "unread"
+}})
+```
+
+---
+
+## Feedback 格式
+
+### 验收打回 DEV
+
+当已完成任务验收不通过，需要让 DEV 重新处理时，必须发送 `type: "feedback"`，并在 `attachments` 中加入明确打回语义。推荐使用 `intent: "reject"`。
+
+```
+database_insert({ table: "messages", data: {
+  from_role: "PM", to_role: "DEV", type: "feedback",
+  content: "feature#N 验收打回：\n\n## 问题类型\n证据不足\n\n## 缺失项\n- 验收标准 2 缺少实际命令输出\n\n## 请补充/修复\n请补齐验证证据后重新提交验收报告。",
+  related_task_id: N,
+  related_iteration_id: N,
+  attachments: JSON.stringify({
+    protocol: "win-agent.message.v1",
+    type: "feedback",
+    task_id: N,
+    iteration_id: N,
+    intent: "reject"
+  }),
+  status: "unread"
+}})
+```
+
+等价明确字段也可使用 `result: "rejected"` 或 `action: "reject"`。如果只是追问证据、补充说明、回复阻塞问题，不要使用上述打回字段；可省略 intent，或写 `intent: "clarify"`。
+
+### 追问证据 / 补充说明 / 阻塞回复
+
+```
+database_insert({ table: "messages", data: {
+  from_role: "PM", to_role: "DEV", type: "feedback",
+  content: "feature#N 请补充验收证据：缺少 E2E 截图或操作记录。此消息不是验收打回，请先补充证据。",
+  related_task_id: N,
+  related_iteration_id: N,
+  attachments: JSON.stringify({
+    protocol: "win-agent.message.v1",
+    type: "feedback",
+    task_id: N,
+    iteration_id: N,
+    intent: "clarify"
   }),
   status: "unread"
 }})

@@ -59,10 +59,10 @@ export async function serverCommand() {
   }> = [];
 
   try {
-    const result = execSync(
-      "ps -eo pid,command | grep 'win-agent._engine' | grep -v grep",
-      { encoding: 'utf-8', timeout: 5000 }
-    ).trim();
+    const result = execSync("ps -eo pid,command | grep 'win-agent._engine' | grep -v grep", {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
 
     if (!result) {
       console.log('\n⚠️  没有正在运行的 win-agent server');
@@ -199,7 +199,10 @@ function formatServerChoice(entry: {
   enginePid: number;
   serverInfo: ServerInfo | null;
 }): string {
-  const parts = [`${path.basename(entry.workspace)} (${entry.workspace})`, `PID ${entry.enginePid}`];
+  const parts = [
+    `${path.basename(entry.workspace)} (${entry.workspace})`,
+    `PID ${entry.enginePid}`,
+  ];
   if (entry.serverInfo) {
     parts.push(`:${entry.serverInfo.port}`);
   }

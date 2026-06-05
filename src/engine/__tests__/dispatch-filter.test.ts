@@ -35,6 +35,10 @@ function createMessage(
   return lastInsertRowid as number;
 }
 
+function addDep(taskId: number, dependsOnId: number) {
+  insert('task_dependencies', { task_id: taskId, depends_on: dependsOnId });
+}
+
 describe('filterMessagesForRole', () => {
   describe('DEV role', () => {
     it('skips messages for paused tasks', () => {
@@ -87,7 +91,7 @@ describe('filterMessagesForRole', () => {
       expect(filtered).toHaveLength(0);
     });
 
-    it('skips messages for blocked tasks', () => {
+    it('defers messages for blocked tasks', () => {
       const taskId = createTask('Task', TaskStatus.Blocked);
       const msgId = createMessage(Role.PM, Role.DEV, 'directive', taskId);
 
@@ -109,6 +113,38 @@ describe('filterMessagesForRole', () => {
       ]);
 
       expect(filtered).toHaveLength(0);
+      const msg = select<{ status: string }>('messages', { id: msgId })[0];
+      expect(msg.status).toBe(MessageStatus.Deferred);
+    });
+
+    it('defers directive messages when dependencies are unmet', () => {
+      const depId = createTask('Dep', TaskStatus.PendingDev);
+      const taskId = createTask('Task', TaskStatus.PendingDev);
+      addDep(taskId, depId);
+      const msgId = createMessage(Role.PM, Role.DEV, 'directive', taskId);
+
+      const filtered = filterMessagesForRole(Role.DEV, [
+        {
+          id: msgId,
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          content: 'test',
+          status: 'unread',
+          related_task_id: taskId,
+          related_iteration_id: null,
+          attachments: null,
+          created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
+        },
+      ]);
+
+      expect(filtered).toHaveLength(0);
+      const msg = select<{ status: string }>('messages', { id: msgId })[0];
+      expect(msg.status).toBe(MessageStatus.Deferred);
+      const task = select<{ status: string }>('tasks', { id: taskId })[0];
+      expect(task.status).toBe(TaskStatus.Blocked);
     });
 
     it('skips stale directive messages for done tasks', () => {
@@ -161,7 +197,49 @@ describe('filterMessagesForRole', () => {
       expect(filtered).toHaveLength(1);
     });
 
-    it('delivers feedback messages and auto-rejects done tasks with reason', () => {
+    it.each([
+      ['intent=reject', { intent: 'reject' }],
+      ['result=rejected', { result: 'rejected' }],
+      ['action=reject', { action: 'reject' }],
+    ] as const)(
+      'delivers feedback messages and auto-rejects done tasks only with explicit %s',
+      (_label, rejectFields) => {
+        const taskId = createTask('Task', TaskStatus.Done);
+        const msgId = createMessage(Role.PM, Role.DEV, 'feedback', taskId);
+        const attachments = JSON.stringify({
+          protocol: 'win-agent.message.v1',
+          type: 'feedback',
+          task_id: taskId,
+          ...rejectFields,
+        });
+
+        const filtered = filterMessagesForRole(Role.DEV, [
+          {
+            id: msgId,
+            from_role: Role.PM,
+            to_role: Role.DEV,
+            type: 'feedback',
+            content: 'needs fix',
+            status: 'unread',
+            related_task_id: taskId,
+            related_iteration_id: null,
+            attachments,
+            created_at: '',
+            retry_count: 0,
+            last_retry_at: null,
+          },
+        ]);
+
+        expect(filtered).toHaveLength(1);
+        const task = select<{ status: string; rejection_reason: string | null }>('tasks', {
+          id: taskId,
+        })[0];
+        expect(task.status).toBe(TaskStatus.Rejected);
+        expect(task.rejection_reason).toBe('needs fix');
+      }
+    );
+
+    it('delivers ordinary feedback on done tasks without changing task status', () => {
       const taskId = createTask('Task', TaskStatus.Done);
       const msgId = createMessage(Role.PM, Role.DEV, 'feedback', taskId);
 
@@ -171,7 +249,7 @@ describe('filterMessagesForRole', () => {
           from_role: Role.PM,
           to_role: Role.DEV,
           type: 'feedback',
-          content: 'needs fix',
+          content: 'additional context',
           status: 'unread',
           related_task_id: taskId,
           related_iteration_id: null,
@@ -183,9 +261,75 @@ describe('filterMessagesForRole', () => {
       ]);
 
       expect(filtered).toHaveLength(1);
-      const task = select<{ status: string; rejection_reason: string | null }>('tasks', { id: taskId })[0];
-      expect(task.status).toBe(TaskStatus.Rejected);
-      expect(task.rejection_reason).toBe('needs fix');
+      const task = select<{ status: string; rejection_reason: string | null }>('tasks', {
+        id: taskId,
+      })[0];
+      expect(task.status).toBe(TaskStatus.Done);
+      expect(task.rejection_reason).toBeNull();
+    });
+
+    it('delivers clarify feedback on done tasks without changing task status', () => {
+      const taskId = createTask('Task', TaskStatus.Done);
+      const msgId = createMessage(Role.PM, Role.DEV, 'feedback', taskId);
+      const attachments = JSON.stringify({
+        protocol: 'win-agent.message.v1',
+        type: 'feedback',
+        task_id: taskId,
+        intent: 'clarify',
+      });
+
+      const filtered = filterMessagesForRole(Role.DEV, [
+        {
+          id: msgId,
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'feedback',
+          content: 'please clarify evidence',
+          status: 'unread',
+          related_task_id: taskId,
+          related_iteration_id: null,
+          attachments,
+          created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
+        },
+      ]);
+
+      expect(filtered).toHaveLength(1);
+      const task = select<{ status: string; rejection_reason: string | null }>('tasks', {
+        id: taskId,
+      })[0];
+      expect(task.status).toBe(TaskStatus.Done);
+      expect(task.rejection_reason).toBeNull();
+    });
+
+    it('delivers feedback with invalid attachments on done tasks without changing task status', () => {
+      const taskId = createTask('Task', TaskStatus.Done);
+      const msgId = createMessage(Role.PM, Role.DEV, 'feedback', taskId);
+
+      const filtered = filterMessagesForRole(Role.DEV, [
+        {
+          id: msgId,
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'feedback',
+          content: 'not structured reject',
+          status: 'unread',
+          related_task_id: taskId,
+          related_iteration_id: null,
+          attachments: '{nope',
+          created_at: '',
+          retry_count: 0,
+          last_retry_at: null,
+        },
+      ]);
+
+      expect(filtered).toHaveLength(1);
+      const task = select<{ status: string; rejection_reason: string | null }>('tasks', {
+        id: taskId,
+      })[0];
+      expect(task.status).toBe(TaskStatus.Done);
+      expect(task.rejection_reason).toBeNull();
     });
 
     it('does not change status for feedback on non-done tasks', () => {

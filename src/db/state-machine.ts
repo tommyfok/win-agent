@@ -75,9 +75,7 @@ export function transitionTaskStatus(
   }
 
   if (to === TaskStatus.Rejected && (!reason || !reason.trim())) {
-    throw new Error(
-      `任务状态转换为 rejected 时必须提供非空 rejection_reason (task #${taskId})`
-    );
+    throw new Error(`任务状态转换为 rejected 时必须提供非空 rejection_reason (task #${taskId})`);
   }
 
   const roleAllowlist = TASK_TRANSITION_ROLES[from]?.[to];

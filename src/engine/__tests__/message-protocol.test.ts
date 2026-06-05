@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MESSAGE_PROTOCOL,
+  MESSAGE_PROTOCOL_TYPES,
   formatMessageProtocolAttachment,
   formatMessageProtocolForPrompt,
   parseMessageProtocolAttachment,
@@ -22,11 +23,11 @@ describe('message protocol helpers', () => {
   });
 
   it('parses all supported message types', () => {
-    for (const type of ['directive', 'feedback', 'review_result', 'cancel_task', 'system']) {
+    for (const type of MESSAGE_PROTOCOL_TYPES) {
       const payload = {
         protocol: MESSAGE_PROTOCOL,
         type,
-        ...(type === 'feedback' || type === 'system' ? {} : { task_id: 1 }),
+        ...(type === 'reflection' ? { iteration_id: 1 } : { task_id: 1 }),
       };
 
       expect(parseMessageProtocolAttachment(JSON.stringify(payload))).toMatchObject({
@@ -54,7 +55,17 @@ describe('message protocol helpers', () => {
       })
     ).toMatchObject({
       ok: false,
-      reason: 'type must be one of directive, feedback, review_result, cancel_task, system',
+      reason:
+        'type must be one of directive, feedback, review_result, cancel_task, system, notification, reflection',
+    });
+    expect(
+      validateMessageProtocolPayload({
+        protocol: MESSAGE_PROTOCOL,
+        type: 'reflection',
+      })
+    ).toMatchObject({
+      ok: false,
+      reason: 'reflection messages require task_id or iteration_id',
     });
   });
 

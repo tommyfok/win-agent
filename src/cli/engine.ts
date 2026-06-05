@@ -8,7 +8,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { writePidFile, removePidFile, getDbPath } from '../config/index.js';
 import { openDb } from '../db/connection.js';
-import { select as dbSelect, insert as dbInsert, rawQuery } from '../db/repository.js';
+import {
+  select as dbSelect,
+  insert as dbInsert,
+  rawQuery,
+  upsertProjectConfig,
+  withTransaction,
+} from '../db/repository.js';
 import { MessageStatus } from '../db/types.js';
 import {
   startOpencodeServer,
@@ -33,6 +39,12 @@ import { Role } from '../engine/role-manager.js';
 
 let serverHandle: OpencodeServerHandle | null = null;
 let sessionManager: SessionManager | null = null;
+const ACTIVE_ITERATION_RESTORE_KEY = 'engine.activeIterationRestoreNotifiedSet';
+
+export interface ActiveIterationRestoreNotification {
+  activeCount: number;
+  notified: boolean;
+}
 
 export function getServerHandle(): OpencodeServerHandle | null {
   return serverHandle;
@@ -40,6 +52,44 @@ export function getServerHandle(): OpencodeServerHandle | null {
 
 export function getSessionManager(): SessionManager | null {
   return sessionManager;
+}
+
+function activeIterationSetSignature(iterations: { id: number }[]): string {
+  const ids = [...new Set(iterations.map((iter) => Number(iter.id)))].sort((a, b) => a - b);
+  return JSON.stringify(ids);
+}
+
+export function notifyActiveIterationsOnRestore(): ActiveIterationRestoreNotification {
+  const activeIterations = dbSelect<{ id: number }>('iterations', { status: 'active' });
+  const activeCount = activeIterations.length;
+  const signature = activeIterationSetSignature(activeIterations);
+  const previousSignature = dbSelect<{ value: string }>('project_config', {
+    key: ACTIVE_ITERATION_RESTORE_KEY,
+  })[0]?.value;
+
+  if (activeCount === 0) {
+    if (previousSignature !== signature) {
+      upsertProjectConfig(ACTIVE_ITERATION_RESTORE_KEY, signature);
+    }
+    return { activeCount, notified: false };
+  }
+
+  if (previousSignature === signature) {
+    return { activeCount, notified: false };
+  }
+
+  withTransaction(() => {
+    dbInsert('messages', {
+      from_role: Role.SYS,
+      to_role: Role.PM,
+      type: 'system',
+      content: `引擎已重启恢复，有 ${activeCount} 个活跃迭代继续执行。`,
+      status: MessageStatus.Unread,
+    });
+    upsertProjectConfig(ACTIVE_ITERATION_RESTORE_KEY, signature);
+  });
+
+  return { activeCount, notified: true };
 }
 
 export async function engineCommand(workspace: string) {
@@ -100,16 +150,9 @@ export async function engineCommand(workspace: string) {
     console.log(`✓ 已回忆 ${memoryCount} 条近期记忆`);
   }
 
-  const activeIterations = dbSelect<{ id: number }>('iterations', { status: 'active' });
-  if (activeIterations.length > 0) {
-    dbInsert('messages', {
-      from_role: Role.SYS,
-      to_role: Role.PM,
-      type: 'system',
-      content: `引擎已重启恢复，有 ${activeIterations.length} 个活跃迭代继续执行。`,
-      status: MessageStatus.Unread,
-    });
-    console.log(`△ 发现 ${activeIterations.length} 个活跃迭代，已通知 PM`);
+  const activeRestore = notifyActiveIterationsOnRestore();
+  if (activeRestore.notified) {
+    console.log(`△ 发现 ${activeRestore.activeCount} 个活跃迭代，已通知 PM`);
   }
 
   // Log engine start

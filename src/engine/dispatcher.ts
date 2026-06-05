@@ -14,6 +14,7 @@ import { logger } from '../utils/logger.js';
 import { getModelForRole } from './role-model.js';
 import { startDevSessionStallMonitor } from './dev-session-nudger.js';
 import { createTraceId, withTrace } from './trace.js';
+import { isMessageProtocolType, isGlobalMessageProtocolType } from './message-protocol.js';
 
 export type { MessageRow };
 
@@ -26,13 +27,6 @@ export interface DispatchOptions {
   /** Callback invoked with sessionId once the session is resolved, before prompt is sent. */
   onSessionResolved?: (sessionId: string) => void;
 }
-
-const DEV_TASK_REQUIRED_MESSAGE_TYPES = new Set([
-  'directive',
-  'feedback',
-  'cancel_task',
-  'notification',
-]);
 
 /**
  * Dispatch a batch of unread messages to a role.
@@ -180,7 +174,7 @@ function filterInvalidDevFallbackMessages(
   const valid: MessageRow[] = [];
   const invalid: MessageRow[] = [];
   for (const msg of messages) {
-    if (!msg.related_task_id && DEV_TASK_REQUIRED_MESSAGE_TYPES.has(msg.type)) {
+    if (!msg.related_task_id && !isExplicitGlobalDevMessage(msg)) {
       invalid.push(msg);
     } else {
       valid.push(msg);
@@ -215,6 +209,15 @@ function filterInvalidDevFallbackMessages(
     'skipped DEV task-bound messages without related_task_id'
   );
   return valid;
+}
+
+function isExplicitGlobalDevMessage(msg: MessageRow): boolean {
+  return (
+    isMessageProtocolType(msg.type) &&
+    isGlobalMessageProtocolType(msg.type) &&
+    msg.type === 'reflection' &&
+    Boolean(msg.related_iteration_id)
+  );
 }
 
 /**

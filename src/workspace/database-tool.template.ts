@@ -9,6 +9,26 @@ import path from 'node:path';
 /** Hardcoded role identity — ctx.agent is unreliable */
 const ROLE = '__WIN_AGENT_ROLE__';
 const CURRENT_DISPATCH_TRACE_KEY = 'engine.currentDispatchTraceId';
+const MESSAGE_PROTOCOL = 'win-agent.message.v1';
+const DISPATCHABLE_MESSAGE_ROLES = ['PM', 'DEV'] as const;
+const MESSAGE_TYPE_VALUES = [
+  'directive',
+  'feedback',
+  'review_result',
+  'cancel_task',
+  'system',
+  'notification',
+  'reflection',
+] as const;
+const TASK_BOUND_MESSAGE_TYPES = new Set<string>([
+  'directive',
+  'feedback',
+  'review_result',
+  'cancel_task',
+  'system',
+  'notification',
+]);
+const GLOBAL_MESSAGE_TYPES = new Set<string>(['reflection']);
 
 /** Task status values (hardcoded to avoid cross-module imports) */
 const TASK_STATUS_VALUES = [
@@ -114,6 +134,224 @@ function ensureNonEmpty(obj: Record<string, unknown>, label: string): void {
   if (Object.keys(obj).length === 0) {
     throw new Error(`${label} 不能为空对象`);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+function messageValidationError(message: string): string {
+  return `messages 校验失败: ${message}`;
+}
+
+function validateMessagePartialFields(data: Record<string, unknown>): string | null {
+  if (
+    data.to_role !== undefined &&
+    (typeof data.to_role !== 'string' ||
+      !DISPATCHABLE_MESSAGE_ROLES.includes(
+        data.to_role as (typeof DISPATCHABLE_MESSAGE_ROLES)[number]
+      ))
+  ) {
+    return messageValidationError(
+      `to_role 必须是可调度角色 ${DISPATCHABLE_MESSAGE_ROLES.join('/')}，收到 ${JSON.stringify(data.to_role)}`
+    );
+  }
+
+  if (
+    data.type !== undefined &&
+    (typeof data.type !== 'string' ||
+      !MESSAGE_TYPE_VALUES.includes(data.type as (typeof MESSAGE_TYPE_VALUES)[number]))
+  ) {
+    return messageValidationError(
+      `type 必须是合法类型 ${MESSAGE_TYPE_VALUES.join(', ')}，收到 ${JSON.stringify(data.type)}`
+    );
+  }
+
+  if (
+    data.related_task_id !== undefined &&
+    data.related_task_id !== null &&
+    !isPositiveInteger(data.related_task_id)
+  ) {
+    return messageValidationError('related_task_id 必须是正整数或 null');
+  }
+
+  if (
+    data.related_iteration_id !== undefined &&
+    data.related_iteration_id !== null &&
+    !isPositiveInteger(data.related_iteration_id)
+  ) {
+    return messageValidationError('related_iteration_id 必须是正整数或 null');
+  }
+
+  return null;
+}
+
+function validateMessageRecord(record: Record<string, unknown>): string | null {
+  const partialErr = validateMessagePartialFields(record);
+  if (partialErr) return partialErr;
+
+  const type = record.type === undefined ? 'directive' : record.type;
+  if (typeof type !== 'string') {
+    return messageValidationError(`type 必须是合法类型 ${MESSAGE_TYPE_VALUES.join(', ')}`);
+  }
+
+  if (
+    typeof record.to_role !== 'string' ||
+    !DISPATCHABLE_MESSAGE_ROLES.includes(
+      record.to_role as (typeof DISPATCHABLE_MESSAGE_ROLES)[number]
+    )
+  ) {
+    return messageValidationError(
+      `to_role 必须是可调度角色 ${DISPATCHABLE_MESSAGE_ROLES.join('/')}，收到 ${JSON.stringify(record.to_role)}`
+    );
+  }
+
+  if (TASK_BOUND_MESSAGE_TYPES.has(type) && !isPositiveInteger(record.related_task_id)) {
+    return messageValidationError(`${type} 消息必须设置 related_task_id`);
+  }
+
+  if (
+    GLOBAL_MESSAGE_TYPES.has(type) &&
+    !isPositiveInteger(record.related_task_id) &&
+    !isPositiveInteger(record.related_iteration_id)
+  ) {
+    return messageValidationError(`${type} 消息无 related_task_id 时必须设置 related_iteration_id`);
+  }
+
+  return validateMessageAttachmentConsistency(record, type);
+}
+
+function validateMessageAttachmentConsistency(
+  record: Record<string, unknown>,
+  messageType: string
+): string | null {
+  const rawAttachments = record.attachments;
+  if (rawAttachments === null || rawAttachments === undefined || rawAttachments === '') {
+    return null;
+  }
+
+  let parsed: unknown = rawAttachments;
+  if (typeof rawAttachments === 'string') {
+    try {
+      parsed = JSON.parse(rawAttachments);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!isRecord(parsed) || parsed.protocol !== MESSAGE_PROTOCOL) {
+    return null;
+  }
+
+  const protocolErr = validateMessageProtocolPayload(parsed);
+  if (protocolErr) {
+    return messageValidationError(`attachments 协议无效: ${protocolErr}`);
+  }
+
+  if (parsed.type !== messageType) {
+    return messageValidationError(
+      `attachments.type 与 type 不一致: attachments.type=${String(parsed.type)}, type=${messageType}`
+    );
+  }
+
+  const attachmentTaskId = parsed.task_id === undefined ? null : parsed.task_id;
+  const relatedTaskId = record.related_task_id === undefined ? null : record.related_task_id;
+  if (attachmentTaskId !== relatedTaskId) {
+    return messageValidationError(
+      `attachments.task_id 与 related_task_id 不一致: attachments.task_id=${String(attachmentTaskId)}, related_task_id=${String(relatedTaskId)}`
+    );
+  }
+
+  const attachmentIterationId = parsed.iteration_id === undefined ? null : parsed.iteration_id;
+  const relatedIterationId =
+    record.related_iteration_id === undefined ? null : record.related_iteration_id;
+  if (attachmentIterationId !== relatedIterationId) {
+    return messageValidationError(
+      `attachments.iteration_id 与 related_iteration_id 不一致: attachments.iteration_id=${String(attachmentIterationId)}, related_iteration_id=${String(relatedIterationId)}`
+    );
+  }
+
+  return null;
+}
+
+function validateMessageProtocolPayload(payload: Record<string, unknown>): string | null {
+  if (
+    typeof payload.type !== 'string' ||
+    !MESSAGE_TYPE_VALUES.includes(payload.type as (typeof MESSAGE_TYPE_VALUES)[number])
+  ) {
+    return `type 必须是合法类型 ${MESSAGE_TYPE_VALUES.join(', ')}`;
+  }
+
+  if (payload.task_id !== undefined && !isPositiveInteger(payload.task_id)) {
+    return 'task_id 必须是正整数';
+  }
+
+  if (payload.iteration_id !== undefined && !isPositiveInteger(payload.iteration_id)) {
+    return 'iteration_id 必须是正整数';
+  }
+
+  if (TASK_BOUND_MESSAGE_TYPES.has(payload.type) && !isPositiveInteger(payload.task_id)) {
+    return `${payload.type} 消息必须设置 task_id`;
+  }
+
+  if (
+    GLOBAL_MESSAGE_TYPES.has(payload.type) &&
+    !isPositiveInteger(payload.task_id) &&
+    !isPositiveInteger(payload.iteration_id)
+  ) {
+    return `${payload.type} 消息必须设置 task_id 或 iteration_id`;
+  }
+
+  return null;
+}
+
+function buildWhereClauses(where: Record<string, unknown>, params: unknown[]): string[] {
+  const whereClauses: string[] = [];
+  for (const [key, value] of Object.entries(where)) {
+    if (value === null) {
+      whereClauses.push(`${key} IS NULL`);
+    } else if (Array.isArray(value)) {
+      if (value.length === 0) {
+        whereClauses.push('0');
+        continue;
+      }
+      whereClauses.push(`${key} IN (${value.map(() => '?').join(', ')})`);
+      params.push(...value);
+    } else {
+      whereClauses.push(`${key} = ?`);
+      params.push(value);
+    }
+  }
+  return whereClauses;
+}
+
+function validateMessageUpdate(
+  db: SqliteDb,
+  where: Record<string, unknown>,
+  data: Record<string, unknown>
+): string | null {
+  const partialErr = validateMessagePartialFields(data);
+  if (partialErr) return partialErr;
+
+  const params: unknown[] = [];
+  const whereClauses = buildWhereClauses(where, params);
+  const rows = db
+    .prepare(`SELECT * FROM messages WHERE ${whereClauses.join(' AND ')}`)
+    .all(...params) as Array<Record<string, unknown>>;
+
+  for (const row of rows) {
+    const merged = { ...row, ...data };
+    const rowErr = validateMessageRecord(merged);
+    if (rowErr) {
+      return `${rowErr}（message id=${String(row.id)}）`;
+    }
+  }
+
+  return null;
 }
 
 /** Cache PRAGMA results per table to avoid repeated calls within one tool invocation */
@@ -341,6 +579,10 @@ export const insert: ToolDefinition = tool({
 
     const keys = Object.keys(data);
     validateColumns(db, String(args.table), keys);
+    if (args.table === 'messages') {
+      const validationErr = validateMessageRecord(data);
+      if (validationErr) return JSON.stringify({ error: validationErr });
+    }
     const placeholders = keys.map(() => '?').join(', ');
     const sql = `INSERT INTO ${String(args.table)} (${keys.join(', ')}) VALUES (${placeholders})`;
     const values = keys.map((k) => toSqlValue(data[k]));
@@ -383,7 +625,8 @@ export const update: ToolDefinition = tool({
       }
       // Reject with empty reason is forbidden
       if (String(data.status) === 'rejected') {
-        const hasReason = data.rejection_reason != null && String(data.rejection_reason).trim() !== '';
+        const hasReason =
+          data.rejection_reason != null && String(data.rejection_reason).trim() !== '';
         if (!hasReason) {
           return JSON.stringify({
             error: '任务状态设为 rejected 时必须提供非空 rejection_reason',
@@ -408,6 +651,10 @@ export const update: ToolDefinition = tool({
 
     validateColumns(db, String(args.table), Object.keys(data));
     validateColumns(db, String(args.table), Object.keys(where));
+    if (args.table === 'messages') {
+      const validationErr = validateMessageUpdate(db, where, data);
+      if (validationErr) return JSON.stringify({ error: validationErr });
+    }
 
     if (args.table === 'tasks' && data.status && where.id != null) {
       const prev = db.prepare('SELECT status FROM tasks WHERE id = ?').get(where.id) as

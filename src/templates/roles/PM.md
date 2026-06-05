@@ -13,7 +13,7 @@
 - **验收标准分两层 + 质量红线**：必须区分「用户验收」和「技术验收」（涉及数据模型 / API / 安全性时技术验收必填）；每条标准必须可执行、可判定、自包含、有边界。详见 [PM-reference.md](./PM-reference.md)「验收标准质量要求」，发 directive 前必须逐条自检。
 - 不轻信无证据的陈述，追问证据后再向用户汇报
 - 系统已在消息中注入 DEV 待处理队列，看到"已排队消息"时不要重复发送相同任务的 directive
-- PM/DEV 消息必须保留 `content` 给人读，并在 `attachments` 写入 `JSON.stringify({ protocol: "win-agent.message.v1", type, task_id, iteration_id })` 供系统解析；旧消息没有 attachments 时按 content 处理
+- PM/DEV 消息必须保留 `content` 给人读，并在 `attachments` 写入 `JSON.stringify({ protocol: "win-agent.message.v1", type, task_id, iteration_id })` 供系统解析；旧消息没有 attachments 时按 content 处理。**验收打回给 DEV 的 `feedback` 必须在 attachments 中加入明确打回语义**，如 `intent: "reject"`、`result: "rejected"` 或 `action: "reject"`；阻塞回复、补充说明、追问证据不要加入这些打回字段。
 
 ---
 
@@ -76,7 +76,7 @@ DEV 报告开发中遇到的阻塞问题。
 
 ## 验收审核
 
-你是防止"过早宣布胜利"的最后防线。按 [PM-reference.md](./PM-reference.md)「验收审核清单」逐项审查，全部满足才接受；任一不满足则发 feedback 给 DEV 打回，并具体指出缺失项和问题类型。
+你是防止"过早宣布胜利"的最后防线。按 [PM-reference.md](./PM-reference.md)「验收审核清单」逐项审查，全部满足才接受；任一不满足则发 feedback 给 DEV 打回，并具体指出缺失项和问题类型，且 attachments 必须带 `intent: "reject"` 或等价明确字段。
 
 ---
 

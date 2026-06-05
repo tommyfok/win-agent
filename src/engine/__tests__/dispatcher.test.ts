@@ -66,13 +66,49 @@ describe('dispatchToRole DEV session routing', () => {
     expect(pmMessages[0].content).toContain(`msg#${msgId} 缺少 related_task_id`);
   });
 
-  it('allows global DEV reflection messages to use the fallback session', async () => {
+  it('skips non-global DEV messages without related_task_id instead of using fallback session', async () => {
     const { lastInsertRowid } = insert('messages', {
       from_role: Role.SYS,
       to_role: Role.DEV,
       type: 'reflection',
       content: 'reflect',
       status: MessageStatus.Unread,
+    });
+    const msgId = Number(lastInsertRowid);
+
+    const client = {
+      session: {
+        prompt: vi.fn(),
+      },
+    };
+    const sessionManager = {
+      getTaskSession: vi.fn(),
+    };
+
+    const result = await dispatchToRole(client as never, sessionManager as never, Role.DEV, [
+      makeMessage({ id: msgId, type: 'reflection', content: 'reflect', from_role: Role.SYS }),
+    ]);
+
+    expect(result.sessionId).toBeNull();
+    expect(client.session.prompt).not.toHaveBeenCalled();
+    expect(sessionManager.getTaskSession).not.toHaveBeenCalled();
+    expect(select<{ status: string }>('messages', { id: msgId })[0].status).toBe(
+      MessageStatus.Read
+    );
+  });
+
+  it('allows global DEV reflection messages with related_iteration_id to use the fallback session', async () => {
+    const { lastInsertRowid: iterationRowid } = insert('iterations', {
+      status: 'reviewed',
+    });
+    const iterationId = Number(iterationRowid);
+    const { lastInsertRowid } = insert('messages', {
+      from_role: Role.SYS,
+      to_role: Role.DEV,
+      type: 'reflection',
+      content: 'reflect',
+      status: MessageStatus.Unread,
+      related_iteration_id: iterationId,
     });
     const msgId = Number(lastInsertRowid);
 
@@ -93,7 +129,13 @@ describe('dispatchToRole DEV session routing', () => {
     };
 
     const result = await dispatchToRole(client as never, sessionManager as never, Role.DEV, [
-      makeMessage({ id: msgId, type: 'reflection', content: 'reflect', from_role: Role.SYS }),
+      makeMessage({
+        id: msgId,
+        type: 'reflection',
+        content: 'reflect',
+        from_role: Role.SYS,
+        related_iteration_id: iterationId,
+      }),
     ]);
 
     expect(result.sessionId).toBe('fallback-session');
@@ -108,12 +150,17 @@ describe('dispatchToRole DEV session routing', () => {
   });
 
   it('uses caller-provided dispatch trace id in role_outputs and logs', async () => {
+    const { lastInsertRowid: iterationRowid } = insert('iterations', {
+      status: 'reviewed',
+    });
+    const iterationId = Number(iterationRowid);
     const { lastInsertRowid } = insert('messages', {
       from_role: Role.SYS,
       to_role: Role.DEV,
       type: 'reflection',
       content: 'reflect',
       status: MessageStatus.Unread,
+      related_iteration_id: iterationId,
     });
     const msgId = Number(lastInsertRowid);
 
@@ -137,7 +184,15 @@ describe('dispatchToRole DEV session routing', () => {
       client as never,
       sessionManager as never,
       Role.DEV,
-      [makeMessage({ id: msgId, type: 'reflection', content: 'reflect', from_role: Role.SYS })],
+      [
+        makeMessage({
+          id: msgId,
+          type: 'reflection',
+          content: 'reflect',
+          from_role: Role.SYS,
+          related_iteration_id: iterationId,
+        }),
+      ],
       { traceId: 'dispatch_test_123' }
     );
 

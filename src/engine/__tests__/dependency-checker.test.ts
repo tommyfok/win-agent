@@ -146,6 +146,94 @@ describe('checkAndUnblockDependencies', () => {
     expect(devMsgs.length).toBe(1);
   });
 
+  it('restores deferred DEV directive to unread when dependencies become done', () => {
+    const depId = createTask('Dep', TaskStatus.PendingDev);
+    const taskId = createTask('Task', TaskStatus.PendingDev);
+    addDep(taskId, depId);
+    checkAndBlockUnmetDependencies(taskId, TaskStatus.PendingDev);
+    const { lastInsertRowid } = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'continue with original task context',
+      related_task_id: taskId,
+      status: MessageStatus.Deferred,
+    });
+
+    update('tasks', { id: depId }, { status: TaskStatus.Done });
+    checkAndUnblockDependencies();
+
+    const msg = select<{ status: string }>('messages', { id: Number(lastInsertRowid) })[0];
+    expect(msg.status).toBe(MessageStatus.Unread);
+  });
+
+  it('restores deferred DEV directive even when assigned_to is missing', () => {
+    const depId = createTask('Dep', TaskStatus.PendingDev);
+    const taskId = createTask('Task', TaskStatus.PendingDev);
+    addDep(taskId, depId);
+    checkAndBlockUnmetDependencies(taskId, TaskStatus.PendingDev);
+    const { lastInsertRowid } = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'assigned_to missing should not drop this work',
+      related_task_id: taskId,
+      status: MessageStatus.Deferred,
+    });
+
+    update('tasks', { id: depId }, { status: TaskStatus.Done });
+    checkAndUnblockDependencies();
+
+    const msg = select<{ status: string }>('messages', { id: Number(lastInsertRowid) })[0];
+    expect(msg.status).toBe(MessageStatus.Unread);
+  });
+
+  it('does not let historical read or non-notification SYS->DEV messages suppress unblock notification', () => {
+    const depId = createTask('Dep', TaskStatus.PendingDev);
+    const taskId = createTask('Task', TaskStatus.PendingDev, Role.DEV);
+    addDep(taskId, depId);
+    checkAndBlockUnmetDependencies(taskId, TaskStatus.PendingDev);
+    const { lastInsertRowid } = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'original deferred directive',
+      related_task_id: taskId,
+      status: MessageStatus.Deferred,
+    });
+    insert('messages', {
+      from_role: Role.SYS,
+      to_role: Role.DEV,
+      type: 'notification',
+      content: 'old already-read notification',
+      related_task_id: taskId,
+      status: MessageStatus.Read,
+    });
+    insert('messages', {
+      from_role: Role.SYS,
+      to_role: Role.DEV,
+      type: 'system',
+      content: 'other unread system message',
+      related_task_id: taskId,
+      status: MessageStatus.Unread,
+    });
+
+    update('tasks', { id: depId }, { status: TaskStatus.Done });
+    checkAndUnblockDependencies();
+
+    const directive = select<{ status: string }>('messages', { id: Number(lastInsertRowid) })[0];
+    expect(directive.status).toBe(MessageStatus.Unread);
+    const freshNotifications = select<{ status: string; content: string }>('messages', {
+      from_role: Role.SYS,
+      to_role: Role.DEV,
+      type: 'notification',
+      related_task_id: taskId,
+      status: MessageStatus.Unread,
+    });
+    expect(freshNotifications).toHaveLength(1);
+    expect(freshNotifications[0].content).toContain('依赖已全部完成');
+  });
+
   it('does not duplicate DEV notification if one already exists', () => {
     const depId = createTask('Dep', TaskStatus.PendingDev);
     const taskId = createTask('Task', TaskStatus.PendingDev, Role.DEV);

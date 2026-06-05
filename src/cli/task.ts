@@ -48,6 +48,8 @@ const statusLabels: Record<TaskStatus, string> = {
   [TaskStatus.Blocked]: '已阻塞',
 };
 
+const STALE_DEV_EXECUTION_MESSAGE_TYPES = ['directive', 'system', 'notification', 'cancel_task'];
+
 function ensureDb() {
   const { running } = checkEngineRunning();
   if (!running) {
@@ -59,6 +61,26 @@ function ensureDb() {
   } catch {
     openDb(getDbPath(process.cwd()));
   }
+}
+
+function markStaleDevExecutionMessagesRead(taskId: number) {
+  const typePlaceholders = STALE_DEV_EXECUTION_MESSAGE_TYPES.map(() => '?').join(', ');
+
+  rawRun(
+    `UPDATE messages
+        SET status = ?
+      WHERE related_task_id = ?
+        AND status = ?
+        AND to_role = ?
+        AND type IN (${typePlaceholders})`,
+    [
+      MessageStatus.Read,
+      taskId,
+      MessageStatus.Unread,
+      Role.DEV,
+      ...STALE_DEV_EXECUTION_MESSAGE_TYPES,
+    ]
+  );
 }
 
 function taskList() {
@@ -165,10 +187,7 @@ function taskPause(taskId: string) {
 
   dbUpdate('tasks', { id }, { status: TaskStatus.Paused, pre_suspend_status: task.status });
 
-  rawRun(
-    `UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`,
-    [id]
-  );
+  markStaleDevExecutionMessagesRead(id);
 
   dbInsert('messages', {
     from_role: Role.SYS,
@@ -260,10 +279,7 @@ function taskCancel(taskId: string) {
 
   dbUpdate('tasks', { id }, { status: TaskStatus.Cancelled });
 
-  rawRun(
-    `UPDATE messages SET status = '${MessageStatus.Read}' WHERE related_task_id = ? AND status = '${MessageStatus.Unread}'`,
-    [id]
-  );
+  markStaleDevExecutionMessagesRead(id);
 
   dbInsert('messages', {
     from_role: Role.SYS,

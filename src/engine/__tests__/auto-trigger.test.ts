@@ -197,4 +197,20 @@ describe('checkScaffoldDone (via checkAutoTriggers)', () => {
     const scaffoldMsgs = msgs.filter((m) => m.content.includes('脚手架'));
     expect(scaffoldMsgs.length).toBe(1);
   });
+
+  it('does not fire again after resetTriggers restores persisted scaffold_done', () => {
+    insert('project_config', { key: 'project_mode', value: 'greenfield' });
+    insert('tasks', { title: 'Setup [scaffold]', status: TaskStatus.Done });
+
+    checkAutoTriggers();
+    resetTriggers();
+    checkAutoTriggers();
+
+    const msgs = select<{ content: string }>('messages', { to_role: Role.PM });
+    const scaffoldMsgs = msgs.filter((m) => m.content.includes('脚手架'));
+    expect(scaffoldMsgs.length).toBe(1);
+
+    const firedLogs = select<{ content: string }>('logs', { action: 'trigger_fired' });
+    expect(firedLogs.map((log) => log.content)).toContain('scaffold_done');
+  });
 });
