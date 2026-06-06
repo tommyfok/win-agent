@@ -4,7 +4,7 @@ import { update, insert as dbInsert, withTransaction } from '../db/repository.js
 import { MessageStatus } from '../db/types.js';
 import { queryRelevantKnowledge, type KnowledgeEntry } from '../embedding/knowledge.js';
 import { match } from 'ts-pattern';
-import { withAbortableTimeout, withRetry } from './retry.js';
+import { AbortError, withAbortableTimeout, withRetry } from './retry.js';
 import { filterMessagesForRole } from './dispatch-filter.js';
 import type { MessageRow } from './dispatch-filter.js';
 import { buildDispatchPrompt, getTaskContext } from './prompt-builder.js';
@@ -15,6 +15,12 @@ import { getModelForRole } from './role-model.js';
 import { startDevSessionStallMonitor } from './dev-session-nudger.js';
 import { createTraceId, withTrace } from './trace.js';
 import { isMessageProtocolType, isGlobalMessageProtocolType } from './message-protocol.js';
+import {
+  buildDispatchMarker,
+  createDispatchSignature,
+  findDispatchHistoryMatch,
+  type SessionMessageLike,
+} from './dispatch-dedupe.js';
 
 export type { MessageRow };
 
@@ -27,6 +33,9 @@ export interface DispatchOptions {
   /** Callback invoked with sessionId once the session is resolved, before prompt is sent. */
   onSessionResolved?: (sessionId: string) => void;
 }
+
+const DISPATCH_HISTORY_LIMIT = 20;
+const DISPATCH_HISTORY_TIMEOUT_MS = 5_000;
 
 /**
  * Dispatch a batch of unread messages to a role.
@@ -77,6 +86,20 @@ async function dispatchToRoleWithTrace(
   }
   options?.onSessionResolved?.(sessionId);
 
+  messages = await filterAlreadyDeliveredMessages(
+    client,
+    role,
+    sessionId,
+    messages,
+    traceId,
+    options?.signal,
+    log
+  );
+  if (messages.length === 0) {
+    log.info({ sessionId }, 'dispatch skipped because all messages were already delivered');
+    return { sessionId, inputTokens: 0, outputTokens: 0 };
+  }
+
   // 3. Query relevant knowledge
   const messageContent = messages.map((m) => m.content).join('\n');
   let knowledge: KnowledgeEntry[] = [];
@@ -90,8 +113,11 @@ async function dispatchToRoleWithTrace(
   const taskContext =
     role === Role.DEV ? getTaskContext(messages, sessionManager.getWorkspace()) : null;
   const pendingContext = sessionManager.consumePendingContext(sessionId);
+  const dispatchMarker = buildDispatchMarker(createDispatchSignature(messages), traceId);
   const prompt =
     (pendingContext ? pendingContext + '\n\n---\n\n' : '') +
+    dispatchMarker +
+    '\n\n' +
     buildDispatchPrompt(role, messages, knowledge, taskContext);
   const model = getModelForRole(role, sessionManager.getWorkspace());
 
@@ -161,6 +187,87 @@ async function dispatchToRoleWithTrace(
   });
 
   return { sessionId, inputTokens, outputTokens };
+}
+
+async function filterAlreadyDeliveredMessages(
+  client: OpencodeClient,
+  role: Role,
+  sessionId: string,
+  messages: MessageRow[],
+  traceId: string,
+  signal: AbortSignal | undefined,
+  log: {
+    warn: (obj: unknown, msg?: string) => void;
+    info: (obj: unknown, msg?: string) => void;
+  }
+): Promise<MessageRow[]> {
+  const signature = createDispatchSignature(messages);
+  let history: SessionMessageLike[];
+  try {
+    const result = await withAbortableTimeout(
+      (historySignal) =>
+        client.session.messages({
+          path: { id: sessionId },
+          query: { limit: DISPATCH_HISTORY_LIMIT },
+          signal: historySignal,
+        }),
+      DISPATCH_HISTORY_TIMEOUT_MS,
+      `${role} dispatch history check`,
+      signal
+    );
+    history = (result.data ?? []) as SessionMessageLike[];
+  } catch (err) {
+    if (err instanceof AbortError) throw err;
+    log.warn({ err, sessionId }, 'dispatch history check failed; continuing without dedupe');
+    return messages;
+  }
+
+  const match = findDispatchHistoryMatch(history, signature);
+  if (match.sameFingerprint) {
+    dbInsert('logs', {
+      role: Role.SYS,
+      action: 'dispatch_duplicate_fingerprint_seen',
+      content:
+        `${role} dispatch saw same content fingerprint in session history ` +
+        `(task=${signature.taskId ?? 'none'}, messages=${signature.messageIds.join(',')})`,
+      related_task_id: signature.taskId,
+      trace_id: traceId,
+    });
+  }
+
+  if (match.exactMessageIds.length === 0) {
+    return messages;
+  }
+
+  const duplicateIds = new Set(match.exactMessageIds);
+  const duplicateMessages = messages.filter((msg) => duplicateIds.has(msg.id));
+  const remainingMessages = messages.filter((msg) => !duplicateIds.has(msg.id));
+
+  withTransaction(() => {
+    for (const msg of duplicateMessages) {
+      update('messages', { id: msg.id }, { status: MessageStatus.Read });
+    }
+    dbInsert('logs', {
+      role: Role.SYS,
+      action: 'dispatch_deduped',
+      content:
+        `${role} dispatch skipped already-delivered message(s): ` +
+        match.exactMessageIds.map((id) => `msg#${id}`).join(', '),
+      related_task_id: signature.taskId,
+      trace_id: traceId,
+    });
+  });
+
+  log.info(
+    {
+      sessionId,
+      skippedMessageIds: match.exactMessageIds,
+      remainingMessageIds: remainingMessages.map((m) => m.id),
+    },
+    'dispatch deduped already-delivered messages'
+  );
+
+  return remainingMessages;
 }
 
 function filterInvalidDevFallbackMessages(

@@ -4,6 +4,7 @@ import { setupTestDb } from '../../db/__tests__/test-helpers.js';
 import { MessageStatus } from '../../db/types.js';
 import { dispatchToRole, type MessageRow } from '../dispatcher.js';
 import { Role } from '../role-manager.js';
+import { buildDispatchMarker, createDispatchSignature } from '../dispatch-dedupe.js';
 
 beforeEach(() => {
   setupTestDb();
@@ -114,6 +115,7 @@ describe('dispatchToRole DEV session routing', () => {
 
     const client = {
       session: {
+        messages: vi.fn().mockResolvedValue({ data: [] }),
         prompt: vi.fn().mockResolvedValue({
           data: {
             parts: [{ type: 'text', text: 'ok' }],
@@ -141,6 +143,9 @@ describe('dispatchToRole DEV session routing', () => {
     expect(result.sessionId).toBe('fallback-session');
     expect(sessionManager.getTaskSession).toHaveBeenCalledWith(-1, Role.DEV);
     expect(client.session.prompt).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(client.session.prompt.mock.calls[0][0])).toContain(
+      'win-agent-dispatch'
+    );
 
     const outputs = select<{ trace_id: string | null }>('role_outputs', {});
     expect(outputs[0].trace_id).toMatch(/^dispatch_/);
@@ -166,6 +171,7 @@ describe('dispatchToRole DEV session routing', () => {
 
     const client = {
       session: {
+        messages: vi.fn().mockResolvedValue({ data: [] }),
         prompt: vi.fn().mockResolvedValue({
           data: {
             parts: [{ type: 'text', text: 'ok' }],
@@ -202,5 +208,60 @@ describe('dispatchToRole DEV session routing', () => {
     expect(select<{ trace_id: string | null }>('logs', { action: 'dispatch' })[0].trace_id).toBe(
       'dispatch_test_123'
     );
+  });
+
+  it('skips a DEV message whose dispatch marker is already present in session history', async () => {
+    const { lastInsertRowid: taskRowid } = insert('tasks', {
+      title: 'Task',
+    });
+    const taskId = Number(taskRowid);
+    const { lastInsertRowid } = insert('messages', {
+      from_role: Role.PM,
+      to_role: Role.DEV,
+      type: 'directive',
+      content: 'build this',
+      status: MessageStatus.Unread,
+      related_task_id: taskId,
+    });
+    const msgId = Number(lastInsertRowid);
+    const message = makeMessage({
+      id: msgId,
+      content: 'build this',
+      related_task_id: taskId,
+    });
+    const marker = buildDispatchMarker(createDispatchSignature([message]), 'dispatch_previous');
+
+    const client = {
+      session: {
+        messages: vi.fn().mockResolvedValue({
+          data: [{ parts: [{ type: 'text', text: `${marker}\n\n## 本次派发消息` }] }],
+        }),
+        prompt: vi.fn(),
+      },
+    };
+    const sessionManager = {
+      getTaskSession: vi.fn().mockResolvedValue('dev-session'),
+    };
+
+    const result = await dispatchToRole(
+      client as never,
+      sessionManager as never,
+      Role.DEV,
+      [message],
+      { traceId: 'dispatch_current' }
+    );
+
+    expect(result.sessionId).toBe('dev-session');
+    expect(client.session.messages).toHaveBeenCalledTimes(1);
+    expect(client.session.prompt).not.toHaveBeenCalled();
+    expect(select<{ status: string }>('messages', { id: msgId })[0].status).toBe(
+      MessageStatus.Read
+    );
+
+    const logs = select<{ trace_id: string | null; content: string }>('logs', {
+      action: 'dispatch_deduped',
+    });
+    expect(logs[0].trace_id).toBe('dispatch_current');
+    expect(logs[0].content).toContain(`msg#${msgId}`);
   });
 });

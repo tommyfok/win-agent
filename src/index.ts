@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name('win-agent')
   .description('Multi-agent workflow engine')
-  .version('0.1.0')
+  .version('0.11.7')
   .action(checkCommand);
 
 program
