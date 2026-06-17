@@ -110,8 +110,7 @@ async function dispatchToRoleWithTrace(
   }
 
   // 4. Build and send prompt
-  const taskContext =
-    role === Role.DEV ? getTaskContext(messages, sessionManager.getWorkspace()) : null;
+  const taskContext = role === Role.DEV ? getTaskContext(messages) : null;
   const pendingContext = sessionManager.consumePendingContext(sessionId);
   const dispatchMarker = buildDispatchMarker(createDispatchSignature(messages), traceId);
   const prompt =

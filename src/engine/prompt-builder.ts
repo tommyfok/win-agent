@@ -7,21 +7,22 @@ import {
   parseMessageProtocolAttachment,
 } from './message-protocol.js';
 import { Role } from './role-manager.js';
-import path from 'node:path';
-import fs from 'node:fs';
 
 /** Task context injected into DEV dispatch prompts */
 export interface TaskContext {
   id: number;
   title: string;
-  description: string | null;
-  acceptanceCriteria: string | null;
-  acceptanceProcess: string | null;
   status: string;
   dependencies: Array<{ id: number; title: string; status: string }>;
-  specContent: string | null;
-  constitutionContent: string | null;
+  /** Resolved spec file path (relative to workspace) — DEV is expected to Read it on demand. */
+  specPath: string | null;
 }
+
+/** Cap on a single handoff memory section injected into the prompt. */
+const HANDOFF_SUMMARY_CAP = 480;
+
+/** Cap on each knowledge entry preview when the index-mode block is emitted. */
+const KNOWLEDGE_PREVIEW_CAP = 0;
 
 const DEV_NON_ACTIONABLE_STATUSES = new Set<TaskStatus>([
   TaskStatus.Paused,
@@ -32,9 +33,12 @@ const DEV_NON_ACTIONABLE_STATUSES = new Set<TaskStatus>([
 
 /**
  * Get task context for DEV role.
- * Returns task details and its dependency statuses, or null if no task is found.
+ * Returns task metadata + dependency statuses + spec path (no file content).
+ * The full description/acceptance is already in the PM directive message body, so we
+ * deliberately do NOT echo them here — the dispatch prompt only adds machine-readable
+ * metadata that the message body would not naturally carry.
  */
-export function getTaskContext(messages: MessageRow[], workspace?: string): TaskContext | null {
+export function getTaskContext(messages: MessageRow[]): TaskContext | null {
   const taskId = messages.find((m) => m.related_task_id)?.related_task_id;
   if (!taskId) return null;
 
@@ -42,8 +46,6 @@ export function getTaskContext(messages: MessageRow[], workspace?: string): Task
     id: number;
     title: string;
     description: string | null;
-    acceptance_criteria: string | null;
-    acceptance_process: string | null;
     status: string;
   }
   interface DepRow {
@@ -71,54 +73,37 @@ export function getTaskContext(messages: MessageRow[], workspace?: string): Task
   return {
     id: task.id,
     title: task.title,
-    description: task.description,
-    acceptanceCriteria: task.acceptance_criteria,
-    acceptanceProcess: task.acceptance_process,
     status: task.status,
     dependencies,
-    specContent: workspace ? getSpecContentForTask(task.description, task.title, workspace) : null,
-    constitutionContent: workspace ? getConstitutionContent(workspace) : null,
+    specPath: extractSpecPath(task.description, task.title),
   };
 }
 
-function getSpecContentForTask(
-  description: string | null,
-  title: string | null,
-  workspace: string
-): string | null {
-  const specPathMatch =
+function extractSpecPath(description: string | null, title: string | null): string | null {
+  const match =
     description?.match(/\.win-agent\/docs\/spec\/[\w-]+\.md/) ||
     title?.match(/\.win-agent\/docs\/spec\/[\w-]+\.md/);
-  if (!specPathMatch) return null;
-  try {
-    const specPath = path.join(workspace, specPathMatch[0]);
-    return fs.readFileSync(specPath, 'utf-8');
-  } catch {
-    return null;
-  }
-}
-
-function getConstitutionContent(workspace: string): string | null {
-  const constitutionPath = path.join(workspace, '.win-agent', 'docs', 'constitution.md');
-  try {
-    if (fs.existsSync(constitutionPath)) {
-      return fs.readFileSync(constitutionPath, 'utf-8');
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  return match ? match[0] : null;
 }
 
 /**
  * Build the dispatch prompt injected into the role's session.
  *
+ * Design philosophy:
+ *   This prompt carries ONLY what the message body cannot — machine-readable task
+ *   metadata, structured dependency snapshot, knowledge pointers. Role-level workflow
+ *   (Phase 1→4, subagent rules, escalation paths) lives in the role's system prompt
+ *   (DEV.md / PM.md); spec content / constitution / handoff details are referenced
+ *   by path and read on demand. Repeating any of those here would inflate every
+ *   dispatch by thousands of tokens for zero added information.
+ *
  * Sections:
- * 1. 本次派发消息 (messages for this dispatch)
- * 2. 当前任务 (task context, DEV only)
- * 3. 相关知识库 (relevant knowledge, if any)
- * 4. DEV 待处理队列 (PM only, dedup guard)
- * 5. 操作提示 (action hints)
+ * 1. 本次派发消息 (messages for this dispatch — authoritative PM-authored content)
+ * 2. 任务元数据 (DEV only — task id/status/deps; description/acceptance live in §1)
+ * 3. 前置 task 关键产出 (DEV only — truncated handoff summary)
+ * 4. 可按需查阅 (spec path + knowledge index — DEV opens them on demand)
+ * 5. DEV 待处理队列 (PM only, dedup guard)
+ * 6. 提示 (PM only, action hints)
  */
 export function buildDispatchPrompt(
   role: Role,
@@ -128,7 +113,7 @@ export function buildDispatchPrompt(
 ): string {
   const parts: string[] = [];
 
-  // 1. Messages delivered in this dispatch
+  // 1. Messages delivered in this dispatch (authoritative human-readable content)
   parts.push('## 本次派发消息');
   for (const msg of messages) {
     const taskRef = msg.related_task_id ? ` (task#${msg.related_task_id})` : '';
@@ -139,56 +124,58 @@ export function buildDispatchPrompt(
     );
   }
 
-  // 2. Task context (for DEV)
+  // 2. Task metadata (DEV only) — structured pointers; description/acceptance are in §1
   if (taskContext) {
-    const depLines =
-      taskContext.dependencies.length > 0
-        ? taskContext.dependencies
-            .map((d) => `  - task#${d.id} ${d.title} [${d.status}]`)
-            .join('\n')
-        : '  无前置依赖';
+    const depSummary =
+      taskContext.dependencies.length === 0
+        ? '无'
+        : taskContext.dependencies.map((d) => `task#${d.id} [${d.status}]`).join(', ');
     parts.push(
-      `## 当前任务 (task#${taskContext.id})\n` +
+      `## 任务元数据 (task#${taskContext.id} · ${taskContext.status})\n` +
         `- 标题: ${taskContext.title}\n` +
-        `- 状态: ${taskContext.status}\n` +
-        (taskContext.description ? `- 描述: ${taskContext.description}\n` : '') +
-        (taskContext.acceptanceCriteria ? `- 验收标准:\n${taskContext.acceptanceCriteria}\n` : '') +
-        (taskContext.acceptanceProcess ? `- 验收流程:\n${taskContext.acceptanceProcess}\n` : '') +
-        `- 前置依赖:\n${depLines}`
+        `- 前置依赖: ${depSummary}\n` +
+        `- 完整描述 / 验收标准 / 验收流程：见上方 PM directive 消息正文`
     );
 
-    if (taskContext.specContent) {
-      parts.push(`## Feature Spec（完整内容）\n${taskContext.specContent}`);
-    }
-
-    if (taskContext.constitutionContent) {
-      parts.push(`## 项目约束（constitution）\n${taskContext.constitutionContent}`);
-    }
-
-    if (role === Role.DEV && taskContext.dependencies.some((d) => d.status === 'done')) {
+    // 3. Handoff summary from completed dependencies (truncated)
+    if (role === Role.DEV) {
       const completedDeps = taskContext.dependencies.filter((d) => d.status === 'done');
-      const memoryRows = select<{ content: string }>('memory', {
-        role: 'DEV',
-        trigger: 'task_complete',
-      });
-      for (const dep of completedDeps) {
-        const relevantMemories = memoryRows.filter((m) => m.content.includes(`task#${dep.id}`));
-        if (relevantMemories.length > 0) {
-          parts.push(`## 前置任务 task#${dep.id} 完成摘要\n${relevantMemories[0].content}`);
+      if (completedDeps.length > 0) {
+        const memoryRows = select<{ content: string }>('memory', {
+          role: 'DEV',
+          trigger: 'task_complete',
+        });
+        for (const dep of completedDeps) {
+          const relevantMemories = memoryRows.filter((m) => m.content.includes(`task#${dep.id}`));
+          if (relevantMemories.length > 0) {
+            const summary = truncateHandoff(relevantMemories[0].content);
+            parts.push(`## 前置 task#${dep.id} 关键产出\n${summary}`);
+          }
         }
       }
     }
   }
 
-  // 3. Relevant knowledge
-  if (knowledge.length > 0) {
-    parts.push('## 相关知识库');
-    for (const k of knowledge) {
-      parts.push(`### ${k.title} (${k.category})\n${k.content}`);
-    }
+  // 4. On-demand references — spec path + knowledge index (DEV opens on demand)
+  const refLines: string[] = [];
+  if (taskContext?.specPath) {
+    refLines.push(`- Spec: \`${taskContext.specPath}\`（用 Read 自取，无需此处内联）`);
+  }
+  for (const k of knowledge) {
+    const preview =
+      KNOWLEDGE_PREVIEW_CAP > 0
+        ? ` — ${k.content.slice(0, KNOWLEDGE_PREVIEW_CAP).replace(/\n/g, ' ')}…`
+        : '';
+    refLines.push(
+      `- 知识 [${k.category}] ${k.title}${preview}` +
+        ` — \`database_query knowledge id=${k.id}\``
+    );
+  }
+  if (refLines.length > 0) {
+    parts.push(`## 可按需查阅\n${refLines.join('\n')}`);
   }
 
-  // 4. DEV pending queue (PM only) — dedup guard so PM doesn't resend
+  // 5. DEV pending queue (PM only) — dedup guard so PM doesn't resend
   //    directives already queued and waiting to be dispatched.
   if (role === Role.PM) {
     const pendingDevMsgs = select<MessageRow>(
@@ -232,30 +219,9 @@ export function buildDispatchPrompt(
     }
   }
 
-  // 5. Action hints (role-specific)
-  if (role === Role.DEV) {
-    parts.push(
-      '## ⚠️ 执行要求（严格遵守）\n' +
-        '你必须严格按照 Phase 1 → 2 → 3 → 4 顺序执行，禁止跳过任何 Phase。\n\n' +
-        '**Phase 1 — 环境感知（必须先完成再做任何事）：**\n' +
-        '1. 执行 `git log --oneline -10` + `git status` 了解代码现状\n' +
-        '2. 查看近期工作回忆（系统注入的或查询 memory 表）\n' +
-        '3. 阅读上方注入的任务上下文（任务描述、验收标准）\n\n' +
-        '**Phase 2 — 消息分派：** 根据消息 type 选择对应分支\n\n' +
-        '**Phase 3 — 开发和自测：** 阅读 spec → 评估 subagents 编排 → 开发（按 development.md）→ 验证（按 validation.md），全部通过才能进入 Phase 4\n\n' +
-        '**Subagents 编排要求：**\n' +
-        '- 只要运行环境提供 subagent / Task / worker / explorer 等委派能力，默认应主动评估并使用\n' +
-        '- 可并发就并发：独立的代码阅读、模块实现、测试验证、资料检索应尽早委派给多个 subagents\n' +
-        '- 有依赖就分批：先完成上游接口/结论，再启动依赖它的下游任务；同层任务可并行\n' +
-        '- 写代码的 subagent 必须有清晰且互不重叠的文件/模块/职责边界，不能回滚或覆盖他人改动\n' +
-        '- 关键路径、最终集成、冲突消解、任务状态更新、commit 和验收报告仍由主 DEV 负责\n\n' +
-        '**Phase 4 — 收尾：** git commit → 更新状态为 done → 写交接记忆 → 经验归档 → 发验收报告给 PM\n\n' +
-        '**禁止行为：**\n' +
-        '- 禁止跳过 Phase 1 直接开始编码\n' +
-        '- 禁止跳过 Phase 3 的验证步骤（development.md + validation.md）直接提交验收\n' +
-        '- 禁止在 validation.md 验证未通过时进入 Phase 4'
-    );
-  } else {
+  // 6. Action hints — PM only. DEV's workflow lives in DEV.md system prompt;
+  //    repeating it on every dispatch added ~1.5KB of zero-information overhead.
+  if (role === Role.PM) {
     parts.push(
       '## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要）。任务状态更新仅限以下场景：\n' +
         '- 取消任务：将未开始任务（pending_dev）设为 cancelled\n' +
@@ -266,6 +232,17 @@ export function buildDispatchPrompt(
   }
 
   return parts.join('\n\n');
+}
+
+/**
+ * Truncate a handoff memory entry to the cap, preserving the leading task summary line.
+ * Memory entries follow the convention "task#N 完成：<one-liner>。<details...>", so the
+ * leading clause is the most useful signal; longer detail tails are cut to keep the
+ * dispatch prompt focused.
+ */
+function truncateHandoff(content: string): string {
+  if (content.length <= HANDOFF_SUMMARY_CAP) return content;
+  return content.slice(0, HANDOFF_SUMMARY_CAP).trimEnd() + '…（完整内容见 memory 表）';
 }
 
 function formatAttachmentsForPrompt(attachments: string | null): string | null {
