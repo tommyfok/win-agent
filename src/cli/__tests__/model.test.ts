@@ -1,5 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import { parseOpencodeModels } from '../model.js';
+import { execSync } from 'node:child_process';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fetchOpencodeModels, parseOpencodeModels } from '../model.js';
+
+vi.mock('node:child_process', () => ({
+  execSync: vi.fn(),
+}));
+
+const execSyncMock = vi.mocked(execSync);
 
 describe('parseOpencodeModels', () => {
   it('parses provider/model pairs from CLI output', () => {
@@ -78,5 +85,40 @@ tencent-coding-plan-cn/hunyuan
     expect(models.get('opencode-go')!.length).toBe(3);
     expect(models.get('alibaba-coding-plan-cn')).toEqual(['qwen3.6-plus']);
     expect(models.get('tencent-coding-plan-cn')).toEqual(['hunyuan']);
+  });
+});
+
+describe('fetchOpencodeModels', () => {
+  beforeEach(() => {
+    execSyncMock.mockReset();
+  });
+
+  it('runs opencode models without POSIX stderr redirection', () => {
+    execSyncMock.mockReturnValue('opencode/gpt-5\n');
+
+    fetchOpencodeModels();
+
+    expect(execSyncMock).toHaveBeenCalled();
+    const [cmd] = execSyncMock.mock.calls[0];
+    // 守住跨平台不变量：命令字符串不得包含任何 `2>` 形式的 stderr 重定向
+    expect(cmd).not.toMatch(/\b2>\s*\/?dev\/null\b/);
+    expect(cmd).not.toMatch(/\b2>\s*nul\b/);
+    expect(cmd).not.toMatch(/\s2>\S/);
+  });
+
+  it('parses models returned by opencode models', () => {
+    execSyncMock.mockReturnValue('opencode/gpt-5\n');
+
+    const models = fetchOpencodeModels();
+
+    expect(models?.get('opencode')).toEqual(['gpt-5']);
+  });
+
+  it('returns null when opencode models fails', () => {
+    execSyncMock.mockImplementation(() => {
+      throw new Error('opencode failed');
+    });
+
+    expect(fetchOpencodeModels()).toBeNull();
   });
 });

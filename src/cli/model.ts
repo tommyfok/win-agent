@@ -42,9 +42,11 @@ export function parseOpencodeModels(output: string): Map<string, string[]> {
  */
 export function fetchOpencodeModels(): Map<string, string[]> | null {
   try {
-    const output = execSync('opencode models 2>/dev/null', {
+    const output = execSync('opencode models', {
       encoding: 'utf-8',
       timeout: 15000,
+      // 跨平台静默 stderr：避免依赖 POSIX (`2>/dev/null`) 或 cmd (`2>nul`) shell 重定向
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
     const models = parseOpencodeModels(output);
     if (models.size > 0) return models;
