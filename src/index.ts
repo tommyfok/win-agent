@@ -26,6 +26,11 @@ program
   .action(checkCommand);
 
 program
+  .command('check')
+  .description('Check environment: detect LLM provider, validate opencode config')
+  .action(checkCommand);
+
+program
   .command('init')
   .description('One-time project setup: configure, scan workspace, inject context into role files')
   .action(initCommand);
