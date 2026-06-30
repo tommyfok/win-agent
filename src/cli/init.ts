@@ -462,10 +462,25 @@ async function _onboardingCommand() {
             parts: [{ type: 'text', text: prompt }],
           },
         });
-        const textParts = result.data?.parts?.filter(
+        const parts = result.data?.parts ?? [];
+        const partTypes = parts.map((p) => p.type).join(', ');
+        const textParts = parts.filter(
           (p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text'
         );
-        return cleanOverviewOutput(textParts?.map((p) => p.text).join('\n') ?? '');
+        const content = textParts.map((p) => p.text).join('\n');
+
+        // Diagnose empty responses
+        if (parts.length === 0) {
+          console.log(
+            '   ⚠️  LLM 返回了空响应（无 parts）。请检查 opencode 模型配置是否正确，例如运行 npx win-agent check'
+          );
+        } else if (content.trim().length === 0 && parts.length > 0) {
+          console.log(
+            `   ⚠️  LLM 响应无文本内容（parts 类型: ${partTypes}）。模型可能返回了非文本响应`
+          );
+        }
+
+        return cleanOverviewOutput(content);
       };
 
       // 7a. overview.md
@@ -534,6 +549,14 @@ async function _onboardingCommand() {
       console.log(`   ⚠️  工作空间分析失败，跳过: ${err}`);
     }
   // NOTE: serverHandle is kept alive for skills check below, closed after init completes
+
+  // ── Post-generation check ──
+  if (projectMode === 'existing' && detectExistingCode(workspace) && overview.trim().length === 0) {
+    console.log(
+      '\n   ⚠️⚠️  LLM 未生成任何文档内容（overview/development/validation 均为空）'
+    );
+    console.log('   请检查 opencode 模型配置，运行: npx win-agent check');
+  }
 
   // ── 9️⃣ 注入项目上下文到角色文件 ──
   console.log('\n9️⃣  更新角色文件');

@@ -375,19 +375,22 @@ export function installMandatorySkills(): number {
   }
 
   console.log(`   → 安装 ${toInstall.length} 个必装 Skills...`);
+  const total = toInstall.length;
   let count = 0;
   for (const name of toInstall) {
+    const idx = count + 1;
     try {
       execSync(`npx skills add addyosmani/agent-skills@${name} -y`, {
         timeout: 30_000,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       count++;
+      console.log(`   [${String(idx).padStart(2)}/${total}] ${name} ✓`);
     } catch {
-      console.log(`   ✗ ${name} 安装失败`);
+      console.log(`   [${String(idx).padStart(2)}/${total}] ${name} ✗ 安装失败`);
     }
   }
-  console.log(`   ✓ 必装 Skills: ${count}/${toInstall.length} 个安装成功`);
+  console.log(`   ✓ 必装 Skills: ${count}/${total} 个安装成功`);
   return count;
 }
 
