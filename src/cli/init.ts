@@ -472,7 +472,7 @@ async function _onboardingCommand() {
         // Diagnose empty responses
         if (parts.length === 0) {
           console.log(
-            '   ⚠️  LLM 返回了空响应（无 parts）。请检查 opencode 模型配置是否正确，例如运行 npx win-agent check'
+            '   ⚠️  LLM 返回了空响应（无 parts）。请检查 opencode 模型配置是否正确，例如运行 npx win-agent（默认执行环境检查）'
           );
         } else if (content.trim().length === 0 && parts.length > 0) {
           console.log(
@@ -555,7 +555,7 @@ async function _onboardingCommand() {
     console.log(
       '\n   ⚠️⚠️  LLM 未生成任何文档内容（overview/development/validation 均为空）'
     );
-    console.log('   请检查 opencode 模型配置，运行: npx win-agent check');
+    console.log('   请检查 opencode 模型配置，运行: npx win-agent（默认执行环境检查）');
   }
 
   // ── 9️⃣ 注入项目上下文到角色文件 ──
