@@ -12,7 +12,7 @@ import { setEmbeddingDimension } from '../db/schema.js';
 import { getDbPath } from '../config/index.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
 import { Role } from '../engine/role-manager.js';
-import { checkAndInstallSkills } from './skills.js';
+import { checkAndInstallSkills, installMandatorySkills } from './skills.js';
 import { AGENTS_MD_FILENAME } from './constants.js';
 
 /** Machine-detectable marker for content that needs user review */
@@ -556,6 +556,14 @@ async function _onboardingCommand() {
     dbInsert('project_config', { key: 'onboarding_completed', value: 'true' });
   }
   closeDb();
+
+  // ── 必装 Skills ──
+  console.log('\n   必装 Skills...');
+  try {
+    installMandatorySkills();
+  } catch {
+    console.log('   ⚠️  必装 Skills 安装跳过');
+  }
 
   // ── Skills 推荐 ──
   if (serverHandle) {

@@ -319,6 +319,78 @@ function installSkills(recommendations: SkillRecommendation[]): void {
   }
 }
 
+// ─── Mandatory skills ───────────────────────────────────────────────────────────
+
+/** Skills from addyosmani/agent-skills that are mandatory for every project. */
+const MANDATORY_SKILLS: string[] = [
+  // Define
+  'interview-me',
+  'idea-refine',
+  'spec-driven-development',
+  // Plan
+  'planning-and-task-breakdown',
+  // Build
+  'incremental-implementation',
+  'test-driven-development',
+  'context-engineering',
+  'source-driven-development',
+  'doubt-driven-development',
+  'frontend-ui-engineering',
+  'api-and-interface-design',
+  // Verify
+  'browser-testing-with-devtools',
+  'debugging-and-error-recovery',
+  // Review
+  'code-review-and-quality',
+  'code-simplification',
+  'security-and-hardening',
+  'performance-optimization',
+  // Ship
+  'git-workflow-and-versioning',
+  'ci-cd-and-automation',
+  'deprecation-and-migration',
+  'documentation-and-adrs',
+  'observability-and-instrumentation',
+  'shipping-and-launch',
+  // Meta
+  'using-agent-skills',
+];
+
+/**
+ * Silently install all mandatory skills from addyosmani/agent-skills.
+ * Skips skills that are already installed. Runs before the interactive
+ * skill recommendation flow.
+ *
+ * @returns the number of newly installed skills
+ */
+export function installMandatorySkills(): number {
+  const installed = getInstalledSkillNames();
+  const toInstall = MANDATORY_SKILLS.filter(
+    (name) => !installed.has(name.toLowerCase())
+  );
+
+  if (toInstall.length === 0) {
+    console.log('   ✓ 必装 Skills 均已安装');
+    return 0;
+  }
+
+  console.log(`   → 安装 ${toInstall.length} 个必装 Skills...`);
+  let count = 0;
+  for (const name of toInstall) {
+    try {
+      execSync(`npx skills add addyosmani/agent-skills@${name} -y`, {
+        timeout: 30_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      count++;
+    } catch {
+      console.log(`   ✗ ${name} 安装失败`);
+    }
+  }
+  console.log(`   ✓ 必装 Skills: ${count}/${toInstall.length} 个安装成功`);
+  return count;
+}
+
 // ─── Main entry point ───────────────────────────────────────────────────────────
 
 /**
