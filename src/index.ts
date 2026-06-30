@@ -15,13 +15,14 @@ import { skillsCommand } from './cli/skills.js';
 import { modelCommand } from './cli/model.js';
 import { serverCommand } from './cli/server.js';
 import { registerTaskCommands } from './cli/task.js';
+import pkg from '../package.json';
 
 const program = new Command();
 
 program
   .name('win-agent')
   .description('Multi-agent workflow engine')
-  .version('0.11.8')
+  .version(pkg.version)
   .action(checkCommand);
 
 program
