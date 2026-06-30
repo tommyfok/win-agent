@@ -40,7 +40,7 @@ win-agent 是一个基于 OpenCode SDK 的多 Agent 工作流引擎，通过协�
 | **上下文自动轮转** | 检测 token 用量超过 80% 时自动压缩记忆并开启新会话 |
 | **项目模式识别** | 自动判断 greenfield / pending / existing 并生成对应文档 |
 | **自动触发器** | 脚手架完成、所有任务结束、拒绝率过高时自动触发下一阶段 |
-| **Skill 集成** | 根据技术栈自动推荐并安装 OpenCode Skills |
+| **Skill 集成** | 初始化时注入固定 agent-skills 方法论包，PM / DEV 按阶段按需读取；技术栈市场 Skills 仅保留为显式高级命令 |
 | **持久化会话** | PM 维护长期对话，DEV 按任务创建独立会话 |
 
 ---
@@ -73,7 +73,7 @@ win-agent init
 4. **文档生成** — 自动生成 `overview.md`、`development.md`、`validation.md`
 5. **知识库初始化** — 将文档注入向量数据库
 6. **角色配置** — 部署 PM 和 DEV 的 Agent 配置文件
-7. **Skill 推荐** — 根据技术栈推荐并安装适配的 Skills
+7. **agent-skills 注入** — 同步固定、精简、版本可控的方法论包，供 PM / DEV 按需读取
 
 初始化完成后，`.win-agent/` 目录将被创建：
 
@@ -85,6 +85,8 @@ win-agent init
 ├── roles/               # PM 和 DEV 的 Prompt 模板（可手动编辑）
 │   ├── PM.md
 │   └── DEV.md
+├── skills/
+│   └── agent-skills/    # PM / DEV 方法论参考包
 └── db/
     └── win-agent.db     # SQLite 数据库
 ```
@@ -120,7 +122,10 @@ win-agent talk
 | `win-agent log` | 实时查看引擎日志 |
 | `win-agent task` | 任务管理子命令（列表、状态筛选） |
 | `win-agent cancel <id>` | 取消指定迭代 |
-| `win-agent skills` | 根据技术栈推荐并安装 Skills |
+| `win-agent skills status` | 查看 agent-skills 方法论包同步状态 |
+| `win-agent skills sync-agent-skills` | 首次同步 agent-skills 方法论包 |
+| `win-agent skills update-agent-skills` | 强制刷新 agent-skills 方法论包 |
+| `win-agent skills` | 高级入口：根据技术栈推荐并安装 OpenCode 市场 Skills |
 | `win-agent update` | 更新角色模板到最新版本 |
 | `win-agent clean` | 清理 `.win-agent/`、`.opencode/` 和 Skills 安装产物 |
 
@@ -139,7 +144,7 @@ src/
 │   ├── task.ts           # 任务管理命令
 │   ├── status.ts         # 状态展示
 │   ├── talk.ts           # 打开 PM 对话
-│   ├── skills.ts         # 技术栈检测与 Skill 推荐
+│   ├── skills.ts         # agent-skills 方法论包管理与技术栈 Skill 高级推荐
 │   ├── stop.ts           # 停止引擎
 │   ├── cancel.ts         # 取消迭代
 │   ├── restart.ts        # 重启引擎

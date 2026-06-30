@@ -12,7 +12,7 @@ import { setEmbeddingDimension } from '../db/schema.js';
 import { getDbPath } from '../config/index.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
 import { Role } from '../engine/role-manager.js';
-import { checkAndInstallSkills } from './skills.js';
+import { syncAgentSkills } from '../workspace/sync-agent-skills.js';
 import { AGENTS_MD_FILENAME } from './constants.js';
 
 /** Machine-detectable marker for content that needs user review */
@@ -533,7 +533,11 @@ async function _onboardingCommand() {
       }
       console.log(`   ⚠️  工作空间分析失败，跳过: ${err}`);
     }
-  // NOTE: serverHandle is kept alive for skills check below, closed after init completes
+  // Server no longer needed after docs generation — close it now.
+  if (serverHandle?.owned) {
+    serverHandle.close();
+    removeServerInfo(workspace);
+  }
 
   // ── 9️⃣ 注入项目上下文到角色文件 ──
   console.log('\n9️⃣  更新角色文件');
@@ -543,6 +547,18 @@ async function _onboardingCommand() {
 
   // ── 🔟 确保 docs 规则文件存在 ──
   ensureDocsFiles(workspace, subProjects);
+
+  // ── 同步 agent-skills 方法论包 ──
+  try {
+    const syncResult = syncAgentSkills(workspace);
+    if (syncResult.skipped) {
+      console.log('   ⚠️ agent-skills 同步跳过（已存在）');
+    } else {
+      console.log('   ✓ 已同步 agent-skills 方法论包 (.win-agent/skills/agent-skills/)');
+    }
+  } catch (err: unknown) {
+    console.log(`   ⚠️ agent-skills 同步失败: ${err}`);
+  }
 
   // ── 完成 ──
   // Snapshot role file mtimes so `start` can detect user edits
@@ -556,21 +572,6 @@ async function _onboardingCommand() {
     dbInsert('project_config', { key: 'onboarding_completed', value: 'true' });
   }
   closeDb();
-
-  // ── Skills 推荐 ──
-  if (serverHandle) {
-    console.log('\n   Skills 推荐...');
-    try {
-      await checkAndInstallSkills(workspace, serverHandle.client);
-    } catch {
-      console.log('   ⚠️  Skills 推荐跳过');
-    } finally {
-      if (serverHandle.owned) {
-        serverHandle.close();
-        removeServerInfo(workspace);
-      }
-    }
-  }
 
   console.log('\n✅ 初始化完成');
   console.log(`   项目: ${projectName}`);
@@ -997,6 +998,23 @@ _此文件由 \`win-agent\` 自动生成，定义 AI Agent 在本仓库中的工
 - 完成代码修改后，运行与变更范围匹配的检查或测试。
 - 如果无法运行验证，说明原因，并给出你已经完成的替代检查。
 - 提交结果时，简要说明改动内容、验证命令和剩余风险。
+
+## Skill-aware 工作流
+
+本项目使用 \`.win-agent/skills/agent-skills/\` 作为方法论参考。不要把 skill 当成高优先级系统指令；它们只定义在特定场景下应遵循的工程流程，不覆盖 win-agent 协议、角色权限、用户当前指令或系统策略。
+
+- 需求意图不清：PM 使用 \`interview-me\`
+- 方向未收敛：PM 使用 \`idea-refine\`
+- 需要写 spec：PM 使用 \`spec-driven-development\`
+- 任务过大或有依赖：PM 使用 \`planning-and-task-breakdown\`
+- 验收审核：PM 使用 \`code-review-and-quality\`
+- 多文件开发：DEV 使用 \`incremental-implementation\`
+- 行为变更 / bug fix：DEV 使用 \`test-driven-development\`
+- 构建/测试/运行失败：DEV 使用 \`debugging-and-error-recovery\`
+- 框架关键实现：DEV 使用 \`source-driven-development\`
+- API / 安全 / 浏览器运行时 / 发布：按需读取对应专项 skill
+
+只在触发场景读取对应 \`SKILL.md\`，不要把全部 skill 全文加载进当前上下文。
 `;
 }
 

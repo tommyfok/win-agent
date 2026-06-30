@@ -11,7 +11,7 @@ import { restartCommand } from './cli/restart.js';
 import { cleanCommand } from './cli/clean.js';
 import { logCommand } from './cli/log.js';
 import { updateCommand } from './cli/update.js';
-import { skillsCommand } from './cli/skills.js';
+import { registerSkillsCommands } from './cli/skills.js';
 import { modelCommand } from './cli/model.js';
 import { serverCommand } from './cli/server.js';
 import { registerTaskCommands } from './cli/task.js';
@@ -64,10 +64,7 @@ program
   .description('Clean win-agent, opencode, and skills artifacts from current directory')
   .action(cleanCommand);
 
-program
-  .command('skills')
-  .description('Recommend and install skills based on project tech stack')
-  .action(skillsCommand);
+registerSkillsCommands(program);
 
 program
   .command('model')

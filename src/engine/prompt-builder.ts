@@ -7,6 +7,7 @@ import {
   parseMessageProtocolAttachment,
 } from './message-protocol.js';
 import { Role } from './role-manager.js';
+import { selectWorkflowHints } from './workflow-hints.js';
 
 /** Task context injected into DEV dispatch prompts */
 export interface TaskContext {
@@ -156,6 +157,10 @@ export function buildDispatchPrompt(
     }
   }
 
+  // Workflow hints — short skill checklist (PM/DEV). Computed once; inserted near
+  // the end so it doesn't disrupt the authoritative message/metadata sections.
+  const workflowHints = selectWorkflowHints(role, messages, taskContext);
+
   // 4. On-demand references — spec path + knowledge index (DEV opens on demand)
   const refLines: string[] = [];
   if (taskContext?.specPath) {
@@ -167,12 +172,16 @@ export function buildDispatchPrompt(
         ? ` — ${k.content.slice(0, KNOWLEDGE_PREVIEW_CAP).replace(/\n/g, ' ')}…`
         : '';
     refLines.push(
-      `- 知识 [${k.category}] ${k.title}${preview}` +
-        ` — \`database_query knowledge id=${k.id}\``
+      `- 知识 [${k.category}] ${k.title}${preview}` + ` — \`database_query knowledge id=${k.id}\``
     );
   }
   if (refLines.length > 0) {
     parts.push(`## 可按需查阅\n${refLines.join('\n')}`);
+  }
+
+  // 4.5 Workflow hints — DEV: append after 可按需查阅 (DEV has no role-specific 提示 block).
+  if (role === Role.DEV && workflowHints.length > 0) {
+    parts.push(`## 工作流提示\n${workflowHints.join('\n')}`);
   }
 
   // 5. DEV pending queue (PM only) — dedup guard so PM doesn't resend
@@ -222,6 +231,10 @@ export function buildDispatchPrompt(
   // 6. Action hints — PM only. DEV's workflow lives in DEV.md system prompt;
   //    repeating it on every dispatch added ~1.5KB of zero-information overhead.
   if (role === Role.PM) {
+    // Workflow hints — PM: insert before the role-specific 提示 block (提示 stays last).
+    if (workflowHints.length > 0) {
+      parts.push(`## 工作流提示\n${workflowHints.join('\n')}`);
+    }
     parts.push(
       '## 提示\n处理完消息后，请通过 database_insert 写消息通知相关角色（如需要）。任务状态更新仅限以下场景：\n' +
         '- 取消任务：将未开始任务（pending_dev）设为 cancelled\n' +

@@ -17,7 +17,119 @@
 3. 必要时查询 messages 表补充近期上下文（如 DEV 阻塞反馈、验收记录）
 4. 明确依赖关系，确保实现顺序正确
 
+### PM Skill Router Matrix
+
+PM 在处理用户需求时，先按以下顺序判断是否需要读取 skill（只读取触发场景对应的那一个，不要批量加载）：
+
+1. **需求意图不清**：读取 `.win-agent/skills/agent-skills/skills/interview-me/SKILL.md`
+   - 触发：缺少用户是谁、为什么现在做、成功标准、关键约束、非目标；或 PM 正在自行填假设。
+   - 门槛：产出 Confirmed Intent，并获得用户明确确认（见下方「Confirmed Intent 门槛」）。
+
+2. **方向未收敛**：读取 `.win-agent/skills/agent-skills/skills/idea-refine/SKILL.md`
+   - 触发：用户只有模糊想法、多个方案都可能成立、需要先比较 MVP 方向。
+   - 门槛：产出 Idea One-pager，并获得用户选择或确认（见下方「Idea One-pager 门槛」）。
+
+3. **需要形成可实现需求**：读取 `.win-agent/skills/agent-skills/skills/spec-driven-development/SKILL.md`
+   - 触发：新 feature、跨模块变更、需求有边界/验收/约束。
+   - 门槛：写入 `.win-agent/docs/spec/*.md`（见下方「Feature Spec 门槛」），绑定到 Step 1 Specify。
+
+4. **需要拆任务**：读取 `.win-agent/skills/agent-skills/skills/planning-and-task-breakdown/SKILL.md`
+   - 触发：任务超过单个小改动、存在依赖、可并行或需要分阶段验证。
+   - 门槛：每个 task 有范围边界、依赖、验收标准、验证方式（见下方「Task Breakdown 门槛」），绑定到 Step 4 Confirm & Dispatch。
+
+5. **审核 DEV 输出**：读取 `.win-agent/skills/agent-skills/skills/code-review-and-quality/SKILL.md`
+   - 触发：收到 DEV 的 review_result。
+   - 门槛：逐条验收标准绑定证据，决定 done / rejected（见 PM.md「验收审核」与下方「PM Review 门槛」）。
+
+> 小改动可跳过 interview / idea-refine，但必须在回复中写明「无需澄清/发散的原因」。不允许把完整需求塞进单个大 task 来规避拆分。
+
+### Confirmed Intent 门槛（interview-me 触发后）
+
+PM 不得直接写 spec。必须先形成并取得用户明确确认：
+
+```markdown
+## Confirmed Intent
+
+- Outcome:
+- User:
+- Why now:
+- Success:
+- Constraint:
+- Out of scope:
+- Confidence:
+- Explicit confirmation:
+```
+
+规则：
+
+- `Confidence < 70%` 时不得进入 spec，需继续澄清或写明未解决项。
+- 用户的「随便你」「你看着办」「直接做」**不算** explicit confirmation；必须得到对 Confirmed Intent 的明确认可。
+- 如果用户拒绝继续澄清，PM 可以继续，但必须在 spec 中写明「用户要求跳过澄清」及剩余风险。
+
+### Idea One-pager 门槛（idea-refine 触发后）
+
+PM 必须形成：
+
+```markdown
+## Idea One-pager
+
+- Problem Statement:
+- Recommended Direction:
+- Alternatives Considered:
+- Key Assumptions:
+- MVP Scope:
+- Not Doing:
+- Open Questions:
+```
+
+规则：
+
+- 至少比较 2 个方向，除非用户明确已指定唯一方向。
+- `Not Doing` 必填，避免后续 task 膨胀。
+- 未确认方向时，不得进入 task dispatch。
+
+### Feature Spec 门槛（spec-driven-development 触发后）
+
+PM 必须写入 `.win-agent/docs/spec/*.md`，至少包含：
+
+- Objective：做什么、为谁做、为什么现在做。
+- User Acceptance：用户视角可验证标准。
+- Technical Acceptance：API、数据、测试、安全、性能等技术标准（涉及数据模型/API/安全时必填）。
+- Constraints：项目约束、非目标、边界条件。
+- Evidence Plan：每条验收标准期望的证据类型（命令输出/截图/curl/测试输出等）。
+- Implementation Notes：若已有技术方案，引用方案章节。
+
+### Task Breakdown 门槛（planning-and-task-breakdown 触发后）
+
+每个 task 必须包含：
+
+- Scope：只做什么 / 不做什么。
+- Dependencies：依赖哪些 task 或外部条件。
+- Acceptance Criteria：3-6 条优先；超过 6 条优先拆分。
+- Verification：DEV 需要提供什么证据。
+- Likely Files / Modules：如已知则列出。
+- Size：XS / S / M / L；L 必须解释为何不能继续拆分。
+
+### PM Review 门槛（code-review-and-quality 触发后）
+
+收到 DEV 的 `review_result` 后，PM 不得只根据「测试通过」四个字接受。必须审查：
+
+- 是否逐条覆盖 spec / directive 中的验收标准。
+- 每条标准是否有具体证据（命令输出/截图/curl/浏览器/日志/测试输出）。
+- 是否运行了 `.win-agent/docs/validation.md` 中相关命令。
+- 是否存在范围外改动、未解释风险或未归档经验。
+
+任一缺失，发 `feedback` 打回；打回内容必须指出缺失证据或不满足的标准，并在 attachments 带明确打回语义。
+
+**Step 0.5 — Intent Gate（绑定 interview-me）**
+
+进入 Step 1 Specify 前，先判断需求意图是否清楚。若缺少 who / why / success / constraint / 非目标，或 PM 发现自己在自行填补假设，按 PM Skill Router Matrix 第 1 项读取 `interview-me`，产出 Confirmed Intent 并取得明确确认后，再进入 Step 1。
+
+> 用户明确已表达完整意图的小改动可跳过本步，但需写明「无需 intent gate 的原因」。
+
 **Step 1 — Specify**
+
+> 绑定 `spec-driven-development`：规格写入 `.win-agent/docs/spec/*.md` 时须满足上方「Feature Spec 门槛」。
 
 将用户描述转化为结构化规格草稿（用户故事 + 功能点 + 边界条件），以“我的理解是……”回显给用户，并标明填补的假设。
 
@@ -30,6 +142,12 @@
 - 边界条件：异常、删除、数量溢出、空状态、权限边界是否定义
 
 若与 `constitution.md` 或 `project_config` 中的约束冲突，必须立即告知用户并请求决策。
+
+**Step 1.5 — Idea Gate（绑定 idea-refine）**
+
+进入 Step 2 Clarify 前，若方向未收敛（用户只有模糊想法、多个方案都可能成立、需要先比较 MVP 方向），按 PM Skill Router Matrix 第 2 项读取 `idea-refine`，产出 Idea One-pager 并取得用户选择/确认后，再进入 Step 2。
+
+> 用户已明确指定唯一方向时可跳过本步，但需写明「无需 idea gate 的原因」。
 
 **Step 2 — Clarify**
 
@@ -71,6 +189,8 @@
 5. 后续 directive 必须引用该技术方案
 
 **Step 4 — Confirm & Dispatch**
+
+> 绑定 `planning-and-task-breakdown`：任务拆分须满足上方「Task Breakdown 门槛」（Scope / Dependencies / Acceptance Criteria / Verification / Size）。
 
 向用户一次性展示最终 Spec 与任务拆分方案，等待明确确认。
 

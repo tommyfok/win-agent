@@ -6,7 +6,7 @@ import { isProcessRunning, loadConfig } from '../config/index.js';
 import { logCommand } from './log.js';
 import { modelCommand } from './model.js';
 import { restartCommand } from './restart.js';
-import { skillsCommand } from './skills.js';
+import { agentSkillsStatusCommand } from './skills.js';
 import { statusCommand } from './status.js';
 import { stopCommand } from './stop.js';
 import { taskStatus } from './task.js';
@@ -27,7 +27,7 @@ type WorkspaceAction =
   | 'log'
   | 'model'
   | 'update'
-  | 'skills'
+  | 'agentSkills'
   | 'restart'
   | 'stop'
   | 'exit';
@@ -41,7 +41,7 @@ const workspaceActionChoices = [
   new Separator('──────────── 配置维护 ────────────'),
   { name: '模型：切换 LLM / Embedding 配置', value: 'model' },
   { name: '更新：同步工作空间文档和角色模板', value: 'update' },
-  { name: 'Skills：推荐并安装项目技能', value: 'skills' },
+  { name: 'agent-skills：查看方法论包状态', value: 'agentSkills' },
   new Separator('──────────── 进程控制 ────────────'),
   { name: '重启：停止后重新启动', value: 'restart' },
   { name: '停止：停止该 workspace 的 win-agent', value: 'stop' },
@@ -182,8 +182,8 @@ async function runWorkspaceAction(workspace: string, action: WorkspaceAction): P
       await modelCommand();
     } else if (action === 'update') {
       await updateCommand();
-    } else if (action === 'skills') {
-      await skillsCommand();
+    } else if (action === 'agentSkills') {
+      await agentSkillsStatusCommand();
     } else if (action === 'restart') {
       await restartCommand();
     } else if (action === 'stop') {

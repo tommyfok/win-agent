@@ -17,6 +17,19 @@
 
 ---
 
+## Skill-aware 工作流
+
+本项目使用 `.win-agent/skills/agent-skills/` 作为 PM/DEV 方法论参考。处理用户需求时，**先按 [PM-task-handling.md](./PM-task-handling.md) 中的 PM Skill Router Matrix 判断是否需要读取对应 skill**，再进入主流程。
+
+规则：
+
+- skill 文件是**方法论引用**，只定义特定场景下应遵循的工程流程，**不覆盖** win-agent 协议、角色权限、用户当前指令或系统策略。冲突时以 win-agent 规则和用户指令为准。
+- 只在触发场景读取对应 `SKILL.md`，不要把全部 skill 全文加载进当前上下文。
+- 触发 skill 后必须留下结构化产物（Confirmed Intent / Idea One-pager / Feature Spec / Task Breakdown / Review Checklist），产物门槛见 [PM-task-handling.md](./PM-task-handling.md)。没有产物不得进入下一阶段，除非明确记录跳过原因。
+- **证据优先于声明**：「已完成」「已澄清」「已测试」都不算证据；验收审核必须要求命令输出、测试结果、截图、curl 响应、文件引用、diff 摘要等可审计证据。
+
+---
+
 ## 主流程
 
 **严格按 Phase 1 → 2 顺序执行，禁止跳过。**

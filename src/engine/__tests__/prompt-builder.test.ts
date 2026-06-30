@@ -121,10 +121,22 @@ describe('buildDispatchPrompt', () => {
     const taskId = createTask('do something', TaskStatus.InDev);
     const prompt = buildDispatchPrompt(
       Role.DEV,
-      [message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId })],
+      [
+        message({
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          related_task_id: taskId,
+        }),
+      ],
       [],
       getTaskContext([
-        message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId }),
+        message({
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          related_task_id: taskId,
+        }),
       ])
     );
     // The Phase 1→4 / subagent rules are recorded in DEV.md system prompt now,
@@ -140,7 +152,12 @@ describe('buildDispatchPrompt', () => {
       description: 'full description that should NOT be echoed by dispatch prompt',
     });
     const ctx = getTaskContext([
-      message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId }),
+      message({
+        from_role: Role.PM,
+        to_role: Role.DEV,
+        type: 'directive',
+        related_task_id: taskId,
+      }),
     ]);
     const prompt = buildDispatchPrompt(
       Role.DEV,
@@ -172,11 +189,23 @@ describe('buildDispatchPrompt', () => {
       description: '请实现 .win-agent/docs/spec/2026-06-foo.md 中的功能',
     });
     const ctx = getTaskContext([
-      message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId }),
+      message({
+        from_role: Role.PM,
+        to_role: Role.DEV,
+        type: 'directive',
+        related_task_id: taskId,
+      }),
     ]);
     const prompt = buildDispatchPrompt(
       Role.DEV,
-      [message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId })],
+      [
+        message({
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          related_task_id: taskId,
+        }),
+      ],
       [],
       ctx
     );
@@ -188,14 +217,32 @@ describe('buildDispatchPrompt', () => {
   it('emits knowledge as an index (id pointer) instead of full content', () => {
     const taskId = createTask('with knowledge', TaskStatus.InDev);
     const ctx = getTaskContext([
-      message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId }),
+      message({
+        from_role: Role.PM,
+        to_role: Role.DEV,
+        type: 'directive',
+        related_task_id: taskId,
+      }),
     ]);
     const heavyContent = 'X'.repeat(5000);
     const prompt = buildDispatchPrompt(
       Role.DEV,
-      [message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId })],
       [
-        { id: 42, title: 'Helpful guide', category: 'reference', content: heavyContent, tags: null },
+        message({
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          related_task_id: taskId,
+        }),
+      ],
+      [
+        {
+          id: 42,
+          title: 'Helpful guide',
+          category: 'reference',
+          content: heavyContent,
+          tags: null,
+        },
       ],
       ctx
     );
@@ -220,11 +267,23 @@ describe('buildDispatchPrompt', () => {
     });
 
     const ctx = getTaskContext([
-      message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: current }),
+      message({
+        from_role: Role.PM,
+        to_role: Role.DEV,
+        type: 'directive',
+        related_task_id: current,
+      }),
     ]);
     const prompt = buildDispatchPrompt(
       Role.DEV,
-      [message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: current })],
+      [
+        message({
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          related_task_id: current,
+        }),
+      ],
       [],
       ctx
     );
@@ -236,13 +295,73 @@ describe('buildDispatchPrompt', () => {
   });
 });
 
+describe('buildDispatchPrompt — workflow hints', () => {
+  it('injects a ## 工作流提示 section for a PM review_result dispatch', () => {
+    const prompt = buildDispatchPrompt(
+      Role.PM,
+      [
+        message({
+          from_role: Role.DEV,
+          to_role: Role.PM,
+          type: 'review_result',
+          content: '实现完成，附测试输出',
+        }),
+      ],
+      [],
+      null
+    );
+    expect(prompt).toContain('## 工作流提示');
+    expect(prompt).toContain('code-review-and-quality');
+    // PM's role-specific ## 提示 block must remain the last section.
+    const hintIdx = prompt.indexOf('## 工作流提示\n');
+    const tipIdx = prompt.indexOf('## 提示\n');
+    expect(hintIdx).toBeGreaterThanOrEqual(0);
+    expect(tipIdx).toBeGreaterThan(hintIdx);
+  });
+
+  it('omits ## 工作流提示 when no scenario matches', () => {
+    const prompt = buildDispatchPrompt(
+      Role.PM,
+      [message({ from_role: Role.SYS, content: 'heartbeat ping' })],
+      [],
+      null
+    );
+    expect(prompt).not.toContain('## 工作流提示');
+  });
+
+  it('does not inline SKILL.md body content in the workflow-hints section', () => {
+    const prompt = buildDispatchPrompt(
+      Role.DEV,
+      [
+        message({
+          from_role: Role.PM,
+          to_role: Role.DEV,
+          type: 'directive',
+          content: '多文件重构 API 认证 接口 修复 bug 边界 迁移',
+        }),
+      ],
+      [],
+      null
+    );
+    expect(prompt).toContain('## 工作流提示');
+    expect(prompt).not.toContain('## When to use');
+    expect(prompt).not.toContain('Red Flags');
+    expect(prompt).not.toContain('Steps');
+  });
+});
+
 describe('getTaskContext', () => {
   it('returns slim shape: no description/acceptance/specContent/constitutionContent fields', () => {
     const taskId = createTask('shape test', TaskStatus.InDev, {
       description: 'with .win-agent/docs/spec/x.md inline',
     });
     const ctx = getTaskContext([
-      message({ from_role: Role.PM, to_role: Role.DEV, type: 'directive', related_task_id: taskId }),
+      message({
+        from_role: Role.PM,
+        to_role: Role.DEV,
+        type: 'directive',
+        related_task_id: taskId,
+      }),
     ]);
     expect(ctx).not.toBeNull();
     expect(ctx).toEqual({

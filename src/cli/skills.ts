@@ -6,6 +6,8 @@ import type { OpencodeClient } from '@opencode-ai/sdk';
 import { detectSubProjects } from '../workspace/init.js';
 import { startOpencodeServer, removeServerInfo } from '../engine/opencode-server.js';
 import { runEnvCheck } from './check.js';
+import type { Command } from 'commander';
+import { syncAgentSkills, getAgentSkillsStatus } from '../workspace/sync-agent-skills.js';
 
 const execAsync = promisify(exec);
 
@@ -423,4 +425,93 @@ export async function skillsCommand(): Promise<void> {
       removeServerInfo(workspace);
     }
   }
+}
+
+// ─── agent-skills methodology pack subcommands ──────────────────────────────
+
+/**
+ * `win-agent skills sync-agent-skills` — first-time sync of the bundled
+ * agent-skills methodology pack. Idempotent: skips if already synced.
+ */
+export async function syncAgentSkillsCommand(): Promise<void> {
+  const { workspace } = await runEnvCheck();
+  const result = syncAgentSkills(workspace);
+  if (result.skipped) {
+    console.log(`\n⏭  agent-skills 已同步，跳过（${result.reason ?? '已存在'}）`);
+    console.log('   如需强制刷新，请使用：win-agent skills update-agent-skills');
+    return;
+  }
+  console.log(`\n✓ 已同步 agent-skills 方法论包（${result.synced.length} 个文件）`);
+  console.log('   路径: .win-agent/skills/agent-skills/');
+  for (const rel of result.synced) {
+    console.log(`   - ${rel}`);
+  }
+}
+
+/**
+ * `win-agent skills update-agent-skills` — force-refresh the bundled
+ * agent-skills methodology pack and rewrite SOURCE.md.
+ */
+export async function updateAgentSkillsCommand(): Promise<void> {
+  const { workspace } = await runEnvCheck();
+  const result = syncAgentSkills(workspace, { force: true });
+  console.log(`\n✓ 已更新 agent-skills 方法论包（${result.synced.length} 个文件）`);
+  console.log('   路径: .win-agent/skills/agent-skills/');
+  for (const rel of result.synced) {
+    console.log(`   - ${rel}`);
+  }
+}
+
+/**
+ * `win-agent skills status` — show the synced agent-skills provenance and skill list.
+ */
+export async function agentSkillsStatusCommand(): Promise<void> {
+  const { workspace } = await runEnvCheck();
+  const status = getAgentSkillsStatus(workspace);
+  if (!status.installed) {
+    console.log('\nℹ️  agent-skills 方法论包未同步');
+    console.log('   运行 win-agent skills sync-agent-skills 进行首次同步');
+    return;
+  }
+  console.log('\n📊 agent-skills 方法论包状态');
+  console.log(`   Bundle version: ${status.bundleVersion ?? status.commit ?? '未知'}`);
+  if (status.upstreamRef) {
+    console.log(`   Upstream ref: ${status.upstreamRef}`);
+  }
+  console.log(`   Synced at: ${status.syncedAt ?? '未知'}`);
+  console.log(`   Skills (${status.skills.length}):`);
+  for (const name of status.skills) {
+    console.log(`   - ${name}`);
+  }
+}
+
+/**
+ * Register the `skills` command group on the program.
+ * - `win-agent skills` (no subcommand) → market recommendation flow (default action).
+ * - `win-agent skills sync-agent-skills` → first-time sync of agent-skills pack.
+ * - `win-agent skills update-agent-skills` → force-refresh agent-skills pack.
+ * - `win-agent skills status` → show synced agent-skills status.
+ */
+export function registerSkillsCommands(program: Command): void {
+  const skills = program
+    .command('skills')
+    .description('agent-skills 方法论包管理；无子命令时进入技术栈 Skills 高级推荐');
+
+  // Explicit advanced path: existing market recommendation flow.
+  skills.action(skillsCommand);
+
+  skills
+    .command('sync-agent-skills')
+    .description('首次同步 agent-skills 方法论包到 .win-agent/skills/agent-skills/')
+    .action(syncAgentSkillsCommand);
+
+  skills
+    .command('update-agent-skills')
+    .description('强制刷新 agent-skills 方法论包并重写 SOURCE.md')
+    .action(updateAgentSkillsCommand);
+
+  skills
+    .command('status')
+    .description('显示已同步的 agent-skills 来源、版本与 skill 列表')
+    .action(agentSkillsStatusCommand);
 }

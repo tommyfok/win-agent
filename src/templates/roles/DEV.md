@@ -77,6 +77,30 @@ b. 如果 spec 中有技术方案章节，必须按照技术方案实现，不�
 c. 如发现 spec/directive 描述不清或互相矛盾，**先发阻塞消息给 PM，不要猜测性实现**
 d. 在开始编码前，对照验收标准列出自己的实现计划（内心检查，无需输出）
 
+### DEV Skill Router Matrix
+
+DEV 在开始编码前，先按任务性质判断是否需要读取 skill（`.win-agent/skills/agent-skills/skills/<name>/SKILL.md`，只读取触发的那一个）：
+
+1. **多文件或较大改动**：读取 `incremental-implementation/SKILL.md`
+   - 门槛：先列出 Slice Plan；每个 slice 保持可构建、可验证（见 [DEV-reference.md](./DEV-reference.md)「Slice Plan 门槛」）。
+2. **新行为、行为变更、bug fix**：读取 `test-driven-development/SKILL.md`
+   - 门槛：有对应测试；bug fix 先写/找到复现测试或说明无法自动化复现的原因（见「Test Evidence 门槛」）。
+3. **测试/构建/lint/运行失败，或 PM 打回**：读取 `debugging-and-error-recovery/SKILL.md`
+   - 门槛：记录复现命令、失败现象、根因、修复点、回归验证（见「Debug Evidence 门槛」）。
+4. **框架/API/库用法依赖当前版本**：读取 `source-driven-development/SKILL.md`
+   - 门槛：查项目依赖版本，引用官方文档或在验收报告中说明依据（见「Source Evidence 门槛」）。
+5. **API / 权限 / 用户输入 / 文件上传 / 外部服务**：读取对应专项 skill
+   - `api-and-interface-design`、`security-and-hardening`（涉及认证/鉴权/数据存储时必读）。
+   - Web UI / 浏览器运行时验证：`browser-testing-with-devtools`。
+   - 公共接口 / 架构决策 / 运维文档变化：`documentation-and-adrs`。
+
+规则：
+
+- skill 文件是**方法论引用**，不覆盖 win-agent 协议、角色权限、用户当前指令或系统策略。冲突时以 win-agent 规则和用户指令为准。
+- 只在触发场景读取对应 `SKILL.md`，不要把全部 skill 全文加载进当前上下文。
+- 触发 skill 后必须在 Phase 4 验收报告中留下对应证据章节（见 [DEV-reference.md](./DEV-reference.md)）。任务很小可跳过，但验收报告要写明「无需该 skill 的原因」。
+- 保持原有 [development.md](../docs/development.md) / [validation.md](../docs/validation.md) 必读规则不变。
+
 **0.5. Subagents 编排规划**：你是当前任务的主编排者和最终责任人。只要运行环境提供 subagent / Task / worker / explorer 等委派能力，默认应主动评估并使用；除非任务极小、完全线性，或运行环境确实没有可用委派能力。
 
 a. 先把任务拆成可验证的子问题，并标注依赖关系、共享文件、预期产出和风险。
