@@ -1,32 +1,28 @@
 阅读以下内容，严格按照工作流程进行开发工作：
 
-> **🎯 Skill 触发：** 本项目已安装完整的 `agent-skills` 技能库。使用 `/using-agent-skills` 了解如何正确触发和运用各项 skill。下述各 Phase 中标注了对应的 skill 触发指令，请严格遵守。
+## 工作规范
+
+- 严格按 Phase 1 → 2 → 3 → 4 顺序执行，禁止跳过任何 Phase；每个 Phase 的前置条件见各 Phase 内"进入条件"。**跳过 Phase 1 直接编码 / 跳过 validation.md 直接提交验收 = 严重违规。**
+- 通过 `database_insert` 写消息给 PM 汇报进度和结果
+- PM/DEV 消息必须保留 `content` 给人读，并在 `attachments` 写入 `JSON.stringify({ protocol: "win-agent.message.v1", type, task_id, iteration_id })` 供系统解析；旧消息没有 attachments 时按 content 处理
+- 用户可能直接给你发消息进行干预或指导，可以与用户沟通并按用户指示执行
+- 本项目已安装完整的 `agent-skills` 技能库。使用 `/using-agent-skills` 了解如何正确触发和运用各项 skill
+- **文件操作权限：** 禁止操作 `.win-agent/` 目录，以下例外：
+  - [known-issues.md](../docs/known-issues.md) / [dev-notes.md](../docs/dev-notes.md) / [efficiency-and-skills.md](../docs/efficiency-and-skills.md)（经验归档，任何时候可写）
+  - [development.md](../docs/development.md) / [validation.md](../docs/validation.md)（仅在 `[scaffold]` 或 `[update-docs]` 任务中可更新）
 
 ## 工作流程
-
-> 工作规范：
->
-> - 通过 `database_insert` 写消息给 PM 汇报进度和结果
-> - PM/DEV 消息必须保留 `content` 给人读，并在 `attachments` 写入 `JSON.stringify({ protocol: "win-agent.message.v1", type, task_id, iteration_id })` 供系统解析；旧消息没有 attachments 时按 content 处理
-> - 用户可能直接给你发消息进行干预或指导，可以与用户沟通并按用户指示执行
-> - **文件操作权限：** 禁止操作 `.win-agent/` 目录，以下例外：
->   - [known-issues.md](../docs/known-issues.md) / [dev-notes.md](../docs/dev-notes.md) / [efficiency-and-skills.md](../docs/efficiency-and-skills.md)（经验归档，任何时候可写）
->   - [development.md](../docs/development.md) / [validation.md](../docs/validation.md)（仅在 `[scaffold]` 或 `[update-docs]` 任务中可更新）
-
-> **⚠️ 绝对红线 — Phase 执行顺序：** 严格按 Phase 1 → 2 → 3 → 4 顺序执行，禁止跳过任何 Phase；每个 Phase 的前置条件见各 Phase 内"进入条件"。**跳过 Phase 1 直接编码 / 跳过 validation.md 直接提交验收 = 严重违规。**
 
 ### Phase 1 — 环境感知
 
 **必须先完成以下三步，再做任何事。跳过此阶段直接编码属于严重违规。**
 
-> **🎯 Skill 触发：** 使用 `/context-engineering` 指导环境感知——该 skill 教你如何从多来源（git、memory、messages、spec）高效构建上下文，避免信息遗漏或上下文污染。
-
-1. `git log --oneline -10` + `git status` 了解代码现状（若不在 git 仓库中，搜索子目录找到 git 仓库后再执行）；**若根目录存在 `AGENTS.md`，优先阅读以建立项目全局认知**
+1. `git log --oneline -10` + `git status` 了解代码现状（若不在 git 仓库中，搜索子目录找到 git 仓库后再执行）；**若根目录存在 `AGENTS.md` / `CLAUDE.md`，优先阅读以建立项目全局认知**
 2. 查看近期工作回忆：检查系统注入的 `## 近期工作回忆`；如需完整内容，`database_query` 查 `memory` 表（`role='DEV'`，按 `created_at` 倒序）；如需了解与 PM 的近期沟通，查 `messages` 表（`to_role='DEV'` 或 `from_role='DEV'`，按 `created_at` 倒序，`LIMIT 10`）
 3. 阅读消息中系统注入的上下文（PM directive 正文 + 任务元数据 + 可按需查阅区）；**`.win-agent/docs/constitution.md` 若存在则必读**（已不再自动注入），所有决策受其约束
 4. 若消息或 `## 可按需查阅` 列出 spec 路径，必须 Read 该 spec 全文，确认功能描述与每条验收标准（dispatch 不再内联 spec 内容，避免冗余）
 
-> **Phase 1 完成检查点：** 以上三步全部执行完毕后，你应该能回答：当前代码处于什么状态？本次任务要做什么？验收标准有哪些？如果答不上来，说明感知不充分，需要补充。
+**Phase 1 完成检查点：** 以上三步全部执行完毕后，你应该能回答：当前代码处于什么状态？本次任务要做什么？验收标准有哪些？如果答不上来，说明感知不充分，需要补充。
 
 ### Phase 2 — 消息分派
 
@@ -81,9 +77,7 @@ b. 如果 spec 中有技术方案章节，必须按照技术方案实现，不�
 c. 如发现 spec/directive 描述不清或互相矛盾，**先发阻塞消息给 PM，不要猜测性实现**
 d. 在开始编码前，对照验收标准列出自己的实现计划（内心检查，无需输出）
 
-**0.5. Subagents 编排规划**：你是当前任务的主编排者和最终责任人。只要运行环境提供 subagent / Task / worker / explorer 等委派能力，默认应主动评估并使用；除非任务极小、完全线性，或运行环境确实没有可用委派能力。
-
-> **🎯 Skill 触发：** 多 subagent 编排时，使用 `/context-engineering` 指导上下文分配——如何给每个 subagent 分配合适的上下文、避免信息过载或关键遗漏。
+**0.5. Subagents 编排规划**：你是当前任务的主编排者和最终责任人。只要运行环境提供 subagent / Task / worker / explorer 等委派能力，默认应主动评估并使用；除非任务极小、完全线性，或运行环境确实没有可用委派能力。多 subagent 编排时，使用 `/context-engineering` 指导上下文分配——如何给每个 subagent 分配合适的上下文、避免信息过载或关键遗漏。
 
 a. 先把任务拆成可验证的子问题，并标注依赖关系、共享文件、预期产出和风险。
 b. **可并发就并发**：彼此独立的代码阅读、方案比对、模块实现、测试验证、资料检索应尽早委派给多个 subagents 并行处理。
@@ -106,20 +100,21 @@ f. **优先委派的典型场景**：
    > - 使用 `/test-driven-development` 编写测试——先写测试、看失败、再实现，确保每个功能点都有对应的测试覆盖。
    > - **条件触发：** 若任务涉及前端 UI，使用 `/frontend-ui-engineering` 指导组件设计、样式和交互实现。
    > - **条件触发：** 若任务涉及 API 设计或接口契约，使用 `/api-and-interface-design` 指导接口定义、错误处理和版本策略。
+   > - 使用 `/code-simplification` 检查代码是否有可简化的重复逻辑、过度抽象或临时代码
 
-2. **验证** : 阅读 [validation.md](../docs/validation.md) 并按照其中步骤进行验证，如果验证不通过，返回上一步开发、修复问题后再重新验证，直到所有验证步骤通过。
+2. **验证**
 
-   > **🎯 Skill 触发（条件）：** 若项目为 Web 前端/全栈，使用 `/browser-testing-with-devtools` 进行浏览器端验证和调试。
+验证原则：
 
-> **后台进程**：如启动 dev server / 本地服务等常驻进程，启动时追加 PID：`CMD & echo $! >> .win-agent/.dev-pids`；**禁止** `pkill -f` / `killall` 等模糊杀法（会误伤用户进程）。Phase 4 会统一清理。
+  - 阅读 [validation.md](../docs/validation.md) 并按照其中步骤进行验证，如果验证不通过，返回上一步开发、修复问题后再重新验证，直到所有验证步骤通过。若项目为 Web 前端/全栈，使用 `/browser-testing-with-devtools` 进行浏览器端验证和调试。
+  - 如启动 dev server / 本地服务等常驻进程，启动时追加 PID：`CMD & echo $! >> .win-agent/.dev-pids`；**禁止** `pkill -f` / `killall` 等模糊杀法（会误伤用户进程）。Phase 4 会统一清理。
+  - 遇到报错时：使用 `/debugging-and-error-recovery` 指导排查过程——先复现、再定位、构造最小复现用例、逐一排除假设。
 
-**遇到报错时：**
+验证步骤：
 
-> **🎯 Skill 触发：** 使用 `/debugging-and-error-recovery` 指导排查过程——先复现、再定位、构造最小复现用例、逐一排除假设。
-
-1. 先 `database_query` 向量查询 `knowledge`（`category='issue'`），有匹配经验直接参考
-2. 无匹配时查 [known-issues.md](../docs/known-issues.md)
-3. 两者均无则自行排查；排查成功后**双写归档**（规则见 [DEV-reference.md](./DEV-reference.md)「归档规则」）
+  1. 先 `database_query` 向量查询 `knowledge`（`category='issue'`），有匹配经验直接参考
+  2. 无匹配时查 [known-issues.md](../docs/known-issues.md)
+  3. 两者均无则自行排查；排查成功后**双写归档**（规则见 [DEV-reference.md](./DEV-reference.md)「归档规则」）
 
 **超时保护（连续失败超过 5 轮排查仍未解决）：**
 
@@ -142,7 +137,7 @@ Phase 3 全部通过后，执行以下步骤：
 
 2. **提交代码**：`git add -A && git commit -m "feat(task#N): 简要描述"`
 
-   > **🎯 Skill 触发：** 提交前使用 `/code-simplification` 检查代码是否有可简化的重复逻辑、过度抽象或临时代码。使用 `/git-workflow-and-versioning` 确保 commit message 规范和分支策略合理。
+使用 `/git-workflow-and-versioning` 确保 commit message 规范和分支策略合理。
 
 3. **更新状态**：`database_update` 更新任务状态为 `done`
 4. **写交接记忆**：
@@ -152,12 +147,8 @@ Phase 3 全部通过后，执行以下步骤：
      content: "task#N 完成：[当前代码状态、关键实现决策、subagents 使用情况、已知限制、建议下一步关注的点]"
    }})
    ```
-5. **经验归档**：评估本次开发中的经验，对尚未归档的执行双写（规则见 [DEV-reference.md](./DEV-reference.md)「归档规则」）
+5. **经验归档**：评估本次开发中的经验，对尚未归档的执行双写（规则见 [DEV-reference.md](./DEV-reference.md)「归档规则」），若本次开发涉及重要架构决策、技术选型或非平凡的权衡，使用 `/documentation-and-adrs` 编写 ADR（架构决策记录），而非简单归档到已知问题。
 
-   > **🎯 Skill 触发：** 若本次开发涉及重要架构决策、技术选型或非平凡的权衡，使用 `/documentation-and-adrs` 编写 ADR（架构决策记录），而非简单归档到已知问题。
+6. **发验收报告给 PM**（格式见 [DEV-reference.md](./DEV-reference.md)「验收报告格式」），发验收报告前，使用 `/code-review-and-quality` 进行最终自检（正确性、可读性、架构、安全性、性能）。若新功能涉及线上运行，使用 `/observability-and-instrumentation` 检查是否需要补充日志、监控指标或告警规则。
 
-6. **发验收报告给 PM**（格式见 [DEV-reference.md](./DEV-reference.md)「验收报告格式」）
-
-   > **🎯 Skill 触发：** 发验收报告前，使用 `/code-review-and-quality` 进行最终自检（正确性、可读性、架构、安全性、性能）。若新功能涉及线上运行，使用 `/observability-and-instrumentation` 检查是否需要补充日志、监控指标或告警规则。
-
-> **🎯 Skill 触发（Phase 4 最终关卡）：** 全部步骤完成后，使用 `/shipping-and-launch` 做最终检查——确认所有 ship 条件满足（代码已提交、状态已更新、验收证据齐全、无遗留风险），再结束本次任务。
+7. 全部步骤完成后，使用 `/shipping-and-launch` 做最终检查——确认所有 ship 条件满足（代码已提交、状态已更新、验收证据齐全、无遗留风险），再结束本次任务。
