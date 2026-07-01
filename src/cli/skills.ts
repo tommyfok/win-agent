@@ -80,14 +80,19 @@ async function searchSkillsByKeywords(keywords: string[]): Promise<SkillCandidat
 
 // ─── Installed-skills check ─────────────────────────────────────────────────────
 
-function getInstalledSkillNames(): Set<string> {
+function getInstalledSkillNames(agentName?: string): Set<string> {
   try {
     const json = execSync('npx skills list --json 2>/dev/null', {
       encoding: 'utf-8',
       timeout: 10_000,
     });
-    const skills = JSON.parse(json || '[]') as Array<{ name: string }>;
-    return new Set(skills.map((s) => s.name.toLowerCase()));
+    const skills = JSON.parse(json || '[]') as Array<{ name: string; agents?: string[] }>;
+    const filtered = agentName
+      ? skills.filter((s) =>
+          s.agents?.some((agent) => agent.toLowerCase() === agentName.toLowerCase())
+        )
+      : skills;
+    return new Set(filtered.map((s) => s.name.toLowerCase()));
   } catch {
     return new Set();
   }
@@ -364,10 +369,8 @@ const MANDATORY_SKILLS: string[] = [
  * @returns the number of newly installed skills
  */
 export function installMandatorySkills(): number {
-  const installed = getInstalledSkillNames();
-  const toInstall = MANDATORY_SKILLS.filter(
-    (name) => !installed.has(name.toLowerCase())
-  );
+  const installed = getInstalledSkillNames('OpenCode');
+  const toInstall = MANDATORY_SKILLS.filter((name) => !installed.has(name.toLowerCase()));
 
   if (toInstall.length === 0) {
     console.log('   ✓ 必装 Skills 均已安装');
@@ -380,7 +383,7 @@ export function installMandatorySkills(): number {
   for (const name of toInstall) {
     const idx = count + 1;
     try {
-      execSync(`npx skills add addyosmani/agent-skills@${name} -y`, {
+      execSync(`npx skills add addyosmani/agent-skills --agent opencode --skill ${name} -y`, {
         timeout: 30_000,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

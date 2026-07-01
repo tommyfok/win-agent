@@ -36,6 +36,7 @@ import { setSimilarityThreshold } from '../embedding/memory.js';
 import { resetTriggers } from '../engine/auto-trigger.js';
 import { initIterationChecker } from '../engine/iteration-checker.js';
 import { Role } from '../engine/role-manager.js';
+import { installMandatorySkills } from './skills.js';
 
 let serverHandle: OpencodeServerHandle | null = null;
 let sessionManager: SessionManager | null = null;
@@ -112,6 +113,14 @@ export async function engineCommand(workspace: string) {
   // Sync agents & tools (in case they changed)
   syncAgents(workspace);
   deployTools(workspace);
+
+  // Ensure PM/DEV OpenCode sessions can load the workflow skills promised by
+  // the role prompts, including projects initialized before this guarantee.
+  try {
+    installMandatorySkills();
+  } catch (err) {
+    console.log(`⚠️  必装 Skills 补齐跳过: ${err}`);
+  }
 
   // ── Start opencode server ──
   console.log('→ 启动 opencode server...');
